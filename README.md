@@ -1,2 +1,5 @@
+![Logo](Logo.png)
+
 # Endstate
-Comet AI Hackathon project
+
+Knowledge-graph powered learning.
