@@ -80,7 +80,7 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
       </header>
       
       <div class="flex-1 overflow-hidden">
-        <Dashboard v-if="activeTab === 'dashboard'" />
+        <Dashboard v-if="activeTab === 'dashboard'" @navigate="setActiveTab" />
         <ChatBox v-if="activeTab === 'chat'" />
         <KnowledgeGraph v-if="activeTab === 'graph'" />
       </div>
