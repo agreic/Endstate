@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as d3 from 'd3'
-import { ZoomIn, ZoomOut, RefreshCw, Search } from 'lucide-vue-next'
+import { ZoomIn, ZoomOut, Maximize2, Search } from 'lucide-vue-next'
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string
@@ -31,6 +31,7 @@ const svgRef = ref<SVGSVGElement | null>(null)
 const selectedNode = ref<GraphNode | null>(null)
 const searchQuery = ref('')
 const zoomLevel = ref(1)
+const hoveredNodeId = ref<string | null>(null)
 
 const graphData: GraphData = {
   nodes: [
@@ -82,6 +83,85 @@ const groupColors: Record<number, string> = {
 let simulation: d3.Simulation<GraphNode, GraphLink> | null = null
 let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null
 let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null
+let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null
+let nodesSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>, GraphNode, d3.EnterElement, unknown> | null = null
+let linksSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>, GraphLink, d3.EnterElement, unknown> | null = null
+
+const isNodeMatching = (node: GraphNode): boolean => {
+  if (!searchQuery.value) return true
+  const query = searchQuery.value.toLowerCase()
+  return node.label.toLowerCase().includes(query) || 
+         node.description?.toLowerCase().includes(query) ||
+         node.id === query
+}
+
+const isLinkMatching = (link: GraphLink): boolean => {
+  if (!searchQuery.value) return true
+  const sourceNode = link.source as GraphNode
+  const targetNode = link.target as GraphNode
+  return isNodeMatching(sourceNode) && isNodeMatching(targetNode)
+}
+
+const updateNodeStyles = () => {
+  if (!nodesSelection) return
+  
+  nodesSelection.selectAll('circle')
+    .attr('fill', (d) => {
+      const node = d as GraphNode
+      const isMatch = isNodeMatching(node)
+      const isHovered = hoveredNodeId.value === node.id
+      const baseColor = groupColors[node.group]
+      
+      if (!isMatch) {
+        return '#d4d4d8'
+      }
+      if (isHovered) {
+        return d3.color(baseColor)?.brighter(0.3)?.toString() || baseColor
+      }
+      return baseColor
+    })
+    .attr('opacity', (d) => {
+      const node = d as GraphNode
+      return isNodeMatching(node) ? 1 : 0.3
+    })
+    .attr('stroke', (d) => {
+      const node = d as GraphNode
+      return (isNodeMatching(node) && hoveredNodeId.value === node.id) ? '#1e40af' : '#fff'
+    })
+    .attr('stroke-width', (d) => {
+      const node = d as GraphNode
+      return (isNodeMatching(node) && hoveredNodeId.value === node.id) ? 3 : 2
+    })
+
+  nodesSelection.selectAll('text')
+    .attr('opacity', (d) => {
+      const node = d as GraphNode
+      return isNodeMatching(node) ? 1 : 0.3
+    })
+    .attr('font-weight', (d) => {
+      const node = d as GraphNode
+      return hoveredNodeId.value === node.id ? '700' : '500'
+    })
+}
+
+const updateLinkStyles = () => {
+  if (!linksSelection) return
+  
+  linksSelection
+    .attr('opacity', (d) => {
+      const link = d as GraphLink
+      return isLinkMatching(link) ? 0.6 : 0.1
+    })
+    .attr('stroke', (d) => {
+      const link = d as GraphLink
+      return isLinkMatching(link) ? '#d4d4d8' : '#e4e4e7'
+    })
+}
+
+watch(searchQuery, () => {
+  updateNodeStyles()
+  updateLinkStyles()
+})
 
 const initGraph = () => {
   if (!graphContainer.value || !svgRef.value) return
@@ -96,7 +176,7 @@ const initGraph = () => {
 
   gElement = svgElement.append('g')
 
-  const zoom = d3.zoom<SVGSVGElement, unknown>()
+  zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
     .scaleExtent([0.3, 4])
     .on('zoom', (event) => {
       if (gElement) {
@@ -105,7 +185,7 @@ const initGraph = () => {
       }
     })
 
-  svgElement.call(zoom)
+  svgElement.call(zoomBehavior)
   svgElement.on('dblclick.zoom', null)
 
   const nodes: GraphNode[] = graphData.nodes.map(d => ({ ...d, fx: null, fy: null }))
@@ -124,7 +204,7 @@ const initGraph = () => {
     .force('center', d3.forceCenter(width / 2, height / 2))
     .force('collision', d3.forceCollide().radius(50))
 
-  const link = gElement.append('g')
+  linksSelection = gElement.append('g')
     .selectAll('line')
     .data(links)
     .join('line')
@@ -132,7 +212,7 @@ const initGraph = () => {
     .attr('stroke-opacity', 0.6)
     .attr('stroke-width', (d) => d.value * 0.8)
 
-  const node = gElement.append('g')
+  nodesSelection = gElement.append('g')
     .selectAll('g')
     .data(nodes)
     .join('g')
@@ -141,15 +221,23 @@ const initGraph = () => {
       .on('start', dragstarted)
       .on('drag', dragged)
       .on('end', dragended))
+    .on('mouseenter', (event, d) => {
+      hoveredNodeId.value = d.id
+      updateNodeStyles()
+    })
+    .on('mouseleave', () => {
+      hoveredNodeId.value = null
+      updateNodeStyles()
+    })
 
-  node.append('circle')
+  nodesSelection.append('circle')
     .attr('r', 20)
     .attr('fill', (d) => groupColors[d.group])
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
     .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))')
 
-  node.append('text')
+  nodesSelection.append('text')
     .text((d) => d.label)
     .attr('x', 24)
     .attr('y', 5)
@@ -158,7 +246,7 @@ const initGraph = () => {
     .attr('font-weight', '500')
     .style('pointer-events', 'none')
 
-  node.on('click', (event, d) => {
+  nodesSelection.on('click', (event, d) => {
     selectedNode.value = d
     event.stopPropagation()
   })
@@ -168,25 +256,14 @@ const initGraph = () => {
   })
 
   simulation.on('tick', () => {
-    link
-      .attr('x1', (d) => {
-        const source = d.source as GraphNode
-        return source.x || 0
-      })
-      .attr('y1', (d) => {
-        const source = d.source as GraphNode
-        return source.y || 0
-      })
-      .attr('x2', (d) => {
-        const target = d.target as GraphNode
-        return target.x || 0
-      })
-      .attr('y2', (d) => {
-        const target = d.target as GraphNode
-        return target.y || 0
-      })
+    linksSelection
+      ?.attr('x1', (d) => (d.source as GraphNode).x || 0)
+      .attr('y1', (d) => (d.source as GraphNode).y || 0)
+      .attr('x2', (d) => (d.target as GraphNode).x || 0)
+      .attr('y2', (d) => (d.target as GraphNode).y || 0)
 
-    node.attr('transform', (d) => `translate(${d.x || 0},${d.y || 0})`)
+    nodesSelection
+      ?.attr('transform', (d) => `translate(${d.x || 0},${d.y || 0})`)
   })
 
   function dragstarted(event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) {
@@ -208,20 +285,26 @@ const initGraph = () => {
 }
 
 const zoomIn = () => {
-  if (svgElement) {
-    svgElement.transition().call(d3.zoom<SVGSVGElement, unknown>().scaleBy, 1.3)
+  if (svgElement && zoomBehavior) {
+    svgElement.transition()
+      .duration(300)
+      .call(zoomBehavior.scaleBy, 1.3)
   }
 }
 
 const zoomOut = () => {
-  if (svgElement) {
-    svgElement.transition().call(d3.zoom<SVGSVGElement, unknown>().scaleBy, 0.7)
+  if (svgElement && zoomBehavior) {
+    svgElement.transition()
+      .duration(300)
+      .call(zoomBehavior.scaleBy, 0.7)
   }
 }
 
 const resetZoom = () => {
-  if (svgElement) {
-    svgElement.transition().call(d3.zoom<SVGSVGElement, unknown>().transform, d3.zoomIdentity)
+  if (svgElement && zoomBehavior) {
+    svgElement.transition()
+      .duration(500)
+      .call(zoomBehavior.transform, d3.zoomIdentity)
   }
 }
 
@@ -249,10 +332,14 @@ onUnmounted(() => {
 
 const getConnectionCount = (nodeId: string): number => {
   return graphData.links.filter(l => {
-    const sourceId = typeof l.source === 'string' ? l.source : l.source.id
-    const targetId = typeof l.target === 'string' ? l.target : l.target.id
+    const sourceId = typeof l.source === 'string' ? l.source : (l.source as GraphNode).id
+    const targetId = typeof l.target === 'string' ? l.target : (l.target as GraphNode).id
     return sourceId === nodeId || targetId === nodeId
   }).length
+}
+
+const clearSearch = () => {
+  searchQuery.value = ''
 }
 </script>
 
@@ -269,7 +356,15 @@ const getConnectionCount = (nodeId: string): number => {
             type="text"
             placeholder="Search nodes..."
             class="text-sm border-none outline-none bg-transparent w-40"
+            @input="() => {}"
           />
+          <button 
+            v-if="searchQuery" 
+            @click="clearSearch"
+            class="text-surface-400 hover:text-surface-600"
+          >
+            ×
+          </button>
         </div>
         <div class="space-y-1">
           <div v-for="(name, group) in ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data']" :key="group" class="flex items-center gap-2">
@@ -277,6 +372,9 @@ const getConnectionCount = (nodeId: string): number => {
             <span class="text-xs text-surface-600">{{ name }}</span>
           </div>
         </div>
+        <p v-if="searchQuery" class="text-xs text-surface-400 mt-2">
+          {{ graphData.nodes.filter(isNodeMatching).length }} of {{ graphData.nodes.length }} nodes match
+        </p>
       </div>
 
       <div class="absolute top-4 right-4 flex flex-col gap-2 z-10">
@@ -299,7 +397,7 @@ const getConnectionCount = (nodeId: string): number => {
           class="p-2 bg-white rounded-lg shadow-md hover:bg-surface-50 transition-colors cursor-pointer"
           title="Reset View"
         >
-          <RefreshCw :size="20" class="text-surface-600" />
+          <Maximize2 :size="20" class="text-surface-600" />
         </button>
       </div>
 

@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import Sidebar from './components/Sidebar.vue'
+import Dashboard from './components/Dashboard.vue'
 import ChatBox from './components/ChatBox.vue'
 import KnowledgeGraph from './components/KnowledgeGraph.vue'
 import { MessageSquare, Network, Settings } from 'lucide-vue-next'
 
 const sidebarOpen = ref(true)
-const activeTab = ref<'chat' | 'graph'>('chat')
+const activeTab = ref<'dashboard' | 'chat' | 'graph'>('dashboard')
 
 const toggleSidebar = () => {
   sidebarOpen.value = !sidebarOpen.value
 }
 
-const setActiveTab = (tab: 'chat' | 'graph') => {
+const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
   activeTab.value = tab
 }
 </script>
@@ -38,6 +39,15 @@ const setActiveTab = (tab: 'chat' | 'graph') => {
         
         <div class="flex items-center gap-2">
           <nav class="flex bg-surface-100 rounded-lg p-1">
+            <button
+              @click="activeTab = 'dashboard'"
+              class="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all"
+              :class="activeTab === 'dashboard' 
+                ? 'bg-white text-primary-600 shadow-sm' 
+                : 'text-surface-500 hover:text-surface-700'"
+            >
+              Dashboard
+            </button>
             <button
               @click="activeTab = 'chat'"
               class="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all"
@@ -70,6 +80,7 @@ const setActiveTab = (tab: 'chat' | 'graph') => {
       </header>
       
       <div class="flex-1 overflow-hidden">
+        <Dashboard v-if="activeTab === 'dashboard'" />
         <ChatBox v-if="activeTab === 'chat'" />
         <KnowledgeGraph v-if="activeTab === 'graph'" />
       </div>
