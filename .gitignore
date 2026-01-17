@@ -211,8 +211,3 @@ frontend/node_modules/           # npm dependencies (regenerate with npm install
 frontend/dist/                   # Vite build output
 frontend/.vite/                  # Vite cache
 *.local                          # Local environment overrides
-
-# npm (root-level - stray installs)
-node_modules/                    # Root npm dependencies (not project-related)
-package-lock.json                # Root lockfile (not project-related)
-package.json                     # Root package.json (not project-related)
