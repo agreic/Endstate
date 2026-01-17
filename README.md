@@ -2,11 +2,12 @@
 
 # Endstate
 
-Knowledge-graph powered learning platform.
+Knowledge-graph powered learning platform with interactive AI agents.
 
 ## Overview
 
-Endstate is a learning platform for intelligent knowledge representation and relationship mapping.
+Endstate is an intelligent learning architect that transforms vague personal goals into executable, visual skill maps and concrete capstone projects. Instead of generic advice, it dynamically generates personalized micro-lessons and adapts your roadmap in real-time based on your actual performance.
+
 
 ## Architecture
 
