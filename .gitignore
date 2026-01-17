@@ -211,3 +211,6 @@ frontend/node_modules/           # npm dependencies (regenerate with npm install
 frontend/dist/                   # Vite build output
 frontend/.vite/                  # Vite cache
 *.local                          # Local environment overrides
+
+# Dependencies
+node_modules/                    # All node_modules (regenerate with npm install)
