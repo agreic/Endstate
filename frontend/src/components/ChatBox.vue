@@ -2,11 +2,28 @@
 import { ref, nextTick, onMounted } from "vue";
 import { Send, Bot, User, Sparkles } from "lucide-vue-next";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
+import { marked } from "marked"; // Add this at the top
+// 1. Setup Gemini
 // 1. Setup Gemini
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const renderMarkdown = (content: string) => {
+  return marked.parse(content);
+};
+// Define the "Brain" instructions
+const systemPrompt = `
+You are Endstate AI. You provide clear, structured, and professional responses.
+- Use ### for headers to separate sections.
+- Use bold (**text**) for emphasis.
+- Always use bullet points for lists or features.
+- Use code blocks with language tags for technical snippets.
+- Use horizontal rules (---) to separate distinct topics.
+`;
+
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash",
+  systemInstruction: systemPrompt, // This is the "brain" transplant
+});
 
 interface Message {
   id: number;
@@ -118,19 +135,16 @@ onMounted(() => scrollToBottom());
           class="max-w-[70%] rounded-2xl px-4 py-3 shadow-sm"
           :class="
             message.role === 'user'
-              ? 'bg-primary-600 text-white rounded-tr-sm'
-              : 'bg-white text-surface-800 rounded-tl-sm'
+              ? 'bg-primary-600 text-white'
+              : 'bg-white text-surface-800'
           "
         >
-          <p class="text-sm leading-relaxed">{{ message.content }}</p>
-          <p
-            class="text-xs mt-1"
-            :class="
-              message.role === 'user' ? 'text-primary-200' : 'text-surface-400'
-            "
-          >
-            {{ formatTime(message.timestamp) }}
-          </p>
+          <div
+            class="text-sm leading-relaxed markdown-container"
+            v-html="renderMarkdown(message.content)"
+          ></div>
+
+          <p class="text-xs mt-1 ...">{{ formatTime(message.timestamp) }}</p>
         </div>
       </div>
 
@@ -189,3 +203,24 @@ onMounted(() => scrollToBottom());
     </div>
   </div>
 </template>
+
+<style scoped>
+.markdown-container :deep(ul) {
+  list-style-type: disc;
+  margin-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-container :deep(ol) {
+  list-style-type: decimal;
+  margin-left: 1.25rem;
+}
+.markdown-container :deep(h3) {
+  font-weight: bold;
+  font-size: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-container :deep(p) {
+  margin-bottom: 0.5rem;
+}
+</style>
