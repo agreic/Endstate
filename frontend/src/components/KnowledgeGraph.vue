@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Database, FileText, Loader2 } from "lucide-vue-next";
-import { fetchGraphData, fetchGraphStats, type GraphNode, type GraphRelationship } from "../services/api";
+import { fetchGraphData, fetchGraphStats, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -82,7 +82,7 @@ const demoGraphData: GraphData = {
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
-const groupColors: Record<number, string> = {
+const demoGroupColors: Record<number, string> = {
   1: "#0ea5e9",
   2: "#8b5cf6",
   3: "#10b981",
@@ -90,17 +90,46 @@ const groupColors: Record<number, string> = {
   5: "#ef4444",
 };
 
-const labelToGroup: Record<string, number> = {
-  'Skill': 1,
-  'Concept': 2,
-  'Topic': 3,
-  'Project': 4,
-  'Resource': 5,
-  'Tool': 2,
-  'Domain': 3,
-  'Assessment': 4,
-  'Milestone': 5,
-  'Person': 4,
+const dbGroupColors: Record<string, string> = {
+  'Skill': "#0ea5e9",
+  'Concept': "#8b5cf6",
+  'Topic': "#10b981",
+  'Project': "#f59e0b",
+  'Resource': "#ef4444",
+  'Tool': "#ec4899",
+  'Person': "#6366f1",
+  'Domain': "#14b8a6",
+  'Assessment': "#f97316",
+  'Milestone': "#84cc16",
+};
+
+const getNodeColor = (node: GraphNode): string => {
+  if (dataSource.value === 'demo') {
+    return demoGroupColors[node.group] || demoGroupColors[1];
+  }
+  return dbGroupColors[node.labels?.[0] || 'Skill'] || dbGroupColors['Skill'];
+};
+
+const getUniqueLabels = (): string[] => {
+  if (dataSource.value === 'demo') {
+    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
+  }
+  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
+  return Array.from(labels).sort();
+};
+
+const getLabelDisplayName = (label: string): string => {
+  if (dataSource.value === 'demo') {
+    return label;
+  }
+  return label;
+};
+
+const getColorForLegendItem = (index: number, label: string): string => {
+  if (dataSource.value === 'demo') {
+    return demoGroupColors[index + 1] || demoGroupColors[1];
+  }
+  return dbGroupColors[label] || dbGroupColors['Skill'];
 };
 
 let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
@@ -109,10 +138,6 @@ let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
 let nodesSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>, GraphNode, d3.EnterElement, unknown> | null = null;
 let linksSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>, GraphLink, d3.EnterElement, unknown> | null = null;
-
-const mapLabelToGroup = (label: string): number => {
-  return labelToGroup[label] || Math.abs(label.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0) % 5) + 1;
-};
 
 const formatPropertyValue = (value: any): string => {
   if (typeof value === 'object' && value !== null) {
@@ -139,22 +164,19 @@ const loadFromDatabase = async () => {
       total_relationships: data.total_relationships,
     };
     
-    const nodeMap = new Map<string, GraphNode>();
-    
-    graphData.value.nodes = data.nodes.map((item: GraphNode) => {
-      const node: GraphNode = {
-        id: item.node?.id || item.id || String(Math.random()),
-        group: mapLabelToGroup(item.labels?.[0] || 'Node'),
-        label: item.properties?.name || item.labels?.[0] || 'Unknown',
-        description: item.properties?.description,
-        labels: item.labels,
-        properties: item.properties || {},
+    graphData.value.nodes = data.nodes.map((item: ApiNode) => {
+      const nodeData = item.node;
+      return {
+        id: nodeData.id || String(Math.random()),
+        group: 1,
+        label: nodeData.name || nodeData.labels?.[0] || 'Unknown',
+        description: nodeData.description,
+        labels: nodeData.labels,
+        properties: nodeData,
       };
-      nodeMap.set(node.id, node);
-      return node;
     });
     
-    graphData.value.links = data.relationships.map((rel: GraphRelationship) => ({
+    graphData.value.links = data.relationships.map((rel: ApiRelationship) => ({
       source: rel.source,
       target: rel.target,
       value: 1,
@@ -210,7 +232,7 @@ const updateNodeStyles = () => {
       const node = d as GraphNode;
       const isMatch = isNodeMatching(node);
       const isHovered = hoveredNodeId.value === node.id;
-      const baseColor = groupColors[node.group];
+      const baseColor = getNodeColor(node);
 
       if (!isMatch) {
         return "#d4d4d8";
@@ -353,7 +375,7 @@ const initGraph = () => {
   nodesSelection
     .append("circle")
     .attr("r", 20)
-    .attr("fill", (d) => groupColors[d.group])
+    .attr("fill", (d) => getNodeColor(d))
     .attr("stroke", "#fff")
     .attr("stroke-width", 2)
     .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.1))");
@@ -479,6 +501,14 @@ const totalRelationships = computed(() => {
   if (graphStats.value) return graphStats.value.total_relationships;
   return graphData.value.links.length;
 });
+
+const legendItems = computed(() => {
+  if (dataSource.value === 'demo') {
+    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
+  }
+  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
+  return Array.from(labels).sort();
+});
 </script>
 
 <template>
@@ -536,21 +566,15 @@ const totalRelationships = computed(() => {
         
         <div class="space-y-1">
           <div
-            v-for="(name, group) in [
-              'Core AI',
-              'Frameworks',
-              'Applications',
-              'LLMs',
-              'Data',
-            ]"
-            :key="group"
+            v-for="(label, index) in legendItems"
+            :key="label"
             class="flex items-center gap-2"
           >
             <span
               class="w-3 h-3 rounded-full"
-              :style="{ backgroundColor: groupColors[group + 1] }"
+              :style="{ backgroundColor: getColorForLegendItem(index, label) }"
             ></span>
-            <span class="text-xs text-surface-600">{{ name }}</span>
+            <span class="text-xs text-surface-600">{{ getLabelDisplayName(label) }}</span>
           </div>
         </div>
         
@@ -597,7 +621,7 @@ const totalRelationships = computed(() => {
         <div class="flex items-center gap-3 mb-2">
           <span
             class="w-4 h-4 rounded-full"
-            :style="{ backgroundColor: groupColors[selectedNode.group] }"
+            :style="{ backgroundColor: getNodeColor(selectedNode) }"
           ></span>
           <h3 class="font-semibold text-surface-800">{{ selectedNode.label }}</h3>
         </div>

@@ -1,14 +1,16 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export interface GraphNode {
+export interface ApiNode {
   node: {
     id: string;
+    name?: string;
+    description?: string;
+    labels?: string[];
     [key: string]: any;
   };
-  labels?: string[];
 }
 
-export interface GraphRelationship {
+export interface ApiRelationship {
   source: string;
   target: string;
   type: string;
@@ -16,8 +18,8 @@ export interface GraphRelationship {
 }
 
 export interface GraphData {
-  nodes: GraphNode[];
-  relationships: GraphRelationship[];
+  nodes: ApiNode[];
+  relationships: ApiRelationship[];
   total_nodes: number;
   total_relationships: number;
 }
