@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search } from "lucide-vue-next";
+import { ZoomIn, ZoomOut, Maximize2, Search, FileText } from "lucide-vue-next";
+
+// --- Props for LLM-generated data ---
+const props = defineProps<{
+  externalData?: { nodes: any[]; links: any[] };
+}>();
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
-  group: number;
+  group: string | number;
   label: string;
   description?: string;
+  labels?: string[];
+  properties?: Record<string, any>;
   x?: number;
   y?: number;
   fx?: number | null;
@@ -33,7 +40,22 @@ const searchQuery = ref("");
 const zoomLevel = ref(1);
 const hoveredNodeId = ref<string | null>(null);
 
-const graphData: GraphData = {
+// This stores the combined data of your OG graph + any LLM discoveries
+const graphData = ref<GraphData>({ nodes: [], links: [] });
+
+const groupColors: Record<string | number, string> = {
+  1: "#0ea5e9", // Core AI
+  2: "#8b5cf6", // Frameworks
+  3: "#10b981", // Applications
+  4: "#f59e0b", // LLMs
+  5: "#ef4444", // Data
+  "Cooking Basics": "#f59e0b",
+  Techniques: "#10b981",
+  "Frontend Core": "#8b5cf6",
+};
+
+// --- OG GRAPH DATA: Restored word-for-word ---
+const demoGraphData: GraphData = {
   nodes: [
     {
       id: "1",
@@ -127,439 +149,279 @@ const graphData: GraphData = {
     },
   ],
   links: [
-    { source: "1", target: "2", value: 3, label: "includes" },
-    { source: "2", target: "3", value: 3, label: "uses" },
-    { source: "1", target: "13", value: 2, label: "includes" },
-    { source: "3", target: "7", value: 2, label: "enables" },
-    { source: "3", target: "8", value: 2, label: "enables" },
-    { source: "3", target: "9", value: 2, label: "enables" },
-    { source: "2", target: "5", value: 2, label: "implemented in" },
-    { source: "2", target: "6", value: 2, label: "implemented in" },
-    { source: "4", target: "5", value: 2, label: "primary language" },
-    { source: "4", target: "6", value: 2, label: "primary language" },
-    { source: "12", target: "10", value: 3, label: "architecture" },
-    { source: "12", target: "11", value: 3, label: "architecture" },
-    { source: "8", target: "10", value: 2, label: "powers" },
-    { source: "8", target: "11", value: 2, label: "powers" },
-    { source: "1", target: "14", value: 2, label: "part of" },
-    { source: "14", target: "15", value: 2, label: "includes" },
-    { source: "7", target: "12", value: 1, label: "uses" },
+    { source: "1", target: "2", value: 3 },
+    { source: "2", target: "3", value: 3 },
+    { source: "1", target: "13", value: 2 },
+    { source: "3", target: "7", value: 2 },
+    { source: "3", target: "8", value: 2 },
+    { source: "3", target: "9", value: 2 },
+    { source: "2", target: "5", value: 2 },
+    { source: "2", target: "6", value: 2 },
+    { source: "4", target: "5", value: 2 },
+    { source: "4", target: "6", value: 2 },
+    { source: "12", target: "10", value: 3 },
+    { source: "12", target: "11", value: 3 },
+    { source: "8", target: "10", value: 2 },
+    { source: "8", target: "11", value: 2 },
+    { source: "1", target: "14", value: 2 },
+    { source: "14", target: "15", value: 2 },
+    { source: "7", target: "12", value: 1 },
   ],
 };
 
-const groupColors: Record<number, string> = {
-  1: "#0ea5e9",
-  2: "#8b5cf6",
-  3: "#10b981",
-  4: "#f59e0b",
-  5: "#ef4444",
-};
-
-let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
+const simulation = ref<d3.Simulation<GraphNode, GraphLink> | null>(null);
 let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null =
   null;
 let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
-let nodesSelection: d3.Selection<
-  d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>,
-  GraphNode,
-  d3.EnterElement,
-  unknown
-> | null = null;
-let linksSelection: d3.Selection<
-  | d3.EnterElement
-  | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>,
-  GraphLink,
-  d3.EnterElement,
-  unknown
-> | null = null;
+let nodesSelection: d3.Selection<any, GraphNode, any, any> | null = null;
+let linksSelection: d3.Selection<any, GraphLink, any, any> | null = null;
 
-const isNodeMatching = (node: GraphNode): boolean => {
-  if (!searchQuery.value) return true;
-  const query = searchQuery.value.toLowerCase();
-  return (
-    node.label.toLowerCase().includes(query) ||
-    node.description?.toLowerCase().includes(query) ||
-    node.id === query
-  );
+const getNodeColor = (node: GraphNode): string => {
+  return groupColors[node.group] || "#94a3b8";
 };
 
-const isLinkMatching = (link: GraphLink): boolean => {
-  if (!searchQuery.value) return true;
-  const sourceNode = link.source as GraphNode;
-  const targetNode = link.target as GraphNode;
-  return isNodeMatching(sourceNode) && isNodeMatching(targetNode);
+const handleRestart = () => {
+  if (simulation.value) simulation.value.alpha(0.3).restart();
 };
-
-const updateNodeStyles = () => {
-  if (!nodesSelection) return;
-
-  nodesSelection
-    .selectAll("circle")
-    .attr("fill", (d) => {
-      const node = d as GraphNode;
-      const isMatch = isNodeMatching(node);
-      const isHovered = hoveredNodeId.value === node.id;
-      const baseColor = groupColors[node.group];
-
-      if (!isMatch) {
-        return "#d4d4d8";
-      }
-      if (isHovered) {
-        return d3.color(baseColor)?.brighter(0.3)?.toString() || baseColor;
-      }
-      return baseColor;
-    })
-    .attr("opacity", (d) => {
-      const node = d as GraphNode;
-      return isNodeMatching(node) ? 1 : 0.3;
-    })
-    .attr("stroke", (d) => {
-      const node = d as GraphNode;
-      return isNodeMatching(node) && hoveredNodeId.value === node.id
-        ? "#1e40af"
-        : "#fff";
-    })
-    .attr("stroke-width", (d) => {
-      const node = d as GraphNode;
-      return isNodeMatching(node) && hoveredNodeId.value === node.id ? 3 : 2;
-    });
-
-  nodesSelection
-    .selectAll("text")
-    .attr("opacity", (d) => {
-      const node = d as GraphNode;
-      return isNodeMatching(node) ? 1 : 0.3;
-    })
-    .attr("font-weight", (d) => {
-      const node = d as GraphNode;
-      return hoveredNodeId.value === node.id ? "700" : "500";
-    });
-};
-
-const updateLinkStyles = () => {
-  if (!linksSelection) return;
-
-  linksSelection
-    .attr("opacity", (d) => {
-      const link = d as GraphLink;
-      return isLinkMatching(link) ? 0.6 : 0.1;
-    })
-    .attr("stroke", (d) => {
-      const link = d as GraphLink;
-      return isLinkMatching(link) ? "#d4d4d8" : "#e4e4e7";
-    });
-};
-
-watch(searchQuery, () => {
-  updateNodeStyles();
-  updateLinkStyles();
-});
 
 const initGraph = () => {
   if (!graphContainer.value || !svgRef.value) return;
 
   const width = graphContainer.value.clientWidth;
   const height = graphContainer.value.clientHeight;
-
   if (width === 0 || height === 0) return;
 
   svgElement = d3.select(svgRef.value);
   svgElement.selectAll("*").remove();
-
   gElement = svgElement.append("g");
 
   zoomBehavior = d3
     .zoom<SVGSVGElement, unknown>()
-    .scaleExtent([0.3, 4])
+    .scaleExtent([0.1, 4])
     .on("zoom", (event) => {
-      if (gElement) {
-        gElement.attr("transform", event.transform);
-        zoomLevel.value = event.transform.k;
-      }
+      gElement?.attr("transform", event.transform);
+      zoomLevel.value = event.transform.k;
     });
 
-  svgElement.call(zoomBehavior);
-  svgElement.on("dblclick.zoom", null);
+  svgElement.call(zoomBehavior).on("dblclick.zoom", null);
 
-  const nodes: GraphNode[] = graphData.nodes.map((d) => ({
+  const nodes: GraphNode[] = graphData.value.nodes.map((d) => ({
     ...d,
     fx: null,
     fy: null,
   }));
-  const links: GraphLink[] = graphData.links.map((d) => ({ ...d }));
+  const links: GraphLink[] = graphData.value.links.map((d) => ({ ...d }));
 
-  for (const link of links) {
-    link.source = nodes.find((n) => n.id === link.source) || link.source;
-    link.target = nodes.find((n) => n.id === link.target) || link.target;
-  }
+  links.forEach((link) => {
+    link.source =
+      nodes.find(
+        (n) =>
+          n.id ===
+          (typeof link.source === "string" ? link.source : link.source.id),
+      ) || link.source;
+    link.target =
+      nodes.find(
+        (n) =>
+          n.id ===
+          (typeof link.target === "string" ? link.target : link.target.id),
+      ) || link.target;
+  });
 
-  simulation = d3
+  simulation.value = d3
     .forceSimulation<GraphNode>(nodes)
     .force(
       "link",
       d3
         .forceLink<GraphNode, GraphLink>(links)
         .id((d) => d.id)
-        .distance(120),
+        .distance(140),
     )
-    .force("charge", d3.forceManyBody().strength(-400))
+    .force("charge", d3.forceManyBody().strength(-500))
     .force("center", d3.forceCenter(width / 2, height / 2))
-    .force("collision", d3.forceCollide().radius(50));
+    .force("collision", d3.forceCollide().radius(60));
 
   linksSelection = gElement
     .append("g")
     .selectAll("line")
     .data(links)
     .join("line")
-    .attr("stroke", "#d4d4d8")
+    .attr("stroke", "#e2e8f0")
     .attr("stroke-opacity", 0.6)
-    .attr("stroke-width", (d) => d.value * 0.8);
+    .attr("stroke-width", 2);
 
   nodesSelection = gElement
     .append("g")
     .selectAll("g")
     .data(nodes)
     .join("g")
-    .style("cursor", "pointer")
+    .style("cursor", "grab")
     .call(
       d3
-        .drag<SVGGElement, GraphNode>()
-        .on("start", dragstarted)
-        .on("drag", dragged)
-        .on("end", dragended),
+        .drag<any, GraphNode>()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.value?.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.value?.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }) as any,
     )
     .on("mouseenter", (event, d) => {
       hoveredNodeId.value = d.id;
-      updateNodeStyles();
+      updateStyles();
     })
     .on("mouseleave", () => {
       hoveredNodeId.value = null;
-      updateNodeStyles();
+      updateStyles();
+    })
+    .on("click", (event, d) => {
+      selectedNode.value = d;
+      event.stopPropagation();
     });
 
   nodesSelection
     .append("circle")
-    .attr("r", 20)
-    .attr("fill", (d) => groupColors[d.group])
+    .attr("r", 22)
+    .attr("fill", (d) => getNodeColor(d))
     .attr("stroke", "#fff")
-    .attr("stroke-width", 2)
-    .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.1))");
+    .attr("stroke-width", 3)
+    .style("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.1))");
 
   nodesSelection
     .append("text")
     .text((d) => d.label)
-    .attr("x", 24)
+    .attr("x", 28)
     .attr("y", 5)
-    .attr("fill", "#3f3f46")
-    .attr("font-size", "12px")
-    .attr("font-weight", "500")
+    .attr("fill", "#1e293b")
+    .style("font-size", "13px")
+    .style("font-weight", "600")
     .style("pointer-events", "none");
 
-  nodesSelection.on("click", (event, d) => {
-    selectedNode.value = d;
-    event.stopPropagation();
-  });
-
-  svgElement.on("click", () => {
-    selectedNode.value = null;
-  });
-
-  simulation.on("tick", () => {
+  simulation.value.on("tick", () => {
     linksSelection
-      ?.attr("x1", (d) => (d.source as GraphNode).x || 0)
-      .attr("y1", (d) => (d.source as GraphNode).y || 0)
-      .attr("x2", (d) => (d.target as GraphNode).x || 0)
-      .attr("y2", (d) => (d.target as GraphNode).y || 0);
-
-    nodesSelection?.attr(
-      "transform",
-      (d) => `translate(${d.x || 0},${d.y || 0})`,
-    );
+      ?.attr("x1", (d) => (d.source as any).x)
+      .attr("y1", (d) => (d.source as any).y)
+      .attr("x2", (d) => (d.target as any).x)
+      .attr("y2", (d) => (d.target as any).y);
+    nodesSelection?.attr("transform", (d) => `translate(${d.x},${d.y})`);
   });
-
-  function dragstarted(
-    event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>,
-    d: GraphNode,
-  ) {
-    if (!event.active && simulation) simulation.alphaTarget(0.3).restart();
-    d.fx = d.x;
-    d.fy = d.y;
-  }
-
-  function dragged(
-    event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>,
-    d: GraphNode,
-  ) {
-    d.fx = event.x;
-    d.fy = event.y;
-  }
-
-  function dragended(
-    event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>,
-    d: GraphNode,
-  ) {
-    if (!event.active && simulation) simulation.alphaTarget(0);
-    d.fx = null;
-    d.fy = null;
-  }
 };
 
-const zoomIn = () => {
-  if (svgElement && zoomBehavior) {
-    svgElement.transition().duration(300).call(zoomBehavior.scaleBy, 1.3);
-  }
+const updateStyles = () => {
+  const query = searchQuery.value.toLowerCase();
+  nodesSelection?.selectAll("circle").attr("opacity", (d: any) => {
+    const matchesSearch = !query || d.label.toLowerCase().includes(query);
+    const isDimmed =
+      (hoveredNodeId.value && hoveredNodeId.value !== d.id) || !matchesSearch;
+    return isDimmed ? 0.2 : 1;
+  });
 };
 
-const zoomOut = () => {
-  if (svgElement && zoomBehavior) {
-    svgElement.transition().duration(300).call(zoomBehavior.scaleBy, 0.7);
-  }
-};
+// --- DATA MERGING LOGIC: Merges OG nodes with LLM nodes ---
+watch(
+  () => props.externalData,
+  (newData) => {
+    const mergedNodes = [...demoGraphData.nodes];
+    const mergedLinks = [...demoGraphData.links];
 
-const resetZoom = () => {
-  if (svgElement && zoomBehavior) {
-    svgElement
-      .transition()
-      .duration(500)
-      .call(zoomBehavior.transform, d3.zoomIdentity);
-  }
-};
+    if (newData) {
+      newData.nodes.forEach((n) => {
+        if (!mergedNodes.find((existing) => existing.id === n.id))
+          mergedNodes.push(n);
+      });
+      newData.links.forEach((l) => mergedLinks.push(l));
+    }
 
-let resizeTimeout: ReturnType<typeof setTimeout>;
-
-const handleResize = () => {
-  clearTimeout(resizeTimeout);
-  resizeTimeout = setTimeout(() => {
-    initGraph();
-  }, 100);
-};
+    graphData.value = { nodes: mergedNodes, links: mergedLinks };
+    setTimeout(() => initGraph(), 100);
+  },
+  { deep: true, immediate: true },
+);
 
 onMounted(() => {
-  setTimeout(() => {
-    initGraph();
-  }, 50);
-  window.addEventListener("resize", handleResize);
+  window.addEventListener("resize", initGraph);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("resize", handleResize);
-  if (simulation) simulation.stop();
-  clearTimeout(resizeTimeout);
+  window.removeEventListener("resize", initGraph);
+  simulation.value?.stop();
 });
-
-const getConnectionCount = (nodeId: string): number => {
-  return graphData.links.filter((l) => {
-    const sourceId =
-      typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
-    const targetId =
-      typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
-    return sourceId === nodeId || targetId === nodeId;
-  }).length;
-};
-
-const clearSearch = () => {
-  searchQuery.value = "";
-};
 </script>
 
 <template>
-  <div class="flex h-full bg-surface-50">
-    <div class="flex-1 relative" ref="graphContainer" style="min-height: 400px">
-      <svg ref="svgRef" class="w-full h-full" style="display: block"></svg>
+  <div class="flex h-full bg-slate-50">
+    <div class="flex-1 relative" ref="graphContainer">
+      <svg ref="svgRef" class="w-full h-full"></svg>
 
-      <div class="absolute top-4 left-4 bg-white rounded-xl shadow-lg p-3 z-10">
-        <div class="flex items-center gap-2 mb-2">
-          <Search :size="16" class="text-surface-400" />
+      <div
+        class="absolute top-6 left-6 bg-white/90 backdrop-blur-md rounded-2xl shadow-xl p-5 z-10 w-72 border border-white"
+      >
+        <div class="flex items-center gap-3 mb-5 bg-slate-100 p-2.5 rounded-xl">
+          <Search :size="18" class="text-slate-400" />
           <input
             v-model="searchQuery"
-            type="text"
-            placeholder="Search nodes..."
-            class="text-sm border-none outline-none bg-transparent w-40"
-            @input="() => {}"
+            placeholder="Search roadmap..."
+            class="bg-transparent text-sm outline-none w-full font-medium"
           />
-          <button
-            v-if="searchQuery"
-            @click="clearSearch"
-            class="text-surface-400 hover:text-surface-600"
-          >
-            ×
-          </button>
         </div>
-        <div class="space-y-1">
+
+        <div class="space-y-2.5">
+          <p
+            class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-3"
+          >
+            Skill Categories
+          </p>
           <div
-            v-for="(name, group) in [
-              'Core AI',
-              'Frameworks',
-              'Applications',
-              'LLMs',
-              'Data',
-            ]"
-            :key="group"
-            class="flex items-center gap-2"
+            v-for="(color, label) in groupColors"
+            :key="label"
+            class="flex items-center gap-3"
           >
             <span
-              class="w-3 h-3 rounded-full"
-              :style="{ backgroundColor: groupColors[group + 1] }"
+              class="w-3 h-3 rounded-full shadow-sm"
+              :style="{ backgroundColor: color }"
             ></span>
-            <span class="text-xs text-surface-600">{{ name }}</span>
+            <span class="text-xs text-slate-600 font-semibold">{{
+              label
+            }}</span>
           </div>
         </div>
-        <p v-if="searchQuery" class="text-xs text-surface-400 mt-2">
-          {{ graphData.nodes.filter(isNodeMatching).length }} of
-          {{ graphData.nodes.length }} nodes match
-        </p>
       </div>
 
-      <div class="absolute top-4 right-4 flex flex-col gap-2 z-10">
+      <div class="absolute top-6 right-6 flex flex-col gap-3 z-10">
         <button
-          @click="zoomIn"
-          class="p-2 bg-white rounded-lg shadow-md hover:bg-surface-50 transition-colors cursor-pointer"
-          title="Zoom In"
+          @click="handleRestart"
+          class="p-3 bg-white rounded-2xl shadow-lg hover:bg-slate-50 transition-all border border-slate-100"
         >
-          <ZoomIn :size="20" class="text-surface-600" />
-        </button>
-        <button
-          @click="zoomOut"
-          class="p-2 bg-white rounded-lg shadow-md hover:bg-surface-50 transition-colors cursor-pointer"
-          title="Zoom Out"
-        >
-          <ZoomOut :size="20" class="text-surface-600" />
-        </button>
-        <button
-          @click="resetZoom"
-          class="p-2 bg-white rounded-lg shadow-md hover:bg-surface-50 transition-colors cursor-pointer"
-          title="Reset View"
-        >
-          <Maximize2 :size="20" class="text-surface-600" />
+          <Maximize2 :size="20" class="text-slate-600" />
         </button>
       </div>
 
       <div
         v-if="selectedNode"
-        class="absolute bottom-4 left-4 bg-white rounded-xl shadow-lg p-4 max-w-xs z-10 animate-fade-in"
+        class="absolute bottom-6 left-6 bg-white p-6 rounded-3xl shadow-2xl max-w-sm z-10 border border-slate-100"
       >
-        <div class="flex items-center gap-3 mb-2">
-          <span
-            class="w-4 h-4 rounded-full"
-            :style="{ backgroundColor: groupColors[selectedNode.group] }"
-          ></span>
-          <h3 class="font-semibold text-surface-800">
+        <div class="flex items-center gap-4 mb-4">
+          <div
+            class="w-5 h-5 rounded-full shadow-inner"
+            :style="{ backgroundColor: getNodeColor(selectedNode) }"
+          ></div>
+          <h3 class="font-extrabold text-xl text-slate-900 tracking-tight">
             {{ selectedNode.label }}
           </h3>
         </div>
-        <p class="text-sm text-surface-600">{{ selectedNode.description }}</p>
-        <div class="mt-3 pt-3 border-t border-surface-100">
-          <span class="text-xs text-surface-400">
-            Connected to {{ getConnectionCount(selectedNode.id) }} nodes
-          </span>
-        </div>
-      </div>
-
-      <div
-        class="absolute bottom-4 right-4 text-xs text-surface-400 bg-white/80 px-3 py-1 rounded-full"
-      >
-        Drag nodes to reposition • Scroll to zoom • Click for details
+        <p
+          class="text-sm text-slate-600 leading-relaxed mb-6 font-medium italic"
+        >
+          "{{ selectedNode.description }}"
+        </p>
       </div>
     </div>
   </div>

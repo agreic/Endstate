@@ -6,7 +6,9 @@ import { marked } from "marked";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
-
+const emit = defineEmits<{
+  (e: "updateGraph", data: any): void;
+}>();
 // State for Web Search Toggle
 const isSearchEnabled = ref(false);
 
@@ -15,10 +17,25 @@ const renderMarkdown = (content: string) => {
 };
 
 const systemPrompt = `
-You are Endstate AI. You provide clear, structured, and professional responses.
-- Use ### for headers.
-- Always use bullet points for lists.
-- If web search results are provided, synthesize them naturally.
+You are Endstate AI, the Agentic Learning Architect.
+Your goal is to transform vague learning wishes into executable skill graphs.
+
+RULES:
+1. When a user asks for a "skill graph" or a "learning path", you MUST provide a JSON block.
+2. This JSON block MUST be wrapped in <graph_update> tags.
+3. After the tags, tell the user: "I've architected your learning path! Head over to the Knowledge Graph tab to see your new roadmap."
+
+JSON FORMAT:
+<graph_update>
+{
+  "newNodes": [
+    {"id": "unique_id", "group": 1, "label": "Skill Name", "description": "Short summary"}
+  ],
+  "newLinks": [
+    {"source": "prerequisite_id", "target": "skill_id", "value": 3}
+  ]
+}
+</graph_update>
 `;
 
 // Initialize Model WITH Google Search Tool
@@ -92,7 +109,31 @@ const sendMessage = async () => {
     // but Gemini is smart enough to only search if the prompt requires it.
     const result = await chat.sendMessage(userText);
     const response = await result.response;
+    const rawText = response.text();
 
+    // --- NEW: EXTRACT GRAPH DATA ---
+
+    const graphMatch = rawText.match(
+      /<graph_update>([\s\S]*?)<\/graph_update>/,
+    );
+    let cleanContent = rawText;
+
+    // Inside sendMessage function
+    if (graphMatch) {
+      try {
+        const graphData = JSON.parse(graphMatch[1]);
+        emit("updateGraph", graphData); // Sends data to App.vue
+
+        // This cleans the chat bubble so it only shows the "Head over to the tab" text
+        cleanContent = rawText.replace(
+          /<graph_update>[\s\S]*?<\/graph_update>/,
+          "",
+        );
+      } catch (e) {
+        console.error("Graph parsing failed", e);
+      }
+    }
+    // --- END NEW SECTION ---
     // Extract Grounding Metadata (Sources)
     const metadata = response.candidates?.[0]?.groundingMetadata;
     const sources: Source[] = [];
@@ -120,7 +161,7 @@ const sendMessage = async () => {
     messages.value.push({
       id: Date.now(),
       role: "assistant",
-      content: response.text(),
+      content: cleanContent,
       timestamp: new Date(),
       sources: uniqueSources,
     });
