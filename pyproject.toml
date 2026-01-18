@@ -13,6 +13,8 @@ dependencies = [
     "langchain-google-genai>=2.0.0",
     "neo4j>=5.0.0",
     "python-dotenv>=1.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
 ]
 
 [project.optional-dependencies]
