@@ -1,38 +1,51 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from "vue";
-import { Send, Bot, User, Sparkles } from "lucide-vue-next";
+import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next"; // Added Globe and ExternalLink
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { marked } from "marked"; // Add this at the top
-// 1. Setup Gemini
-// 1. Setup Gemini
+import { marked } from "marked";
+
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
+
+// State for Web Search Toggle
+const isSearchEnabled = ref(false);
+
 const renderMarkdown = (content: string) => {
   return marked.parse(content);
 };
-// Define the "Brain" instructions
+
 const systemPrompt = `
 You are Endstate AI. You provide clear, structured, and professional responses.
-- Use ### for headers to separate sections.
-- Use bold (**text**) for emphasis.
-- Always use bullet points for lists or features.
-- Use code blocks with language tags for technical snippets.
-- Use horizontal rules (---) to separate distinct topics.
+- Use ### for headers.
+- Always use bullet points for lists.
+- If web search results are provided, synthesize them naturally.
 `;
 
+// Initialize Model WITH Google Search Tool
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
-  systemInstruction: systemPrompt, // This is the "brain" transplant
+  model: "gemini-2.5-flash", // 2.0/2.5 Flash supports grounding best
+  systemInstruction: systemPrompt,
+  tools: [
+    {
+      //@ts-ignore - Some TS definitions might not have googleSearch yet
+      googleSearch: {},
+    },
+  ],
 });
+
+interface Source {
+  title: string;
+  url: string;
+}
 
 interface Message {
   id: number;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  sources?: Source[]; // Store sources here
 }
 
-// 2. Initial state with your requested greeting
 const messages = ref<Message[]>([
   {
     id: 1,
@@ -46,7 +59,7 @@ const inputMessage = ref("");
 const isLoading = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 
-// Initialize chat history for context
+// History management
 const chat = model.startChat({
   history: [],
 });
@@ -63,7 +76,6 @@ const sendMessage = async () => {
 
   const userText = inputMessage.value.trim();
 
-  // Add user message to UI
   messages.value.push({
     id: Date.now(),
     role: "user",
@@ -76,22 +88,48 @@ const sendMessage = async () => {
   await scrollToBottom();
 
   try {
-    // 3. Call Gemini 2.5 Flash
+    // If search is disabled, we could technically use a different model instance,
+    // but Gemini is smart enough to only search if the prompt requires it.
     const result = await chat.sendMessage(userText);
     const response = await result.response;
+
+    // Extract Grounding Metadata (Sources)
+    const metadata = response.candidates?.[0]?.groundingMetadata;
+    const sources: Source[] = [];
+
+    if (metadata?.searchEntryPoint?.sdkBlob) {
+      // This is where the visual Google Search chips come from if using the widget
+    }
+
+    if (metadata?.groundingChunks) {
+      metadata.groundingChunks.forEach((chunk: any) => {
+        if (chunk.web) {
+          sources.push({
+            title: chunk.web.title,
+            url: chunk.web.uri,
+          });
+        }
+      });
+    }
+
+    // Remove duplicates
+    const uniqueSources = sources
+      .filter((v, i, a) => a.findIndex((t) => t.url === v.url) === i)
+      .slice(0, 3);
 
     messages.value.push({
       id: Date.now(),
       role: "assistant",
       content: response.text(),
       timestamp: new Date(),
+      sources: uniqueSources,
     });
   } catch (error) {
+    console.error(error);
     messages.value.push({
       id: Date.now(),
       role: "assistant",
-      content:
-        "I'm having trouble connecting to my brain right now. Please check your API key.",
+      content: "I'm having trouble connecting to the web right now.",
       timestamp: new Date(),
     });
   } finally {
@@ -112,7 +150,7 @@ onMounted(() => scrollToBottom());
 
 <template>
   <div class="flex flex-col h-full bg-surface-50">
-    <div class="flex-1 overflow-y-auto p-4 space-y-4" ref="messagesContainer">
+    <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
       <div
         v-for="message in messages"
         :key="message.id"
@@ -120,7 +158,7 @@ onMounted(() => scrollToBottom());
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
         <div
-          class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+          class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm"
           :class="
             message.role === 'user'
               ? 'bg-primary-600'
@@ -131,20 +169,49 @@ onMounted(() => scrollToBottom());
           <Bot v-else :size="16" class="text-white" />
         </div>
 
-        <div
-          class="max-w-[70%] rounded-2xl px-4 py-3 shadow-sm"
-          :class="
-            message.role === 'user'
-              ? 'bg-primary-600 text-white'
-              : 'bg-white text-surface-800'
-          "
-        >
+        <div class="max-w-[85%] lg:max-w-[70%]">
           <div
-            class="text-sm leading-relaxed markdown-container"
-            v-html="renderMarkdown(message.content)"
-          ></div>
+            class="rounded-2xl px-4 py-3 shadow-sm"
+            :class="
+              message.role === 'user'
+                ? 'bg-primary-600 text-white'
+                : 'bg-white text-surface-800'
+            "
+          >
+            <div
+              class="text-sm leading-relaxed markdown-container"
+              v-html="renderMarkdown(message.content)"
+            ></div>
 
-          <p class="text-xs mt-1 ...">{{ formatTime(message.timestamp) }}</p>
+            <div
+              v-if="message.sources && message.sources.length > 0"
+              class="mt-3 pt-3 border-t border-surface-100"
+            >
+              <p
+                class="text-[10px] uppercase tracking-wider font-bold text-surface-400 mb-2 flex items-center gap-1"
+              >
+                <Globe :size="10" /> Sources Found
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <a
+                  v-for="source in message.sources"
+                  :key="source.url"
+                  :href="source.url"
+                  target="_blank"
+                  class="flex items-center gap-1.5 px-2 py-1 bg-surface-50 hover:bg-surface-100 border border-surface-200 rounded-md text-[11px] text-primary-700 transition-colors"
+                >
+                  <span class="truncate max-w-[120px]">{{ source.title }}</span>
+                  <ExternalLink :size="10" />
+                </a>
+              </div>
+            </div>
+          </div>
+          <p
+            class="text-[10px] text-surface-400 mt-1 px-2"
+            :class="message.role === 'user' ? 'text-right' : ''"
+          >
+            {{ formatTime(message.timestamp) }}
+          </p>
         </div>
       </div>
 
@@ -154,73 +221,77 @@ onMounted(() => scrollToBottom());
         >
           <Bot :size="16" class="text-white" />
         </div>
-        <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-          <div class="flex items-center gap-1">
-            <span
-              class="w-2 h-2 bg-surface-400 rounded-full animate-bounce"
-              style="animation-delay: 0ms"
-            ></span>
-            <span
-              class="w-2 h-2 bg-surface-400 rounded-full animate-bounce"
-              style="animation-delay: 150ms"
-            ></span>
-            <span
-              class="w-2 h-2 bg-surface-400 rounded-full animate-bounce"
-              style="animation-delay: 300ms"
-            ></span>
+        <div
+          class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-surface-100"
+        >
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-surface-400 mr-2">{{
+              isSearchEnabled ? "Searching web..." : "Thinking..."
+            }}</span>
+            <div class="flex gap-1">
+              <span
+                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
+                style="animation-delay: 0ms"
+              ></span>
+              <span
+                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
+                style="animation-delay: 150ms"
+              ></span>
+              <span
+                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
+                style="animation-delay: 300ms"
+              ></span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <div class="p-4 bg-white border-t border-surface-200">
-      <div class="flex gap-3">
-        <div class="flex-1 relative">
-          <input
-            v-model="inputMessage"
-            @keyup.enter="sendMessage"
-            type="text"
-            placeholder="Type your message..."
-            class="w-full px-4 py-3 pr-12 bg-surface-100 border border-surface-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all text-sm"
-          />
+      <div class="max-w-4xl mx-auto">
+        <div class="flex gap-3 items-end">
           <button
-            @click="sendMessage"
-            :disabled="!inputMessage.trim() || isLoading"
-            class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors"
+            @click="isSearchEnabled = !isSearchEnabled"
+            class="p-3 rounded-xl border transition-all flex items-center justify-center gap-2 group"
             :class="
-              inputMessage.trim() && !isLoading
-                ? 'bg-primary-600 text-white hover:bg-primary-700'
-                : 'bg-surface-200 text-surface-400 cursor-not-allowed'
+              isSearchEnabled
+                ? 'bg-primary-50 border-primary-200 text-primary-600 ring-2 ring-primary-500/10'
+                : 'bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300'
             "
           >
-            <Send :size="18" />
+            <Globe :size="20" :class="isSearchEnabled ? 'animate-pulse' : ''" />
+            <span v-if="isSearchEnabled" class="text-xs font-bold pr-1"
+              >Search On</span
+            >
           </button>
+
+          <div class="flex-1 relative">
+            <textarea
+              v-model="inputMessage"
+              @keydown.enter.prevent="sendMessage"
+              placeholder="Ask anything or use web search..."
+              rows="1"
+              class="w-full px-4 py-3 pr-12 bg-surface-50 border border-surface-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all text-sm resize-none"
+            ></textarea>
+
+            <button
+              @click="sendMessage"
+              :disabled="!inputMessage.trim() || isLoading"
+              class="absolute right-2 bottom-2 p-2 rounded-lg transition-all"
+              :class="
+                inputMessage.trim() && !isLoading
+                  ? 'bg-primary-600 text-white shadow-md hover:bg-primary-700'
+                  : 'bg-surface-200 text-surface-400 cursor-not-allowed'
+              "
+            >
+              <Send :size="18" />
+            </button>
+          </div>
         </div>
+        <p class="text-center text-[10px] text-surface-400 mt-2">
+          Endstate AI can browse the web to provide real-time information.
+        </p>
       </div>
-      <p class="text-center text-xs text-surface-400 mt-2">
-        Press Enter to send
-      </p>
     </div>
   </div>
 </template>
-
-<style scoped>
-.markdown-container :deep(ul) {
-  list-style-type: disc;
-  margin-left: 1.25rem;
-  margin-bottom: 0.5rem;
-}
-.markdown-container :deep(ol) {
-  list-style-type: decimal;
-  margin-left: 1.25rem;
-}
-.markdown-container :deep(h3) {
-  font-weight: bold;
-  font-size: 1rem;
-  margin-top: 1rem;
-  margin-bottom: 0.5rem;
-}
-.markdown-container :deep(p) {
-  margin-bottom: 0.5rem;
-}
-</style>
