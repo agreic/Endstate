@@ -13,13 +13,13 @@ services:
       - neo4j_logs:/logs
 
   # Uncomment below to enable Ollama container
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: ollama-local
-  #   ports:
-  #     - "11434:11434"  # Ollama API
-  #   volumes:
-  #     - ollama_data:/root/.ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-local
+    ports:
+      - "11434:11434"  # Ollama API
+    volumes:
+      - ollama_data:/root/.ollama
     # Uncomment below for GPU support (NVIDIA)
     # deploy:
     #   resources:
@@ -32,4 +32,4 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs:
-  # ollama_data:
+  ollama_data:
