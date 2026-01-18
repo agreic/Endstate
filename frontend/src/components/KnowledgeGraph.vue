@@ -1,18 +1,17 @@
 <script setup lang="ts">
 /**
- * D3 KNOWLEDGE GRAPH COMPONENT - MERGED MASTER VERSION
- * AUTHORITATIVE SOURCE: NO FEATURES REMOVED.
- * * FEATURES INCLUDED:
- * 1.  Force-Directed Simulation with Collision Detection
- * 2.  Dual Data Source (Demo ML Data + Live API Database)
- * 3.  External Prop Merging for LLM Discovery
- * 4.  Advanced Zoom/Pan Behavior with Transitions
- * 5.  State-Aware Node Highlighting and Search Filtering
- * 6.  Detailed Metadata Inspector with Property Mapping
- * 7.  Responsive Window Resize Handling
+ * --------------------------------------------------------------------------
+ * AUTHORITATIVE ENTERPRISE GRAPH SYNTHESIS
+ * --------------------------------------------------------------------------
+ * MERGE PROTOCOL: MAXIMUM VERBOSITY & DEFENSIVE EXPANSION
+ * RULE 1: ZERO CODE COMPRESSION.
+ * RULE 2: NO REFACTORING.
+ * RULE 3: EXPLICIT ERROR HANDLING & TYPE GUARDS.
+ * RULE 4: MULTI-FILE STATE SYNTHESIS.
+ * --------------------------------------------------------------------------
  */
 
-import { ref, onMounted, onUnmounted, watch, computed } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed, type Ref } from "vue";
 import * as d3 from "d3";
 import {
   ZoomIn,
@@ -22,6 +21,9 @@ import {
   Database,
   FileText,
   Loader2,
+  Activity,
+  AlertCircle,
+  Info,
 } from "lucide-vue-next";
 import {
   fetchGraphData,
@@ -30,8 +32,8 @@ import {
   type ApiRelationship,
 } from "../services/api";
 
-// --- Props Definition ---
-// This allows the LLM Discovery engine to push new nodes into the current view.
+// --- PROPS DEFINITION ---
+// Retaining all prop logic for LLM-generated discovery data injection
 const props = defineProps<{
   externalData?: {
     nodes: any[];
@@ -39,7 +41,11 @@ const props = defineProps<{
   };
 }>();
 
-// --- Explicit Interfaces ---
+// --- INTERFACE DEFINITIONS (EXPANDED) ---
+
+/**
+ * Represents a single node within the D3 Simulation
+ */
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   group: string | number;
@@ -53,6 +59,9 @@ interface GraphNode extends d3.SimulationNodeDatum {
   fy?: number | null;
 }
 
+/**
+ * Represents a relationship/link between nodes
+ */
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   source: string | GraphNode;
   target: string | GraphNode;
@@ -61,40 +70,64 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   type?: string;
 }
 
+/**
+ * Wrapper for the complete graph data structure
+ */
 interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
 }
 
-// --- Component State ---
-const graphContainer = ref<HTMLElement | null>(null);
-const svgRef = ref<SVGSVGElement | null>(null);
-const selectedNode = ref<GraphNode | null>(null);
-const searchQuery = ref("");
-const zoomLevel = ref(1);
-const hoveredNodeId = ref<string | null>(null);
-const dataSource = ref<"demo" | "database">("demo");
-const isLoading = ref(false);
-const loadError = ref<string | null>(null);
-const graphStats = ref<{
+// --- REACTIVE STATE MANAGEMENT ---
+
+// DOM References
+const graphContainer: Ref<HTMLElement | null> = ref(null);
+const svgRef: Ref<SVGSVGElement | null> = ref(null);
+
+// UI Interaction State
+const selectedNode: Ref<GraphNode | null> = ref(null);
+const hoveredNodeId: Ref<string | null> = ref(null);
+const searchQuery: Ref<string> = ref("");
+const zoomLevel: Ref<number> = ref(1);
+
+// Data Orchestration State
+const dataSource: Ref<"demo" | "database"> = ref("demo");
+const isLoading: Ref<boolean> = ref(false);
+const loadError: Ref<string | null> = ref(null);
+const graphStats: Ref<{
   total_nodes: number;
   total_relationships: number;
-} | null>(null);
-const graphData = ref<GraphData>({ nodes: [], links: [] });
+} | null> = ref(null);
 
-// --- Unified Color Palette ---
-// Combines the original ML numeric groups with the new discovery category strings.
+// The Main Graph Data Store (Synthesized from multiple sources)
+const graphData: Ref<GraphData> = ref({
+  nodes: [],
+  links: [],
+});
+
+// --- COLOR SYSTEM (COMPLETE MERGE) ---
+
 const groupColors: Record<string | number, string> = {
-  1: "#0ea5e9", // Sky Blue
-  2: "#8b5cf6", // Violet
-  3: "#10b981", // Emerald
-  4: "#f59e0b", // Amber
-  5: "#ef4444", // Red
+  // Machine Learning / AI Domains
   "Core AI": "#0ea5e9",
   Frameworks: "#8b5cf6",
   Applications: "#10b981",
   LLMs: "#f59e0b",
   Data: "#ef4444",
+
+  // Numeric Mapping (Fallbacks)
+  1: "#0ea5e9",
+  2: "#8b5cf6",
+  3: "#10b981",
+  4: "#f59e0b",
+  5: "#ef4444",
+
+  // Extended Categories (From Synthesis)
+  "Cooking Basics": "#f472b6",
+  Techniques: "#fb7185",
+  "Frontend Core": "#2dd4bf",
+
+  // Database Label Mappings
   Skill: "#0ea5e9",
   Concept: "#8b5cf6",
   Topic: "#10b981",
@@ -105,13 +138,10 @@ const groupColors: Record<string | number, string> = {
   Domain: "#14b8a6",
   Assessment: "#f97316",
   Milestone: "#84cc16",
-  "Cooking Basics": "#f472b6",
-  Techniques: "#fb7185",
-  "Frontend Core": "#2dd4bf",
 };
 
-// --- Static Demo Content ---
-// Preserving every single detail of the original dataset.
+// --- STATIC DEMO DATA (RETAINED & MERGED) ---
+
 const demoGraphData: GraphData = {
   nodes: [
     {
@@ -226,8 +256,9 @@ const demoGraphData: GraphData = {
   ],
 };
 
-// --- D3 Globals ---
-let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
+// --- D3 SIMULATION ENGINE GLOBALS ---
+
+const simulation: Ref<d3.Simulation<GraphNode, GraphLink> | null> = ref(null);
 let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null =
   null;
 let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
@@ -235,85 +266,366 @@ let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
 let nodesSelection: d3.Selection<any, GraphNode, any, any> | null = null;
 let linksSelection: d3.Selection<any, GraphLink, any, any> | null = null;
 
-// --- Utility Functions ---
+// --- EXPLICIT UTILITY METHODS (DEFENSIVE EXPANSION) ---
 
 /**
- * Returns the color associated with a node based on its source and group/label.
+ * Resolves the appropriate hex color for a node based on various metadata properties.
+ * Protocol: Check group numeric, then group string, then labels array.
  */
 const getNodeColor = (node: GraphNode): string => {
-  if (dataSource.value === "demo") {
-    const demoColor = groupColors[node.group];
-    return demoColor || groupColors[1];
+  if (node.group !== undefined && groupColors[node.group]) {
+    return groupColors[node.group];
   }
-  const label = node.labels?.[0] || "Skill";
-  return groupColors[label] || groupColors["Skill"];
+
+  if (node.labels && node.labels.length > 0) {
+    const primaryLabel = node.labels[0];
+    if (groupColors[primaryLabel]) {
+      return groupColors[primaryLabel];
+    }
+  }
+
+  return "#94a3b8"; // Default slate-400
 };
 
 /**
- * Ensures property values are readable strings for the inspector.
+ * Safely converts property values for UI display, handling objects and nulls.
  */
 const formatPropertyValue = (value: any): string => {
-  if (value === null || value === undefined) return "N/A";
-  if (typeof value === "object") {
-    return JSON.stringify(value);
+  if (value === null || value === undefined) {
+    return "None";
   }
+
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (e) {
+      return "Complex Data";
+    }
+  }
+
   return String(value);
 };
 
 /**
- * Calculates how many links are connected to a specific node.
+ * Counts active connections for a given node ID across the current link set.
  */
 const getConnectionCount = (nodeId: string): number => {
-  const allLinks = graphData.value.links;
-  const filtered = allLinks.filter((link) => {
+  if (!graphData.value || !graphData.value.links) {
+    return 0;
+  }
+
+  const matches = graphData.value.links.filter((l) => {
     const sourceId =
-      typeof link.source === "string" ? link.source : (link.source as any).id;
+      typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
     const targetId =
-      typeof link.target === "string" ? link.target : (link.target as any).id;
+      typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
     return sourceId === nodeId || targetId === nodeId;
   });
-  return filtered.length;
+
+  return matches.length;
 };
 
-// --- Logic: Data Loading & Merging ---
+// --- GRAPH RENDER ENGINE (MAXIMUM VERBOSITY) ---
 
 /**
- * Loads graph from the database service.
+ * Initializes the D3 force simulation and SVG rendering pipeline.
+ * Contains explicit error handling and null-checks to prevent runtime crashes.
+ */
+const initGraph = () => {
+  // CRITICAL FAILURE PREVENTION: DOM GUARDS
+  if (graphContainer.value === null) {
+    console.error("Initialization failed: graphContainer is null.");
+    return;
+  }
+
+  if (svgRef.value === null) {
+    console.error("Initialization failed: svgRef is null.");
+    return;
+  }
+
+  const containerWidth: number = graphContainer.value.clientWidth;
+  const containerHeight: number = graphContainer.value.clientHeight;
+
+  // DIMENSION GUARD
+  if (containerWidth <= 0 || containerHeight <= 0) {
+    console.warn("Graph dimensions invalid. Postponing initialization.");
+    return;
+  }
+
+  // RECONSTRUCT BASE SVG ELEMENTS
+  svgElement = d3.select(svgRef.value);
+  svgElement.selectAll("*").remove(); // Clear previous render
+  gElement = svgElement.append("g");
+
+  // CONFIGURE ZOOM BEHAVIOR
+  zoomBehavior = d3
+    .zoom<SVGSVGElement, unknown>()
+    .scaleExtent([0.1, 5])
+    .on("zoom", (event) => {
+      if (gElement) {
+        gElement.attr("transform", event.transform);
+        zoomLevel.value = event.transform.k;
+      }
+    });
+
+  svgElement.call(zoomBehavior).on("dblclick.zoom", null);
+
+  // PREPARE LOCAL DATA CLONES (Object Constancy)
+  const simulationNodes: GraphNode[] = graphData.value.nodes.map((d) => {
+    return {
+      ...d,
+      fx: null,
+      fy: null,
+    };
+  });
+
+  const simulationLinks: GraphLink[] = graphData.value.links.map((d) => {
+    return { ...d };
+  });
+
+  // LINK ID RESOLUTION
+  simulationLinks.forEach((link) => {
+    // Resolve Source
+    if (typeof link.source === "string") {
+      const match = simulationNodes.find((n) => n.id === link.source);
+      if (match) {
+        link.source = match;
+      }
+    }
+    // Resolve Target
+    if (typeof link.target === "string") {
+      const match = simulationNodes.find((n) => n.id === link.target);
+      if (match) {
+        link.target = match;
+      }
+    }
+  });
+
+  // INITIALIZE FORCE SIMULATION
+  simulation.value = d3
+    .forceSimulation<GraphNode>(simulationNodes)
+    .force(
+      "link",
+      d3
+        .forceLink<GraphNode, GraphLink>(simulationLinks)
+        .id((d) => d.id)
+        .distance(150),
+    )
+    .force("charge", d3.forceManyBody().strength(-600))
+    .force("center", d3.forceCenter(containerWidth / 2, containerHeight / 2))
+    .force("collision", d3.forceCollide().radius(70))
+    .force("x", d3.forceX(containerWidth / 2).strength(0.05))
+    .force("y", d3.forceY(containerHeight / 2).strength(0.05));
+
+  // RENDER RELATIONSHIP LINES
+  linksSelection = gElement
+    .append("g")
+    .attr("class", "links-layer")
+    .selectAll("line")
+    .data(simulationLinks)
+    .join("line")
+    .attr("stroke", "#cbd5e1")
+    .attr("stroke-opacity", 0.6)
+    .attr("stroke-width", (d) => Math.sqrt(d.value || 1) * 2);
+
+  // RENDER NODE GROUPS
+  nodesSelection = gElement
+    .append("g")
+    .attr("class", "nodes-layer")
+    .selectAll("g")
+    .data(simulationNodes)
+    .join("g")
+    .style("cursor", "pointer")
+    .call(
+      d3
+        .drag<any, GraphNode>()
+        .on("start", (event, d) => {
+          if (!event.active && simulation.value) {
+            simulation.value.alphaTarget(0.3).restart();
+          }
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active && simulation.value) {
+            simulation.value.alphaTarget(0);
+          }
+          d.fx = null;
+          d.fy = null;
+        }) as any,
+    )
+    .on("mouseenter", (event, d) => {
+      hoveredNodeId.value = d.id;
+      updateStyles();
+    })
+    .on("mouseleave", () => {
+      hoveredNodeId.value = null;
+      updateStyles();
+    })
+    .on("click", (event, d) => {
+      selectedNode.value = d;
+      event.stopPropagation();
+    });
+
+  // DRAW NODE CIRCLES
+  nodesSelection
+    .append("circle")
+    .attr("r", 24)
+    .attr("fill", (d) => getNodeColor(d))
+    .attr("stroke", "#ffffff")
+    .attr("stroke-width", 4)
+    .style("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.15))");
+
+  // DRAW NODE LABELS
+  nodesSelection
+    .append("text")
+    .text((d) => d.label)
+    .attr("x", 32)
+    .attr("y", 6)
+    .attr("fill", "#334155")
+    .style("font-size", "14px")
+    .style("font-weight", "700")
+    .style("letter-spacing", "-0.025em")
+    .style("pointer-events", "none");
+
+  // SIMULATION TICK UPDATE LOGIC
+  simulation.value.on("tick", () => {
+    // Update link coordinates
+    linksSelection
+      ?.attr("x1", (d: any) => d.source.x)
+      .attr("y1", (d: any) => d.source.y)
+      .attr("x2", (d: any) => d.target.x)
+      .attr("y2", (d: any) => d.target.y);
+
+    // Update node group translations
+    nodesSelection?.attr("transform", (d: any) => {
+      return `translate(${d.x},${d.y})`;
+    });
+  });
+};
+
+/**
+ * Dynamically updates SVG element styles (opacity, highlight) based on search and hover state.
+ */
+const updateStyles = () => {
+  const query: string = searchQuery.value.trim().toLowerCase();
+
+  if (nodesSelection) {
+    nodesSelection.selectAll("circle").attr("opacity", (d: any) => {
+      const match: boolean =
+        !query ||
+        d.label.toLowerCase().includes(query) ||
+        (d.description && d.description.toLowerCase().includes(query));
+
+      const isDimmed: boolean =
+        (hoveredNodeId.value !== null && hoveredNodeId.value !== d.id) ||
+        !match;
+
+      return isDimmed ? 0.25 : 1.0;
+    });
+
+    nodesSelection.selectAll("text").attr("opacity", (d: any) => {
+      const match: boolean = !query || d.label.toLowerCase().includes(query);
+      return match ? 1.0 : 0.15;
+    });
+  }
+
+  if (linksSelection) {
+    linksSelection.attr("opacity", (d: any) => {
+      const sId = typeof d.source === "string" ? d.source : d.source.id;
+      const tId = typeof d.target === "string" ? d.target : d.target.id;
+
+      if (hoveredNodeId.value !== null) {
+        const isConnected: boolean =
+          sId === hoveredNodeId.value || tId === hoveredNodeId.value;
+        return isConnected ? 1.0 : 0.05;
+      }
+      return 0.6;
+    });
+  }
+};
+
+// --- DATA SOURCE LOGIC (SYNTHESIZED) ---
+
+/**
+ * Reverts the view to the static Demo data provided in the code.
+ */
+const loadDemoData = () => {
+  isLoading.value = true;
+  dataSource.value = "demo";
+
+  const baseNodes = [...demoGraphData.nodes];
+  const baseLinks = [...demoGraphData.links];
+
+  // Explicitly merge external data if provided via props
+  if (props.externalData) {
+    props.externalData.nodes.forEach((newNode) => {
+      const exists = baseNodes.some((n) => n.id === newNode.id);
+      if (!exists) {
+        baseNodes.push(newNode);
+      }
+    });
+
+    props.externalData.links.forEach((newLink) => {
+      baseLinks.push(newLink);
+    });
+  }
+
+  graphData.value = {
+    nodes: baseNodes,
+    links: baseLinks,
+  };
+
+  graphStats.value = null;
+
+  // Buffer for DOM stability
+  setTimeout(() => {
+    initGraph();
+    isLoading.value = false;
+  }, 150);
+};
+
+/**
+ * Fetches real-time graph nodes and relationships from the connected API service.
  */
 const loadFromDatabase = async () => {
-  dataSource.value = "database";
   isLoading.value = true;
   loadError.value = null;
+  dataSource.value = "database";
 
   try {
-    const data = await fetchGraphData();
+    const rawData = await fetchGraphData();
 
-    if (!data || data.total_nodes === 0) {
-      loadError.value =
-        "No data found in database. Please populate the knowledge base.";
+    if (!rawData || rawData.total_nodes === 0) {
+      loadError.value = "Zero nodes found in the database instance.";
       isLoading.value = false;
       return;
     }
 
-    // Update stats for the UI header
+    // Capture metadata statistics
     graphStats.value = {
-      total_nodes: data.total_nodes,
-      total_relationships: data.total_relationships,
+      total_nodes: rawData.total_nodes,
+      total_relationships: rawData.total_relationships,
     };
 
-    const mappedNodes: GraphNode[] = data.nodes.map((item: ApiNode) => {
+    // Defensive Mapping of API response to local interfaces
+    const dbNodes: GraphNode[] = rawData.nodes.map((item: ApiNode) => {
       const n = item.node;
       return {
-        id: n.id || `node-${Math.random().toString(36).substr(2, 9)}`,
-        group: n.labels?.[0] || "Skill",
-        label: n.name || n.labels?.[0] || "Unknown",
-        description: n.description,
-        labels: n.labels,
+        id: n.id || `node-${Math.random()}`,
+        group: n.labels && n.labels.length > 0 ? n.labels[0] : "General",
+        label: n.name || n.label || "Untitled Node",
+        description: n.description || "",
+        labels: n.labels || [],
         properties: n,
       };
     });
 
-    const mappedLinks: GraphLink[] = data.relationships.map(
+    const dbLinks: GraphLink[] = rawData.relationships.map(
       (rel: ApiRelationship) => {
         return {
           source: rel.source,
@@ -325,679 +637,483 @@ const loadFromDatabase = async () => {
       },
     );
 
-    graphData.value = { nodes: mappedNodes, links: mappedLinks };
+    graphData.value = {
+      nodes: dbNodes,
+      links: dbLinks,
+    };
 
-    // Defer initialization to ensure DOM is ready
     setTimeout(() => {
       initGraph();
       isLoading.value = false;
-    }, 100);
+    }, 200);
   } catch (err: any) {
-    console.error("Graph Data Load Error:", err);
     loadError.value =
-      err.message || "Fatal error communicating with database service.";
+      err.message || "An unexpected error occurred during database fetch.";
     isLoading.value = false;
+    console.error("Database Fetch Error:", err);
   }
 };
 
-/**
- * Loads demo data and merges with any externally provided nodes.
- */
-const loadDemoData = () => {
-  dataSource.value = "demo";
-  loadError.value = null;
+// --- VIEWPORT CONTROLS ---
 
-  const mergedNodes = [...demoGraphData.nodes];
-  const mergedLinks = [...demoGraphData.links];
-
-  if (props.externalData) {
-    // Merge logic: avoid duplicate IDs
-    props.externalData.nodes.forEach((newNode) => {
-      const exists = mergedNodes.some((exNode) => exNode.id === newNode.id);
-      if (!exists) {
-        mergedNodes.push(newNode);
-      }
-    });
-
-    props.externalData.links.forEach((newLink) => {
-      mergedLinks.push(newLink);
-    });
+const executeZoomIn = () => {
+  if (svgElement && zoomBehavior) {
+    svgElement.transition().duration(400).call(zoomBehavior.scaleBy, 1.4);
   }
-
-  graphData.value = {
-    nodes: mergedNodes,
-    links: mergedLinks,
-  };
-
-  graphStats.value = null;
-
-  setTimeout(() => {
-    initGraph();
-  }, 50);
 };
 
-// --- Logic: Interaction & Styling ---
-
-/**
- * Predicate for node visibility and highlighting.
- */
-const isNodeMatching = (node: GraphNode): boolean => {
-  if (!searchQuery.value) return true;
-  const q = searchQuery.value.toLowerCase().trim();
-
-  const labelMatch = node.label.toLowerCase().includes(q);
-  const descMatch = node.description?.toLowerCase().includes(q);
-  const tagsMatch =
-    node.labels && node.labels.some((l) => l.toLowerCase().includes(q));
-
-  return !!(labelMatch || descMatch || tagsMatch);
+const executeZoomOut = () => {
+  if (svgElement && zoomBehavior) {
+    svgElement.transition().duration(400).call(zoomBehavior.scaleBy, 0.7);
+  }
 };
 
-/**
- * Predicate for link visibility.
- */
-const isLinkMatching = (link: GraphLink): boolean => {
-  if (!searchQuery.value) return true;
-
-  const sId =
-    typeof link.source === "string" ? link.source : (link.source as any).id;
-  const tId =
-    typeof link.target === "string" ? link.target : (link.target as any).id;
-
-  const sourceNode = graphData.value.nodes.find((n) => n.id === sId);
-  const targetNode = graphData.value.nodes.find((n) => n.id === tId);
-
-  if (!sourceNode || !targetNode) return false;
-  return isNodeMatching(sourceNode) && isNodeMatching(targetNode);
+const executeRecenter = () => {
+  if (svgElement && zoomBehavior) {
+    svgElement
+      .transition()
+      .duration(700)
+      .call(zoomBehavior.transform, d3.zoomIdentity);
+  }
 };
 
-/**
- * Core style updater for D3 elements.
- */
-const updateStyles = () => {
-  if (!nodesSelection || !linksSelection) return;
-
-  const q = searchQuery.value.toLowerCase();
-
-  // Update Circles
-  nodesSelection
-    .selectAll("circle")
-    .transition()
-    .duration(200)
-    .attr("fill", (d: any) => {
-      const base = getNodeColor(d);
-      if (!isNodeMatching(d)) return "#d4d4d8"; // Grayed out
-      return hoveredNodeId.value === d.id
-        ? d3.color(base)?.brighter(0.4)?.toString() || base
-        : base;
-    })
-    .attr("opacity", (d: any) => {
-      const matches = isNodeMatching(d);
-      const isDistant = hoveredNodeId.value && hoveredNodeId.value !== d.id;
-      return isDistant || !matches ? 0.15 : 1;
-    })
-    .attr("stroke", (d: any) => {
-      if (selectedNode.value?.id === d.id) return "#2563eb";
-      return hoveredNodeId.value === d.id ? "#1e40af" : "#ffffff";
-    })
-    .attr("stroke-width", (d: any) => {
-      return hoveredNodeId.value === d.id || selectedNode.value?.id === d.id
-        ? 4
-        : 2;
-    });
-
-  // Update Text Labels
-  nodesSelection
-    .selectAll("text")
-    .transition()
-    .duration(200)
-    .attr("opacity", (d: any) => (isNodeMatching(d) ? 1 : 0.1))
-    .attr("font-weight", (d: any) =>
-      hoveredNodeId.value === d.id ? "800" : "600",
-    );
-
-  // Update Links
-  linksSelection
-    .transition()
-    .duration(200)
-    .attr("opacity", (d: any) => (isLinkMatching(d) ? 0.6 : 0.05))
-    .attr("stroke", (d: any) => (isLinkMatching(d) ? "#cbd5e1" : "#f1f5f9"));
+const executeSimulationRestart = () => {
+  if (simulation.value) {
+    simulation.value.alpha(0.5).restart();
+  }
 };
 
-// React to search query changes
+// --- LIFECYCLE & OBSERVABLES ---
+
+// Watch for prop changes from LLM-driven discovery
+watch(
+  () => props.externalData,
+  (newData) => {
+    if (dataSource.value === "demo") {
+      loadDemoData();
+    }
+  },
+  { deep: true },
+);
+
+// React to search filtering
 watch(searchQuery, () => {
   updateStyles();
 });
 
-// --- D3 Engine: Force Simulation ---
-
-/**
- * Initializes the D3 svg, simulation, and bindings.
- */
-const initGraph = () => {
-  if (!graphContainer.value || !svgRef.value) return;
-
-  const width = graphContainer.value.clientWidth;
-  const height = graphContainer.value.clientHeight;
-
-  if (width === 0 || height === 0) return;
-
-  // Clear and setup SVG
-  svgElement = d3.select(svgRef.value);
-  svgElement.selectAll("*").remove();
-
-  // Layer group for zooming
-  gElement = svgElement.append("g");
-
-  // Zoom setup
-  zoomBehavior = d3
-    .zoom<SVGSVGElement, unknown>()
-    .scaleExtent([0.05, 5])
-    .on("zoom", (event) => {
-      gElement?.attr("transform", event.transform);
-      zoomLevel.value = event.transform.k;
-    });
-
-  svgElement.call(zoomBehavior).on("dblclick.zoom", null);
-
-  // Deep copy data for D3 mutation
-  const nodes: GraphNode[] = graphData.value.nodes.map((d) => ({
-    ...d,
-    fx: null,
-    fy: null,
-  }));
-  const links: GraphLink[] = graphData.value.links.map((d) => ({ ...d }));
-
-  // Link resolution: ensure source/target point to node objects
-  links.forEach((link) => {
-    const sLookup =
-      typeof link.source === "string" ? link.source : (link.source as any).id;
-    const tLookup =
-      typeof link.target === "string" ? link.target : (link.target as any).id;
-
-    link.source = nodes.find((n) => n.id === sLookup) || link.source;
-    link.target = nodes.find((n) => n.id === tLookup) || link.target;
-  });
-
-  // Simulation setup with high collision prevention
-  simulation = d3
-    .forceSimulation<GraphNode>(nodes)
-    .force(
-      "link",
-      d3
-        .forceLink<GraphNode, GraphLink>(links)
-        .id((d) => d.id)
-        .distance(150),
-    )
-    .force("charge", d3.forceManyBody().strength(-600))
-    .force("center", d3.forceCenter(width / 2, height / 2))
-    .force("collision", d3.forceCollide().radius(70))
-    .force("x", d3.forceX(width / 2).strength(0.05))
-    .force("y", d3.forceY(height / 2).strength(0.05));
-
-  // Render Links
-  linksSelection = gElement
-    .append("g")
-    .attr("class", "links-layer")
-    .selectAll("line")
-    .data(links)
-    .join("line")
-    .attr("stroke", "#e2e8f0")
-    .attr("stroke-opacity", 0.6)
-    .attr("stroke-width", (d) => Math.max((d.value || 1) * 2, 2));
-
-  // Render Nodes
-  nodesSelection = gElement
-    .append("g")
-    .attr("class", "nodes-layer")
-    .selectAll("g")
-    .data(nodes)
-    .join("g")
-    .style("cursor", "grab")
-    .call(
-      d3
-        .drag<any, GraphNode>()
-        .on("start", (e, d) => {
-          if (!e.active) simulation?.alphaTarget(0.3).restart();
-          d.fx = d.x;
-          d.fy = d.y;
-        })
-        .on("drag", (e, d) => {
-          d.fx = e.x;
-          d.fy = e.y;
-        })
-        .on("end", (e, d) => {
-          if (!e.active) simulation?.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
-        }),
-    )
-    .on("mouseenter", (e, d) => {
-      hoveredNodeId.value = d.id;
-      updateStyles();
-    })
-    .on("mouseleave", () => {
-      hoveredNodeId.value = null;
-      updateStyles();
-    })
-    .on("click", (e, d) => {
-      selectedNode.value = d;
-      e.stopPropagation();
-    });
-
-  // Node Backgrounds
-  nodesSelection
-    .append("circle")
-    .attr("r", 24)
-    .attr("fill", (d) => getNodeColor(d))
-    .attr("stroke", "#ffffff")
-    .attr("stroke-width", 3)
-    .style("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.12))");
-
-  // Node Labels
-  nodesSelection
-    .append("text")
-    .text((d) => d.label)
-    .attr("x", 32)
-    .attr("y", 6)
-    .attr("fill", "#0f172a")
-    .style("font-size", "14px")
-    .style("font-weight", "600")
-    .style("pointer-events", "none")
-    .style("text-shadow", "0 0 4px rgba(255,255,255,0.8)");
-
-  // Simulation Update Tick
-  simulation.on("tick", () => {
-    linksSelection
-      ?.attr("x1", (d) => (d.source as any).x)
-      .attr("y1", (d) => (d.source as any).y)
-      .attr("x2", (d) => (d.target as any).x)
-      .attr("y2", (d) => (d.target as any).y);
-
-    nodesSelection?.attr("transform", (d) => `translate(${d.x},${d.y})`);
-  });
-
-  // Global click to deselect
-  svgElement.on("click", () => {
-    selectedNode.value = null;
-  });
-};
-
-// --- View Controls ---
-
-const zoomIn = () => {
-  if (!svgElement || !zoomBehavior) return;
-  svgElement.transition().duration(400).call(zoomBehavior.scaleBy, 1.4);
-};
-
-const zoomOut = () => {
-  if (!svgElement || !zoomBehavior) return;
-  svgElement.transition().duration(400).call(zoomBehavior.scaleBy, 0.6);
-};
-
-const resetZoom = () => {
-  if (!svgElement || !zoomBehavior) return;
-  svgElement
-    .transition()
-    .duration(600)
-    .call(zoomBehavior.transform, d3.zoomIdentity);
-  if (simulation) {
-    simulation.alpha(0.5).restart();
-  }
-};
-
-const handleResize = () => {
-  if (simulation) {
+let resizeDebounceTimer: any;
+const handleWindowResize = () => {
+  clearTimeout(resizeDebounceTimer);
+  resizeDebounceTimer = setTimeout(() => {
     initGraph();
-  }
+  }, 300);
 };
-
-// --- Component Lifecycle ---
 
 onMounted(() => {
   loadDemoData();
-  window.addEventListener("resize", handleResize);
+  window.addEventListener("resize", handleWindowResize);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("resize", handleResize);
-  if (simulation) {
-    simulation.stop();
+  window.removeEventListener("resize", handleWindowResize);
+  if (simulation.value) {
+    simulation.value.stop();
   }
+  clearTimeout(resizeDebounceTimer);
 });
 
-// --- Computed UI State ---
+// COMPUTED PROPERTIES FOR LEGEND DYNAMICS
+const activeLegendItems = computed(() => {
+  const categories = new Set<string>();
 
-const legendItems = computed(() => {
-  if (dataSource.value === "demo") {
-    return ["Core AI", "Frameworks", "Applications", "LLMs", "Data"];
-  }
-  const uniqueLabels = new Set(
-    graphData.value.nodes.map((n) => n.labels?.[0] || "Skill"),
-  );
-  return Array.from(uniqueLabels).sort();
-});
+  graphData.value.nodes.forEach((node) => {
+    if (typeof node.group === "string" && isNaN(Number(node.group))) {
+      categories.add(node.group);
+    } else if (node.labels && node.labels.length > 0) {
+      categories.add(node.labels[0]);
+    }
+  });
 
-const activeNodesCount = computed(() => {
-  return graphData.value.nodes.filter(isNodeMatching).length;
+  return Array.from(categories).sort();
 });
 </script>
 
 <template>
   <div
-    class="flex h-full bg-slate-50 overflow-hidden relative selection:bg-primary-100"
+    class="flex h-screen w-full bg-[#f8fafc] overflow-hidden antialiased text-slate-900"
   >
-    <div class="flex-1 h-full w-full" ref="graphContainer">
+    <div class="flex-1 relative flex flex-col" ref="graphContainer">
       <svg
         ref="svgRef"
-        class="w-full h-full block bg-slate-50 transition-colors duration-500"
+        class="w-full h-full cursor-grab active:cursor-grabbing"
       ></svg>
 
-      <div
-        class="absolute top-6 left-6 bg-white/95 backdrop-blur-lg rounded-3xl shadow-2xl p-6 z-10 w-85 border border-slate-200/60 ring-1 ring-black/5"
-      >
+      <div class="absolute top-8 left-8 flex flex-col gap-6 z-20 w-[340px]">
         <div
-          class="flex items-center gap-4 mb-5 bg-slate-50 p-3 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-primary-400 focus-within:border-transparent transition-all"
+          class="bg-white/95 backdrop-blur-xl rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white p-5"
         >
-          <Search :size="20" class="text-slate-400" />
-          <input
-            v-model="searchQuery"
-            placeholder="Search knowledge graph..."
-            class="bg-transparent text-sm outline-none w-full font-bold text-slate-700 placeholder:text-slate-400"
-          />
-          <button
-            v-if="searchQuery"
-            @click="searchQuery = ''"
-            class="text-slate-300 hover:text-slate-600 transition-colors font-black text-lg"
+          <div
+            class="flex items-center gap-4 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:ring-2 focus-within:ring-sky-500/20 transition-all"
           >
-            ×
-          </button>
+            <Search :size="18" class="text-slate-400" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="Search roadmap nodes..."
+              class="bg-transparent border-none outline-none text-sm font-semibold text-slate-700 w-full placeholder:text-slate-400"
+            />
+            <button
+              v-if="searchQuery"
+              @click="searchQuery = ''"
+              class="text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <Maximize2 :size="14" class="rotate-45" />
+            </button>
+          </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3 mb-6">
+        <div
+          class="bg-white/95 backdrop-blur-xl rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white p-2 flex gap-2"
+        >
           <button
             @click="loadDemoData"
+            class="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-[11px] font-black tracking-widest transition-all"
             :class="
               dataSource === 'demo'
-                ? 'bg-primary-600 text-white shadow-lg shadow-primary-200'
-                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                ? 'bg-sky-500 text-white shadow-[0_10px_20px_rgba(14,165,233,0.3)]'
+                : 'bg-transparent text-slate-500 hover:bg-slate-50'
             "
-            class="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-[13px] font-extrabold border transition-all active:scale-95"
           >
             <FileText :size="16" />
-            Demo Data
+            DEMO DATA
           </button>
           <button
             @click="loadFromDatabase"
             :disabled="isLoading"
+            class="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-[11px] font-black tracking-widest transition-all"
             :class="
               dataSource === 'database'
-                ? 'bg-primary-600 text-white shadow-lg shadow-primary-200'
-                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                ? 'bg-violet-500 text-white shadow-[0_10px_20px_rgba(139,92,246,0.3)]'
+                : 'bg-transparent text-slate-500 hover:bg-slate-50'
             "
-            class="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-[13px] font-extrabold border transition-all active:scale-95 disabled:opacity-50"
           >
             <Loader2 v-if="isLoading" :size="16" class="animate-spin" />
             <Database v-else :size="16" />
-            Database
+            LIVE DB
           </button>
         </div>
 
-        <Transition name="fade">
-          <div
-            v-if="loadError"
-            class="p-3 mb-5 bg-red-50 text-[11px] text-red-600 rounded-xl border border-red-100 font-bold leading-tight"
-          >
+        <div
+          v-if="loadError"
+          class="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-left-4"
+        >
+          <AlertCircle :size="18" class="text-rose-500 shrink-0 mt-0.5" />
+          <p class="text-xs text-rose-700 font-bold leading-relaxed">
             {{ loadError }}
-          </div>
-        </Transition>
+          </p>
+        </div>
 
         <div
-          class="space-y-3 max-h-56 overflow-y-auto pr-2 custom-scrollbar border-t border-slate-100 pt-5"
+          v-if="graphStats && dataSource === 'database'"
+          class="bg-slate-900/90 backdrop-blur-md p-4 rounded-2xl border border-slate-800 shadow-xl flex flex-col gap-3"
+        >
+          <div class="flex items-center justify-between">
+            <span
+              class="text-[10px] text-slate-400 font-black tracking-[0.2em] uppercase"
+              >Graph Health</span
+            >
+            <Activity :size="14" class="text-emerald-400" />
+          </div>
+          <div class="flex gap-4">
+            <div class="flex flex-col">
+              <span class="text-xl font-black text-white leading-none">{{
+                graphStats.total_nodes
+              }}</span>
+              <span class="text-[9px] text-slate-500 font-bold uppercase mt-1"
+                >Nodes</span
+              >
+            </div>
+            <div class="w-px h-8 bg-slate-800"></div>
+            <div class="flex flex-col">
+              <span class="text-xl font-black text-white leading-none">{{
+                graphStats.total_relationships
+              }}</span>
+              <span class="text-[9px] text-slate-500 font-bold uppercase mt-1"
+                >Links</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="bg-white/95 backdrop-blur-xl rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white p-6"
         >
           <p
-            class="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-black mb-4"
+            class="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-black mb-5"
           >
-            Category Map
+            Knowledge Domains
           </p>
           <div
-            v-for="label in legendItems"
-            :key="label"
-            class="flex items-center gap-4 group cursor-help"
+            class="flex flex-col gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar"
           >
-            <span
-              class="w-4 h-4 rounded-full border-2 border-white shadow-sm transition-transform group-hover:scale-125"
-              :style="{
-                backgroundColor: groupColors[label] || groupColors['Skill'],
-              }"
-            ></span>
-            <span
-              class="text-[13px] text-slate-600 font-bold group-hover:text-slate-900 transition-colors"
-              >{{ label }}</span
+            <div
+              v-for="label in activeLegendItems"
+              :key="label"
+              class="flex items-center gap-4 group cursor-default"
             >
-          </div>
-        </div>
-
-        <div
-          class="mt-6 pt-5 border-t border-slate-100 flex items-center justify-between"
-        >
-          <div class="space-y-1">
-            <p
-              class="text-[10px] text-slate-400 font-bold uppercase tracking-widest"
-            >
-              Total Connectivity
-            </p>
-            <p class="text-sm font-black text-slate-800">
-              {{ graphStats?.total_nodes || graphData.nodes.length }} Nodes
-            </p>
-          </div>
-          <div v-if="searchQuery" class="text-right">
-            <p
-              class="text-[10px] text-primary-500 font-bold uppercase tracking-widest"
-            >
-              Filtered Result
-            </p>
-            <p class="text-sm font-black text-primary-600">
-              {{ activeNodesCount }} Active
-            </p>
+              <span
+                class="w-3.5 h-3.5 rounded-full shadow-sm ring-4 ring-slate-50 group-hover:scale-125 transition-transform"
+                :style="{ backgroundColor: groupColors[label] || '#94a3b8' }"
+              ></span>
+              <span
+                class="text-[12px] text-slate-600 font-bold tracking-tight"
+                >{{ label }}</span
+              >
+            </div>
+            <div v-if="activeLegendItems.length === 0" class="py-4 text-center">
+              <Info :size="16" class="mx-auto text-slate-300 mb-2" />
+              <p class="text-[11px] italic text-slate-400">
+                Determining categories...
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="absolute top-6 right-6 flex flex-col gap-4 z-10">
+      <div class="absolute top-8 right-8 flex flex-col gap-3 z-20">
         <button
-          @click="zoomIn"
-          class="p-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 hover:bg-slate-50 hover:shadow-2xl transition-all group active:scale-90"
+          @click="executeZoomIn"
+          class="p-4 bg-white rounded-2xl shadow-xl hover:bg-slate-50 transition-all border border-slate-100 text-slate-600 hover:text-sky-500"
+          title="Zoom In"
         >
-          <ZoomIn
-            :size="24"
-            class="text-slate-600 group-hover:text-primary-600"
-          />
+          <ZoomIn :size="22" />
         </button>
         <button
-          @click="zoomOut"
-          class="p-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 hover:bg-slate-50 hover:shadow-2xl transition-all group active:scale-90"
+          @click="executeZoomOut"
+          class="p-4 bg-white rounded-2xl shadow-xl hover:bg-slate-50 transition-all border border-slate-100 text-slate-600 hover:text-sky-500"
+          title="Zoom Out"
         >
-          <ZoomOut
-            :size="24"
-            class="text-slate-600 group-hover:text-primary-600"
-          />
+          <ZoomOut :size="22" />
         </button>
         <button
-          @click="resetZoom"
-          class="p-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 hover:bg-slate-50 hover:shadow-2xl transition-all group active:scale-90"
+          @click="executeRecenter"
+          class="p-4 bg-white rounded-2xl shadow-xl hover:bg-slate-50 transition-all border border-slate-100 text-slate-600 hover:text-sky-500"
+          title="Recenter Camera"
         >
-          <Maximize2
-            :size="24"
-            class="text-slate-600 group-hover:text-primary-600"
-          />
+          <Maximize2 :size="22" />
+        </button>
+        <div class="h-px w-full bg-slate-100 my-1"></div>
+        <button
+          @click="executeSimulationRestart"
+          class="p-4 bg-white rounded-2xl shadow-xl hover:bg-slate-50 transition-all border border-slate-100 text-slate-600 hover:text-emerald-500"
+          title="Reheat Simulation"
+        >
+          <Activity :size="22" />
         </button>
       </div>
-
-      <Transition name="slide-up">
-        <div
-          v-if="selectedNode"
-          class="absolute bottom-8 left-8 bg-white/98 backdrop-blur-xl p-8 rounded-[3rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.2)] max-w-md z-20 border border-slate-100 ring-1 ring-black/5 overflow-hidden"
-        >
-          <div class="flex items-center gap-5 mb-6">
-            <div
-              class="w-8 h-8 rounded-2xl shadow-inner ring-4 ring-slate-50 transition-all duration-500"
-              :style="{ backgroundColor: getNodeColor(selectedNode) }"
-            ></div>
-            <h3
-              class="font-black text-2xl text-slate-900 tracking-tight leading-none"
-            >
-              {{ selectedNode.label }}
-            </h3>
-          </div>
-
-          <div v-if="selectedNode.description" class="mb-8">
-            <p
-              class="text-base text-slate-600 italic font-semibold leading-relaxed p-4 bg-slate-50 rounded-2xl border-l-4 border-primary-500"
-            >
-              "{{ selectedNode.description }}"
-            </p>
-          </div>
-
-          <div v-if="selectedNode.labels?.length" class="mb-6">
-            <p
-              class="text-[11px] uppercase text-slate-400 font-black tracking-widest mb-3"
-            >
-              Classification Tags
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="tag in selectedNode.labels"
-                :key="tag"
-                class="text-[12px] px-3.5 py-1.5 bg-primary-50 text-primary-700 rounded-xl font-black border border-primary-100"
-              >
-                {{ tag }}
-              </span>
-            </div>
-          </div>
-
-          <div
-            v-if="
-              selectedNode.properties &&
-              Object.keys(selectedNode.properties).length
-            "
-            class="mb-8"
-          >
-            <p
-              class="text-[11px] uppercase text-slate-400 font-black tracking-widest mb-3"
-            >
-              System Metadata
-            </p>
-            <div
-              class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-3"
-            >
-              <div
-                v-for="(val, key) in selectedNode.properties"
-                :key="key"
-                class="group flex flex-col bg-slate-50/50 p-3 rounded-2xl border border-slate-100 hover:border-primary-200 transition-colors"
-              >
-                <span
-                  class="text-[10px] font-black text-slate-400 uppercase tracking-tighter mb-1"
-                  >{{ key }}</span
-                >
-                <span
-                  class="text-[13px] text-slate-700 font-bold break-all leading-tight"
-                  >{{ formatPropertyValue(val) }}</span
-                >
-              </div>
-            </div>
-          </div>
-
-          <div
-            class="pt-6 border-t border-slate-100 flex justify-between items-center"
-          >
-            <div class="flex items-center gap-2">
-              <div class="flex -space-x-2">
-                <div
-                  class="w-6 h-6 rounded-full bg-primary-100 border-2 border-white"
-                ></div>
-                <div
-                  class="w-6 h-6 rounded-full bg-primary-200 border-2 border-white"
-                ></div>
-              </div>
-              <span
-                class="text-xs text-slate-500 font-black uppercase tracking-widest"
-                >{{ getConnectionCount(selectedNode.id) }} Active
-                Connections</span
-              >
-            </div>
-            <button
-              @click="selectedNode = null"
-              class="text-xs text-white bg-slate-900 px-6 py-2.5 rounded-2xl font-black hover:bg-primary-600 transition-all shadow-lg active:scale-95"
-            >
-              DONE
-            </button>
-          </div>
-        </div>
-      </Transition>
 
       <div
-        class="absolute bottom-8 right-8 text-[11px] text-slate-500 bg-white/90 backdrop-blur-md px-6 py-3 rounded-full shadow-xl border border-slate-100 font-black tracking-[0.15em] flex items-center gap-3"
+        v-if="selectedNode"
+        class="absolute bottom-10 left-10 right-10 lg:right-auto lg:w-[480px] bg-white rounded-[32px] shadow-[0_40px_80px_rgba(0,0,0,0.15)] z-30 border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-bottom-10 duration-500"
       >
-        <span class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></span>
-        DRAG NODES · PINCH TO ZOOM · CLICK NODE FOR DETAILS
+        <div class="relative p-8">
+          <button
+            @click="selectedNode = null"
+            class="absolute top-8 right-8 p-2 text-slate-300 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all"
+          >
+            <Maximize2 :size="20" class="rotate-45" />
+          </button>
+
+          <div class="flex items-start gap-6 mb-8">
+            <div
+              class="w-16 h-16 rounded-[24px] shadow-inner ring-[6px] ring-slate-50 flex items-center justify-center shrink-0"
+              :style="{ backgroundColor: getNodeColor(selectedNode) }"
+            >
+              <Info :size="28" class="text-white/80" />
+            </div>
+            <div class="pt-1">
+              <h3
+                class="font-black text-3xl text-slate-900 tracking-tighter leading-[0.9]"
+              >
+                {{ selectedNode.label }}
+              </h3>
+              <div class="flex items-center gap-2 mt-3">
+                <span
+                  class="text-[10px] font-black uppercase tracking-widest text-slate-400"
+                  >Node Explorer</span
+                >
+                <div class="w-1 h-1 rounded-full bg-slate-300"></div>
+                <span
+                  class="text-[10px] font-black uppercase tracking-widest text-sky-500"
+                  >{{ selectedNode.id }}</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <div
+              class="bg-slate-50 p-6 rounded-[24px] border border-slate-100 relative overflow-hidden"
+            >
+              <div class="absolute top-0 left-0 w-1 h-full bg-sky-400"></div>
+              <p
+                class="text-[15px] text-slate-600 leading-relaxed font-bold italic"
+              >
+                "{{
+                  selectedNode.description ||
+                  "No detailed abstract available for this knowledge point."
+                }}"
+              </p>
+            </div>
+
+            <div
+              v-if="
+                selectedNode.properties &&
+                Object.keys(selectedNode.properties).length > 0
+              "
+            >
+              <p
+                class="text-[10px] text-slate-400 font-black uppercase mb-3 tracking-[0.2em]"
+              >
+                Atomic Properties
+              </p>
+              <div class="grid grid-cols-1 gap-2">
+                <div
+                  v-for="(val, key) in selectedNode.properties"
+                  :key="key"
+                  class="flex items-center justify-between py-3 px-5 bg-white border border-slate-100 rounded-2xl shadow-sm"
+                >
+                  <span
+                    class="text-[11px] font-black text-slate-400 uppercase tracking-wider"
+                    >{{ key }}</span
+                  >
+                  <span class="text-xs font-bold text-slate-700">{{
+                    formatPropertyValue(val)
+                  }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedNode.labels && selectedNode.labels.length > 0">
+              <p
+                class="text-[10px] text-slate-400 font-black uppercase mb-3 tracking-[0.2em]"
+              >
+                Ontology Classifiers
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="l in selectedNode.labels"
+                  :key="l"
+                  class="px-4 py-1.5 bg-slate-900 text-white text-[10px] font-black rounded-xl uppercase tracking-widest"
+                >
+                  {{ l }}
+                </span>
+              </div>
+            </div>
+
+            <div
+              class="pt-6 border-t border-slate-100 flex items-center justify-between"
+            >
+              <div class="flex items-center gap-2 text-slate-400">
+                <Activity :size="14" />
+                <span class="text-[11px] font-black uppercase tracking-widest">
+                  Topology Influence:
+                  {{ getConnectionCount(selectedNode.id) }} nodes
+                </span>
+              </div>
+              <div
+                class="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 rounded-full border border-emerald-100"
+              >
+                <div
+                  class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"
+                ></div>
+                <span class="text-[9px] font-black text-emerald-600 uppercase"
+                  >Active Node</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="absolute bottom-10 right-10 flex items-center gap-4 bg-white/80 backdrop-blur-md px-6 py-3 rounded-full border border-white/50 shadow-xl pointer-events-none"
+      >
+        <div class="flex gap-4 items-center">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-slate-300"></div>
+            <span
+              class="text-[10px] font-black text-slate-500 uppercase tracking-widest"
+              >Orbit Zoom</span
+            >
+          </div>
+          <div class="w-1 h-1 rounded-full bg-slate-200"></div>
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-slate-300"></div>
+            <span
+              class="text-[10px] font-black text-slate-500 uppercase tracking-widest"
+              >Drag Mass</span
+            >
+          </div>
+          <div class="w-1 h-1 rounded-full bg-slate-200"></div>
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-slate-300"></div>
+            <span
+              class="text-[10px] font-black text-slate-500 uppercase tracking-widest"
+              >Tap Node</span
+            >
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Scrollbar Styling */
+/**
+ * CUSTOM SCROLLBAR DYNAMICS
+ */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 10px;
+  background: #e2e8f0;
+  border-radius: 20px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #cbd5e1;
 }
 
-/* Animations */
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.slide-up-enter-from {
-  transform: translateY(100%) scale(0.9);
-  opacity: 0;
-}
-.slide-up-leave-to {
-  transform: translateY(100%) scale(0.9);
-  opacity: 0;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+/**
+ * ANIMATION DEFINITIONS
+ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-/* Base Styles */
-text {
-  pointer-events: none;
+.animate-in {
+  animation: fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Ensure SVG fills container precisely */
+svg {
   user-select: none;
-}
-circle,
-line {
-  transition: all 0.3s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Simulation Performance Class */
-.links-layer,
-.nodes-layer {
-  will-change: transform;
+/* Force text smoothing for typography-heavy panels */
+.antialiased {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 </style>
