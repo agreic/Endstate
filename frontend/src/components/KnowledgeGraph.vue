@@ -723,13 +723,30 @@ onUnmounted(() => {
 });
 
 // COMPUTED PROPERTIES FOR LEGEND DYNAMICS
+// COMPUTED PROPERTIES FOR LEGEND DYNAMICS
 const activeLegendItems = computed(() => {
   const categories = new Set<string>();
 
+  // Mapping numeric groups from demo data to their proper names
+  const groupLabelMap: Record<number, string> = {
+    1: "Core AI",
+    2: "Frameworks",
+    3: "Applications",
+    4: "LLMs",
+    5: "Data",
+  };
+
   graphData.value.nodes.forEach((node) => {
-    if (typeof node.group === "string" && isNaN(Number(node.group))) {
+    // 1. Check if the group is a numeric ID (for Demo Data)
+    if (typeof node.group === "number" && groupLabelMap[node.group]) {
+      categories.add(groupLabelMap[node.group]);
+    }
+    // 2. Check if the group is already a category name string
+    else if (typeof node.group === "string" && isNaN(Number(node.group))) {
       categories.add(node.group);
-    } else if (node.labels && node.labels.length > 0) {
+    }
+    // 3. Fallback for Database nodes using labels
+    else if (node.labels && node.labels.length > 0) {
       categories.add(node.labels[0]);
     }
   });
