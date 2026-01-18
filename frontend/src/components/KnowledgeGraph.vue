@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search } from "lucide-vue-next";
+import { ZoomIn, ZoomOut, Maximize2, Search, Database, FileText, Loader2 } from "lucide-vue-next";
+import { fetchGraphData, fetchGraphStats, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   group: number;
   label: string;
   description?: string;
+  labels?: string[];
+  properties?: Record<string, any>;
   x?: number;
   y?: number;
   fx?: number | null;
@@ -19,6 +22,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   target: string | GraphNode;
   value: number;
   label?: string;
+  type?: string;
 }
 
 interface GraphData {
@@ -32,99 +36,28 @@ const selectedNode = ref<GraphNode | null>(null);
 const searchQuery = ref("");
 const zoomLevel = ref(1);
 const hoveredNodeId = ref<string | null>(null);
+const dataSource = ref<'demo' | 'database'>('demo');
+const isLoading = ref(false);
+const loadError = ref<string | null>(null);
+const graphStats = ref<{ total_nodes: number; total_relationships: number } | null>(null);
 
-const graphData: GraphData = {
+const demoGraphData: GraphData = {
   nodes: [
-    {
-      id: "1",
-      group: 1,
-      label: "Machine Learning",
-      description: "Field of AI that enables systems to learn",
-    },
-    {
-      id: "2",
-      group: 1,
-      label: "Deep Learning",
-      description: "Subset of ML using neural networks",
-    },
-    {
-      id: "3",
-      group: 1,
-      label: "Neural Networks",
-      description: "Computing systems inspired by biological brains",
-    },
-    {
-      id: "4",
-      group: 2,
-      label: "Python",
-      description: "Programming language popular in AI",
-    },
-    {
-      id: "5",
-      group: 2,
-      label: "TensorFlow",
-      description: "Open source ML framework by Google",
-    },
-    {
-      id: "6",
-      group: 2,
-      label: "PyTorch",
-      description: "Open source ML framework by Meta",
-    },
-    {
-      id: "7",
-      group: 3,
-      label: "Computer Vision",
-      description: "Enabling computers to see and understand images",
-    },
-    {
-      id: "8",
-      group: 3,
-      label: "NLP",
-      description: "Processing human language by computers",
-    },
-    {
-      id: "9",
-      group: 3,
-      label: "Speech Recognition",
-      description: "Converting spoken words to text",
-    },
-    {
-      id: "10",
-      group: 4,
-      label: "GPT",
-      description: "Generative Pre-trained Transformer models",
-    },
-    {
-      id: "11",
-      group: 4,
-      label: "BERT",
-      description: "Bidirectional Encoder Representations",
-    },
-    {
-      id: "12",
-      group: 4,
-      label: "Transformer",
-      description: "Architecture using attention mechanism",
-    },
-    {
-      id: "13",
-      group: 1,
-      label: "Reinforcement Learning",
-      description: "Learning through rewards and punishments",
-    },
-    {
-      id: "14",
-      group: 5,
-      label: "Data Science",
-      description: "Extracting insights from data",
-    },
-    {
-      id: "15",
-      group: 5,
-      label: "Analytics",
-      description: "Analyzing data for decisions",
-    },
+    { id: "1", group: 1, label: "Machine Learning", description: "Field of AI that enables systems to learn" },
+    { id: "2", group: 1, label: "Deep Learning", description: "Subset of ML using neural networks" },
+    { id: "3", group: 1, label: "Neural Networks", description: "Computing systems inspired by biological brains" },
+    { id: "4", group: 2, label: "Python", description: "Programming language popular in AI" },
+    { id: "5", group: 2, label: "TensorFlow", description: "Open source ML framework by Google" },
+    { id: "6", group: 2, label: "PyTorch", description: "Open source ML framework by Meta" },
+    { id: "7", group: 3, label: "Computer Vision", description: "Enabling computers to see and understand images" },
+    { id: "8", group: 3, label: "NLP", description: "Processing human language by computers" },
+    { id: "9", group: 3, label: "Speech Recognition", description: "Converting spoken words to text" },
+    { id: "10", group: 4, label: "GPT", description: "Generative Pre-trained Transformer models" },
+    { id: "11", group: 4, label: "BERT", description: "Bidirectional Encoder Representations" },
+    { id: "12", group: 4, label: "Transformer", description: "Architecture using attention mechanism" },
+    { id: "13", group: 1, label: "Reinforcement Learning", description: "Learning through rewards and punishments" },
+    { id: "14", group: 5, label: "Data Science", description: "Extracting insights from data" },
+    { id: "15", group: 5, label: "Analytics", description: "Analyzing data for decisions" },
   ],
   links: [
     { source: "1", target: "2", value: 3, label: "includes" },
@@ -147,7 +80,9 @@ const graphData: GraphData = {
   ],
 };
 
-const groupColors: Record<number, string> = {
+const graphData = ref<GraphData>({ nodes: [], links: [] });
+
+const demoGroupColors: Record<number, string> = {
   1: "#0ea5e9",
   2: "#8b5cf6",
   3: "#10b981",
@@ -155,24 +90,119 @@ const groupColors: Record<number, string> = {
   5: "#ef4444",
 };
 
+const dbGroupColors: Record<string, string> = {
+  'Skill': "#0ea5e9",
+  'Concept': "#8b5cf6",
+  'Topic': "#10b981",
+  'Project': "#f59e0b",
+  'Resource': "#ef4444",
+  'Tool': "#ec4899",
+  'Person': "#6366f1",
+  'Domain': "#14b8a6",
+  'Assessment': "#f97316",
+  'Milestone': "#84cc16",
+};
+
+const getNodeColor = (node: GraphNode): string => {
+  if (dataSource.value === 'demo') {
+    return demoGroupColors[node.group] || demoGroupColors[1];
+  }
+  return dbGroupColors[node.labels?.[0] || 'Skill'] || dbGroupColors['Skill'];
+};
+
+const getUniqueLabels = (): string[] => {
+  if (dataSource.value === 'demo') {
+    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
+  }
+  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
+  return Array.from(labels).sort();
+};
+
+const getLabelDisplayName = (label: string): string => {
+  if (dataSource.value === 'demo') {
+    return label;
+  }
+  return label;
+};
+
+const getColorForLegendItem = (index: number, label: string): string => {
+  if (dataSource.value === 'demo') {
+    return demoGroupColors[index + 1] || demoGroupColors[1];
+  }
+  return dbGroupColors[label] || dbGroupColors['Skill'];
+};
+
 let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
-let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null =
-  null;
+let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
 let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
-let nodesSelection: d3.Selection<
-  d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>,
-  GraphNode,
-  d3.EnterElement,
-  unknown
-> | null = null;
-let linksSelection: d3.Selection<
-  | d3.EnterElement
-  | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>,
-  GraphLink,
-  d3.EnterElement,
-  unknown
-> | null = null;
+let nodesSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>, GraphNode, d3.EnterElement, unknown> | null = null;
+let linksSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>, GraphLink, d3.EnterElement, unknown> | null = null;
+
+const formatPropertyValue = (value: any): string => {
+  if (typeof value === 'object' && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+};
+
+const loadFromDatabase = async () => {
+  isLoading.value = true;
+  loadError.value = null;
+  
+  try {
+    const data = await fetchGraphData();
+    
+    if (data.total_nodes === 0) {
+      loadError.value = "No data found in database. Add some content first!";
+      isLoading.value = false;
+      return;
+    }
+    
+    graphStats.value = {
+      total_nodes: data.total_nodes,
+      total_relationships: data.total_relationships,
+    };
+    
+    graphData.value.nodes = data.nodes.map((item: ApiNode) => {
+      const nodeData = item.node;
+      return {
+        id: nodeData.id || String(Math.random()),
+        group: 1,
+        label: nodeData.name || nodeData.labels?.[0] || 'Unknown',
+        description: nodeData.description,
+        labels: nodeData.labels,
+        properties: nodeData,
+      };
+    });
+    
+    graphData.value.links = data.relationships.map((rel: ApiRelationship) => ({
+      source: rel.source,
+      target: rel.target,
+      value: 1,
+      type: rel.type,
+      label: rel.type,
+    }));
+    
+    setTimeout(() => {
+      initGraph();
+      isLoading.value = false;
+    }, 100);
+    
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
+    isLoading.value = false;
+  }
+};
+
+const loadDemoData = () => {
+  dataSource.value = 'demo';
+  graphData.value = { nodes: [...demoGraphData.nodes], links: [...demoGraphData.links] };
+  graphStats.value = null;
+  setTimeout(() => {
+    initGraph();
+  }, 50);
+};
 
 const isNodeMatching = (node: GraphNode): boolean => {
   if (!searchQuery.value) return true;
@@ -180,7 +210,8 @@ const isNodeMatching = (node: GraphNode): boolean => {
   return (
     node.label.toLowerCase().includes(query) ||
     node.description?.toLowerCase().includes(query) ||
-    node.id === query
+    node.id === query ||
+    (node.labels && node.labels.some(l => l.toLowerCase().includes(query)))
   );
 };
 
@@ -188,6 +219,7 @@ const isLinkMatching = (link: GraphLink): boolean => {
   if (!searchQuery.value) return true;
   const sourceNode = link.source as GraphNode;
   const targetNode = link.target as GraphNode;
+  if (!sourceNode || !targetNode) return false;
   return isNodeMatching(sourceNode) && isNodeMatching(targetNode);
 };
 
@@ -200,7 +232,7 @@ const updateNodeStyles = () => {
       const node = d as GraphNode;
       const isMatch = isNodeMatching(node);
       const isHovered = hoveredNodeId.value === node.id;
-      const baseColor = groupColors[node.group];
+      const baseColor = getNodeColor(node);
 
       if (!isMatch) {
         return "#d4d4d8";
@@ -282,16 +314,18 @@ const initGraph = () => {
   svgElement.call(zoomBehavior);
   svgElement.on("dblclick.zoom", null);
 
-  const nodes: GraphNode[] = graphData.nodes.map((d) => ({
+  const nodes: GraphNode[] = graphData.value.nodes.map((d) => ({
     ...d,
     fx: null,
     fy: null,
   }));
-  const links: GraphLink[] = graphData.links.map((d) => ({ ...d }));
+  const links: GraphLink[] = graphData.value.links.map((d) => ({ ...d }));
 
   for (const link of links) {
-    link.source = nodes.find((n) => n.id === link.source) || link.source;
-    link.target = nodes.find((n) => n.id === link.target) || link.target;
+    const sourceNode = nodes.find((n) => n.id === link.source || (link.source as GraphNode)?.id === link.source);
+    const targetNode = nodes.find((n) => n.id === link.target || (link.target as GraphNode)?.id === link.target);
+    if (sourceNode) link.source = sourceNode;
+    if (targetNode) link.target = targetNode;
   }
 
   simulation = d3
@@ -341,7 +375,7 @@ const initGraph = () => {
   nodesSelection
     .append("circle")
     .attr("r", 20)
-    .attr("fill", (d) => groupColors[d.group])
+    .attr("fill", (d) => getNodeColor(d))
     .attr("stroke", "#fff")
     .attr("stroke-width", 2)
     .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.1))");
@@ -436,9 +470,7 @@ const handleResize = () => {
 };
 
 onMounted(() => {
-  setTimeout(() => {
-    initGraph();
-  }, 50);
+  loadDemoData();
   window.addEventListener("resize", handleResize);
 });
 
@@ -449,11 +481,9 @@ onUnmounted(() => {
 });
 
 const getConnectionCount = (nodeId: string): number => {
-  return graphData.links.filter((l) => {
-    const sourceId =
-      typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
-    const targetId =
-      typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
+  return graphData.value.links.filter((l) => {
+    const sourceId = typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
+    const targetId = typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
     return sourceId === nodeId || targetId === nodeId;
   }).length;
 };
@@ -461,6 +491,24 @@ const getConnectionCount = (nodeId: string): number => {
 const clearSearch = () => {
   searchQuery.value = "";
 };
+
+const totalNodes = computed(() => {
+  if (graphStats.value) return graphStats.value.total_nodes;
+  return graphData.value.nodes.length;
+});
+
+const totalRelationships = computed(() => {
+  if (graphStats.value) return graphStats.value.total_relationships;
+  return graphData.value.links.length;
+});
+
+const legendItems = computed(() => {
+  if (dataSource.value === 'demo') {
+    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
+  }
+  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
+  return Array.from(labels).sort();
+});
 </script>
 
 <template>
@@ -469,14 +517,13 @@ const clearSearch = () => {
       <svg ref="svgRef" class="w-full h-full" style="display: block"></svg>
 
       <div class="absolute top-4 left-4 bg-white rounded-xl shadow-lg p-3 z-10">
-        <div class="flex items-center gap-2 mb-2">
+        <div class="flex items-center gap-2 mb-3">
           <Search :size="16" class="text-surface-400" />
           <input
             v-model="searchQuery"
             type="text"
             placeholder="Search nodes..."
             class="text-sm border-none outline-none bg-transparent w-40"
-            @input="() => {}"
           />
           <button
             v-if="searchQuery"
@@ -486,28 +533,60 @@ const clearSearch = () => {
             ×
           </button>
         </div>
+        
+        <div class="flex items-center gap-2 mb-3">
+          <button
+            @click="loadDemoData"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            :class="dataSource === 'demo' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600 hover:bg-surface-200'"
+          >
+            <FileText :size="14" />
+            Demo
+          </button>
+          <button
+            @click="loadFromDatabase"
+            :disabled="isLoading"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            :class="dataSource === 'database' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600 hover:bg-surface-200'"
+          >
+            <template v-if="isLoading">
+              <Loader2 :size="14" class="animate-spin" />
+              Loading...
+            </template>
+            <template v-else>
+              <Database :size="14" />
+              Database
+            </template>
+          </button>
+        </div>
+        
+        <div v-if="loadError" class="text-xs text-red-500 mb-2">
+          {{ loadError }}
+        </div>
+        
         <div class="space-y-1">
           <div
-            v-for="(name, group) in [
-              'Core AI',
-              'Frameworks',
-              'Applications',
-              'LLMs',
-              'Data',
-            ]"
-            :key="group"
+            v-for="(label, index) in legendItems"
+            :key="label"
             class="flex items-center gap-2"
           >
             <span
               class="w-3 h-3 rounded-full"
-              :style="{ backgroundColor: groupColors[group + 1] }"
+              :style="{ backgroundColor: getColorForLegendItem(index, label) }"
             ></span>
-            <span class="text-xs text-surface-600">{{ name }}</span>
+            <span class="text-xs text-surface-600">{{ getLabelDisplayName(label) }}</span>
           </div>
         </div>
+        
+        <div v-if="dataSource === 'database' && graphStats" class="mt-3 pt-3 border-t border-surface-100">
+          <p class="text-xs text-surface-400">
+            {{ totalNodes }} nodes, {{ totalRelationships }} relationships
+          </p>
+        </div>
+        
         <p v-if="searchQuery" class="text-xs text-surface-400 mt-2">
           {{ graphData.nodes.filter(isNodeMatching).length }} of
-          {{ graphData.nodes.length }} nodes match
+          {{ totalNodes }} nodes match
         </p>
       </div>
 
@@ -542,13 +621,37 @@ const clearSearch = () => {
         <div class="flex items-center gap-3 mb-2">
           <span
             class="w-4 h-4 rounded-full"
-            :style="{ backgroundColor: groupColors[selectedNode.group] }"
+            :style="{ backgroundColor: getNodeColor(selectedNode) }"
           ></span>
-          <h3 class="font-semibold text-surface-800">
-            {{ selectedNode.label }}
-          </h3>
+          <h3 class="font-semibold text-surface-800">{{ selectedNode.label }}</h3>
         </div>
-        <p class="text-sm text-surface-600">{{ selectedNode.description }}</p>
+        
+        <p v-if="selectedNode.description" class="text-sm text-surface-600 mb-3">
+          {{ selectedNode.description }}
+        </p>
+        
+        <div v-if="selectedNode.labels?.length" class="mb-3">
+          <p class="text-xs text-surface-400 uppercase mb-1">Type</p>
+          <div class="flex gap-1">
+            <span
+              v-for="label in selectedNode.labels"
+              :key="label"
+              class="text-xs px-2 py-0.5 bg-surface-100 text-surface-600 rounded-full"
+            >
+              {{ label }}
+            </span>
+          </div>
+        </div>
+        
+        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
+          <p class="text-xs text-surface-400 uppercase mb-1">Properties</p>
+          <div class="space-y-1 text-sm">
+            <p v-for="(value, key) in selectedNode.properties" :key="key" class="text-surface-600">
+              <span class="font-medium text-surface-500">{{ key }}:</span> {{ formatPropertyValue(value) }}
+            </p>
+          </div>
+        </div>
+        
         <div class="mt-3 pt-3 border-t border-surface-100">
           <span class="text-xs text-surface-400">
             Connected to {{ getConnectionCount(selectedNode.id) }} nodes
@@ -559,7 +662,7 @@ const clearSearch = () => {
       <div
         class="absolute bottom-4 right-4 text-xs text-surface-400 bg-white/80 px-3 py-1 rounded-full"
       >
-        Drag nodes to reposition • Scroll to zoom • Click for details
+        Drag nodes to reposition · Scroll to zoom · Click for details
       </div>
     </div>
   </div>
