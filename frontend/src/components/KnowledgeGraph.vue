@@ -44,14 +44,24 @@ const hoveredNodeId = ref<string | null>(null);
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
 const groupColors: Record<string | number, string> = {
-  1: "#0ea5e9", // Core AI
-  2: "#8b5cf6", // Frameworks
-  3: "#10b981", // Applications
-  4: "#f59e0b", // LLMs
-  5: "#ef4444", // Data
-  "Cooking Basics": "#f59e0b",
-  Techniques: "#10b981",
-  "Frontend Core": "#8b5cf6",
+  // Original ML categories (keeping these consistent)
+  "Core AI": "#0ea5e9", // Sky Blue
+  Frameworks: "#8b5cf6", // Violet
+  Applications: "#10b981", // Emerald
+  LLMs: "#f59e0b", // Amber
+  Data: "#ef4444", // Red
+
+  // Numeric fallbacks for initial nodes
+  1: "#0ea5e9",
+  2: "#8b5cf6",
+  3: "#10b981",
+  4: "#f59e0b",
+  5: "#ef4444",
+
+  // --- NEW UNIQUE COLORS FOR NEW CATEGORIES ---
+  "Cooking Basics": "#f472b6", // Pink
+  Techniques: "#fb7185", // Rose/Coral
+  "Frontend Core": "#2dd4bf", // Teal
 };
 
 // --- OG GRAPH DATA: Restored word-for-word ---
@@ -379,18 +389,16 @@ onUnmounted(() => {
           >
             Skill Categories
           </p>
-          <div
-            v-for="(color, label) in groupColors"
-            :key="label"
-            class="flex items-center gap-3"
-          >
-            <span
-              class="w-3 h-3 rounded-full shadow-sm"
-              :style="{ backgroundColor: color }"
-            ></span>
-            <span class="text-xs text-slate-600 font-semibold">{{
-              label
-            }}</span>
+          <div v-for="(color, label) in groupColors" :key="label">
+            <div v-if="isNaN(Number(label))" class="flex items-center gap-3">
+              <span
+                class="w-3 h-3 rounded-full shadow-sm"
+                :style="{ backgroundColor: color }"
+              ></span>
+              <span class="text-xs text-slate-600 font-semibold">{{
+                label
+              }}</span>
+            </div>
           </div>
         </div>
       </div>
