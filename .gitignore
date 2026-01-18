@@ -214,3 +214,6 @@ frontend/.vite/                  # Vite cache
 
 # Dependencies
 node_modules/                    # All node_modules (regenerate with npm install)
+
+# Notebooks used for testing
+notebooks/*
