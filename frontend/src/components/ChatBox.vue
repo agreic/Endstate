@@ -50,12 +50,21 @@ const loadChatHistory = async () => {
   try {
     const response = await getChatHistory(sessionId.value);
     if (response.messages && response.messages.length > 0) {
-      messages.value = response.messages.map((msg: any, index: number) => ({
-        id: index,
-        role: msg.role as "user" | "assistant",
-        content: msg.content,
-        timestamp: new Date(msg.timestamp),
-      }));
+      messages.value = response.messages.map((msg: any, index: number) => {
+        let timestamp = new Date();
+        if (msg.timestamp) {
+          const parsed = new Date(msg.timestamp);
+          if (!isNaN(parsed.getTime())) {
+            timestamp = parsed;
+          }
+        }
+        return {
+          id: index,
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+          timestamp,
+        };
+      });
       if (messages.value.length > 0) {
         await scrollToBottom();
         return;
@@ -116,6 +125,9 @@ const sendMessage = async () => {
 };
 
 const formatTime = (date: Date) => {
+  if (!date || isNaN(date.getTime())) {
+    return "";
+  }
   return date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
