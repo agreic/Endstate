@@ -105,63 +105,38 @@ const sendMessage = async () => {
   if (!inputMessage.value.trim() || isLoading.value || isProcessing.value) return;
 
   const userText = inputMessage.value.trim();
-
-  addMessage({
-    id: Date.now(),
-    role: "user",
-    content: userText,
-    timestamp: new Date(),
-  });
-
   inputMessage.value = "";
   setPending(userText);
-  await scrollToBottom();
-
+  
   cancelPendingRequest();
   abortController.value = new AbortController();
   setLoading(true);
   
   try {
     const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value, abortController.value.signal);
-
+    
     if (response.is_processing) {
       isProcessing.value = true;
-      addMessage({
-        id: Date.now(),
-        role: "assistant",
-        content: response.content,
-        timestamp: new Date(),
-      });
+      setLoading(false);
+      abortController.value = null;
+      await loadState(sessionId.value);
+      await scrollToBottom();
       pollForProcessingComplete();
     } else {
-      addMessage({
-        id: Date.now(),
-        role: "assistant",
-        content: response.content,
-        timestamp: new Date(),
-        sources: response.sources as Source[],
-      });
+      clearPending();
+      await loadState(sessionId.value);
+      await scrollToBottom();
     }
   } catch (error: any) {
-    setLoading(false);
     if (error.name === 'AbortError') {
       console.log('Request was cancelled');
+      clearPending();
       return;
     }
     console.error(error);
-    addMessage({
-      id: Date.now(),
-      role: "assistant",
-      content: "I'm having trouble connecting to the server right now. Please try again later.",
-      timestamp: new Date(),
-    });
   } finally {
-    if (!isProcessing.value) {
-      setLoading(false);
-      abortController.value = null;
-      clearPending();
-    }
-    await scrollToBottom();
+    abortController.value = null;
+    setLoading(false);
   }
 };
 
@@ -178,8 +153,8 @@ const pollForProcessingComplete = async () => {
       const result = await checkSessionLocked(sessionId.value);
       if (!result.locked) {
         isProcessing.value = false;
-        setLoading(false);
         abortController.value = null;
+        setLoading(false);
         clearPending();
         await loadState(sessionId.value);
         await scrollToBottom();
