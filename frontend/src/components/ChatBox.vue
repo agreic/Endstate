@@ -204,6 +204,16 @@ onMounted(async () => {
       abortController.value = null;
       setLoading(false);
     }
+  } else if (!isProcessing.value && !isLoading.value) {
+    try {
+      const lockStatus = await checkSessionLocked(sessionId.value);
+      if (lockStatus.locked && messages.value.length > 0) {
+        isProcessing.value = true;
+        pollForProcessingComplete();
+      }
+    } catch (e) {
+      console.error('Failed to check lock status:', e);
+    }
   }
 });
 
