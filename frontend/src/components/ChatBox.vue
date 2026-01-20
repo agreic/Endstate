@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUpdated } from "vue";
+import { ref, nextTick, onMounted, watch } from "vue";
 import { Send, Bot, User, Globe, ExternalLink, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
 import { sendChatMessage as apiSendChatMessage, resetChatSession, checkSessionLocked } from "../services/api";
@@ -198,49 +198,34 @@ const pollForProcessingComplete = async () => {
   }
 };
 
-const checkPendingResponse = async () => {
+onMounted(async () => {
+  await loadState(sessionId.value);
+  await scrollToBottom();
+  
   if (pendingMessage.value && !isLoading.value) {
     cancelPendingRequest();
     abortController.value = new AbortController();
     setLoading(true);
     
     try {
-      const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value, abortController.value.signal);
-      addMessage({
-        id: Date.now(),
-        role: "assistant",
-        content: response.content,
-        timestamp: new Date(),
-        sources: response.sources as Source[],
-      });
+      await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value, abortController.value.signal);
+      clearPending();
+      await loadState(sessionId.value);
+      await scrollToBottom();
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('Request was cancelled');
-        return;
+      if (error.name !== 'AbortError') {
+        console.error(error);
       }
-      console.error(error);
-      addMessage({
-        id: Date.now(),
-        role: "assistant",
-        content: "I'm having trouble connecting to the server right now. Please try again later.",
-        timestamp: new Date(),
-      });
     } finally {
       abortController.value = null;
-      clearPending();
-      await scrollToBottom();
+      setLoading(false);
     }
   }
-};
-
-onMounted(async () => {
-  await loadState(sessionId.value);
-  checkPendingResponse();
 });
 
-onUpdated(() => {
+watch(messages.value, () => {
   scrollToBottom();
-});
+}, { deep: true });
 </script>
 
 <template>
