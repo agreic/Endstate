@@ -145,7 +145,26 @@ class ChatService:
             """,
             {"session_id": session_id}
         )
-        return result
+        
+        # Convert Neo4j DateTime to ISO string and handle missing request_id
+        messages = []
+        for msg in result:
+            msg_copy = {
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "timestamp": None,
+                "request_id": msg.get("request_id"),
+            }
+            timestamp = msg.get("timestamp")
+            if timestamp:
+                try:
+                    # Neo4j DateTime to ISO string
+                    msg_copy["timestamp"] = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                except Exception:
+                    msg_copy["timestamp"] = None
+            messages.append(msg_copy)
+        
+        return messages
     
     def set_locked(self, session_id: str, locked: bool) -> None:
         """Set the processing lock state."""
@@ -265,7 +284,7 @@ class ChatService:
             print(f"Error extracting summary for session {session_id}: {e}")
         finally:
             self.set_locked(session_id, False)
-            BackgroundTaskStore.notify(session_id, "processing_complete", {})
+            await BackgroundTaskStore.notify(session_id, "processing_complete", {})
             if session_id in BackgroundTaskStore._tasks:
                 del BackgroundTaskStore._tasks[session_id]
     
