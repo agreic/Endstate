@@ -2,7 +2,18 @@
 import { ref, nextTick, onMounted } from "vue";
 import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next";
 import { marked } from "marked";
-import { sendChatMessage, type ChatMessage } from "../services/api";
+import { getChatHistory, sendChatMessage as apiSendChatMessage, type ChatMessage } from "../services/api";
+
+const SESSION_ID_KEY = 'endstate_chat_session_id';
+
+const getSessionId = (): string => {
+  let sessionId = localStorage.getItem(SESSION_ID_KEY);
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+  }
+  return sessionId;
+};
 
 const renderMarkdown = (content: string) => {
   return marked.parse(content);
@@ -21,25 +32,47 @@ interface Message {
   sources?: Source[];
 }
 
-const messages = ref<Message[]>([
-  {
-    id: 1,
-    role: "assistant",
-    content: "Hello! I'm Endstate AI. What would you like to learn today?",
-    timestamp: new Date(),
-  },
-]);
-
+const messages = ref<Message[]>([]);
 const inputMessage = ref("");
 const isLoading = ref(false);
 const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
+const sessionId = ref(getSessionId());
 
 const scrollToBottom = async () => {
   await nextTick();
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
   }
+};
+
+const loadChatHistory = async () => {
+  try {
+    const response = await getChatHistory(sessionId.value);
+    if (response.messages && response.messages.length > 0) {
+      messages.value = response.messages.map((msg: any, index: number) => ({
+        id: index,
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+      }));
+      if (messages.value.length > 0) {
+        await scrollToBottom();
+        return;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to load chat history:", error);
+  }
+  
+  messages.value = [
+    {
+      id: 0,
+      role: "assistant",
+      content: "Hello! I'm Endstate AI. What would you like to learn today?",
+      timestamp: new Date(),
+    },
+  ];
 };
 
 const sendMessage = async () => {
@@ -54,17 +87,12 @@ const sendMessage = async () => {
     timestamp: new Date(),
   });
 
-  const history: ChatMessage[] = messages.value.map(msg => ({
-    role: msg.role,
-    content: msg.content,
-  }));
-
   inputMessage.value = "";
   isLoading.value = true;
   await scrollToBottom();
 
   try {
-    const response = await sendChatMessage(userText, history, isSearchEnabled.value);
+    const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value);
 
     messages.value.push({
       id: Date.now(),
@@ -94,7 +122,9 @@ const formatTime = (date: Date) => {
   });
 };
 
-onMounted(() => scrollToBottom());
+onMounted(() => {
+  loadChatHistory();
+});
 </script>
 
 <template>
@@ -238,7 +268,7 @@ onMounted(() => scrollToBottom());
           </div>
         </div>
         <p class="text-center text-[10px] text-surface-400 mt-2">
-          Endstate AI processes requests through the backend server.
+          Endstate AI processes requests through the backend server. Chat history is saved.
         </p>
       </div>
     </div>

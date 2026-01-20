@@ -32,7 +32,7 @@ export interface GraphStats {
 }
 
 export interface ChatMessage {
-  role: "user" | "assistant";
+  role: string;
   content: string;
 }
 
@@ -49,6 +49,14 @@ export interface DashboardStats {
   total_relationships: number;
   conversations?: number;
   insights?: number;
+}
+
+export interface ChatHistoryResponse {
+  messages: Array<{
+    role: string;
+    content: string;
+    timestamp: string;
+  }>;
 }
 
 export async function fetchGraphData(): Promise<GraphData> {
@@ -83,15 +91,30 @@ export async function fetchHealth(): Promise<{ database: boolean; llm: boolean; 
   return response.json();
 }
 
-export async function sendChatMessage(message: string, history: ChatMessage[], enableSearch: boolean = false): Promise<ChatResponse> {
-  const response = await fetch(`${API_URL}/api/chat`, {
+export async function getChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
+  const response = await fetch(`${API_URL}/api/chat/${sessionId}/messages`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function sendChatMessage(
+  message: string,
+  enableSearch: boolean = false,
+  sessionId?: string
+): Promise<ChatResponse> {
+  const endpoint = sessionId 
+    ? `${API_URL}/api/chat/${sessionId}/messages`
+    : `${API_URL}/api/chat`;
+  
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       message,
-      history,
       enable_web_search: enableSearch,
     }),
   });

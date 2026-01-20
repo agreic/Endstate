@@ -328,3 +328,53 @@ class Neo4jClient:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    def create_chat_session(self, session_id: str) -> None:
+        """Create a new chat session node."""
+        self.query(
+            "MERGE (s:ChatSession {id: $session_id}) SET s.created_at = datetime()",
+            {"session_id": session_id}
+        )
+
+    def add_chat_message(self, session_id: str, role: str, content: str) -> None:
+        """Add a message to a chat session."""
+        self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            CREATE (m:ChatMessage {role: $role, content: $content, timestamp: datetime()})
+            CREATE (s)-[:HAS_MESSAGE]->(m)
+            """,
+            {"session_id": session_id, "role": role, "content": content}
+        )
+
+    def get_chat_history(self, session_id: str) -> list[dict]:
+        """Get chat history for a session."""
+        result = self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})-[:HAS_MESSAGE]->(m:ChatMessage)
+            RETURN m.role as role, m.content as content, m.timestamp as timestamp
+            ORDER BY m.timestamp
+            """,
+            {"session_id": session_id}
+        )
+        return result
+
+    def get_all_sessions(self) -> list[dict]:
+        """Get all chat sessions."""
+        result = self.query(
+            """
+            MATCH (s:ChatSession)
+            OPTIONAL MATCH (s)-[:HAS_MESSAGE]->(m:ChatMessage)
+            WITH s, count(m) as message_count
+            RETURN s.id as id, s.created_at as created_at, message_count
+            ORDER BY s.created_at DESC
+            """
+        )
+        return result
+
+    def delete_chat_session(self, session_id: str) -> None:
+        """Delete a chat session and all its messages."""
+        self.query(
+            "MATCH (s:ChatSession {id: $session_id}) DETACH DELETE s",
+            {"session_id": session_id}
+        )

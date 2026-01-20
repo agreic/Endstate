@@ -280,6 +280,93 @@ def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/chat/{session_id}/messages")
+def send_chat_message(session_id: str, request: ChatRequest):
+    """
+    Send a message in a persistent chat session.
+    
+    Args:
+        session_id: Chat session identifier
+        request: Chat request with message and web search option
+        
+    Returns:
+        Chat response with content and optional sources
+    """
+    service = get_service()
+    try:
+        service.db.create_chat_session(session_id)
+        
+        service.db.add_chat_message(session_id, "user", request.message)
+        
+        llm = get_llm()
+        
+        history = service.db.get_chat_history(session_id)
+        messages = []
+        for msg in history:
+            messages.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
+        
+        response = llm.invoke(messages)
+        content = response.content if hasattr(response, 'content') else str(response)
+        
+        service.db.add_chat_message(session_id, "assistant", str(content))
+        
+        return {
+            "content": content,
+            "sources": None,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.get("/api/chat/{session_id}/messages")
+def get_chat_history(session_id: str):
+    """
+    Get chat history for a session.
+    
+    Args:
+        session_id: Chat session identifier
+        
+    Returns:
+        List of chat messages
+    """
+    service = get_service()
+    try:
+        history = service.db.get_chat_history(session_id)
+        return {"messages": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.get("/api/chat")
+def list_chat_sessions():
+    """List all chat sessions."""
+    service = get_service()
+    try:
+        sessions = service.db.get_all_sessions()
+        return {"sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.delete("/api/chat/{session_id}")
+def delete_chat_session(session_id: str):
+    """Delete a chat session."""
+    service = get_service()
+    try:
+        service.db.delete_chat_session(session_id)
+        return {"message": "Session deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
 def main():
     """Run the API server."""
     import uvicorn
