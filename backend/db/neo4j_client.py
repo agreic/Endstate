@@ -389,7 +389,7 @@ class Neo4jClient:
     def is_session_locked(self, session_id: str) -> bool:
         """Check if a chat session is locked (processing)."""
         result = self.query(
-            "MATCH (s:ChatSession {id: $session_id}) RETURN s.is_processing as locked",
+            "MATCH (s:ChatSession {id: $session_id}) RETURN COALESCE(s.is_processing, false) as locked",
             {"session_id": session_id}
         )
         return result[0].get("locked", False) if result else False
