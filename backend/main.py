@@ -294,12 +294,6 @@ def send_chat_message(session_id: str, request: ChatRequest):
         Chat response with content and optional sources
     """
     from backend.services.summary_cache import summary_cache
-    from backend.services.summary_extractor import (
-        extract_summary,
-        should_propose_projects,
-        generate_project_proposals,
-        should_ask_question,
-    )
     
     service = get_service()
     try:
@@ -313,42 +307,24 @@ def send_chat_message(session_id: str, request: ChatRequest):
         for msg in history:
             messages.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
         
-        # Get the user's latest message
-        user_messages = [m for m in history if m["role"] == "user"]
-        recent_messages = [{"role": m["role"], "content": m["content"]} for m in history[-10:]]
-        
         response_text = ""
         summary_saved = False
         
-        # Check if we should extract a summary (after user's agreement)
-        if "yes" in request.message.lower() or "agree" in request.message.lower() or "that sounds good" in request.message.lower():
-            has_summary, summary_data, _ = extract_summary(recent_messages)
+        user_message_lower = request.message.lower()
+        
+        if any(x in user_message_lower for x in ["yes", "agree", "that sounds good", "sure", "let's do it"]):
+            has_summary, summary_data, _ = extract_summary_simple(history)
             if has_summary and summary_data:
-                # Save the summary
                 if summary_cache.save(session_id, summary_data):
-                    response_text = f"Wonderful! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**\n\nThis summary is now stored and you can view it in the Projects tab. Would you like to start working on this, or do you have questions?"
+                    response_text = f"Wonderful! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**. View it in the Projects tab."
                     service.db.add_chat_message(session_id, "assistant", response_text)
                     summary_saved = True
                 else:
                     response_text = "I had trouble saving the summary. Let me try again."
         
         if not summary_saved:
-            # Check if we should propose projects
-            if should_propose_projects(recent_messages):
-                proposals = generate_project_proposals(recent_messages)
-                response_text = f"Based on what you've shared, here are some project ideas:\n\n{proposals}\n\nDoes any of these appeal to you? Or would you like me to suggest different approaches?"
-            elif len(user_messages) >= 3:
-                # After a few exchanges, ask if ready to define a project
-                should_ask, question = should_ask_question(recent_messages)
-                if should_ask:
-                    response_text = question
-                else:
-                    # Enough info - prompt to formalize
-                    response_text = "We've discussed quite a bit! Would you like to formalize this into a project plan? If so, say 'yes' and I'll create a structured summary of what we've discussed."
-            else:
-                # Regular chat - just continue the conversation
-                response = llm.invoke(messages)
-                response_text = response.content if hasattr(response, 'content') else str(response)
+            response = llm.invoke(messages)
+            response_text = response.content if hasattr(response, 'content') else str(response)
         
         service.db.add_chat_message(session_id, "assistant", str(response_text))
         
@@ -361,6 +337,59 @@ def send_chat_message(session_id: str, request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         service.close()
+
+
+def extract_summary_simple(history: list[dict]) -> tuple[bool, dict | None, str]:
+    """
+    Simple summary extraction that only triggers when user agrees.
+    """
+    from backend.llm.provider import get_llm
+    
+    user_msgs = [m for m in history if m["role"] == "user"]
+    if len(user_msgs) < 3:
+        return False, None, "Not enough conversation history"
+    
+    prompt = """You are a learning project planner. Based on the conversation, extract a project summary ONLY if:
+1. The user has agreed to a specific project
+2. At least 2 skills or topics are mentioned
+
+If both conditions are met, output JSON:
+{"user_profile": {"interests": [], "skill_level": "", "time_available": "", "learning_style": ""}, "agreed_project": {"name": "", "description": "", "timeline": "", "milestones": []}, "topics": [], "skills": [], "concepts": []}
+
+If not ready, output: NOT_READY
+
+Conversation:
+"""
+    
+    for msg in history[-8:]:
+        prompt += f"{msg['role']}: {msg['content']}\n"
+    
+    prompt += "\nOutput:"
+    
+    try:
+        llm = get_llm()
+        response = llm.invoke([("human", prompt)])
+        content = response.content if hasattr(response, 'content') else str(response)
+        
+        if "NOT_READY" in content.upper():
+            return False, None, content
+        
+        import json
+        try:
+            data = json.loads(content)
+            return True, data, content
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{[^{}]+\}', content)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                    return True, data, content
+                except:
+                    pass
+            return False, None, content
+    except Exception as e:
+        return False, None, str(e)
 
 
 @app.get("/api/chat/{session_id}/messages")
