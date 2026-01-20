@@ -3,6 +3,7 @@ import type { Message } from '../components/ChatBox.vue';
 
 const MESSAGES_KEY = 'endstate_chat_messages';
 const PENDING_KEY = 'endstate_chat_pending';
+const LOADING_KEY = 'endstate_chat_loading';
 
 export function useChatPersistence() {
   const messages = ref<Message[]>([]);
@@ -22,6 +23,11 @@ export function useChatPersistence() {
       const savedPending = localStorage.getItem(PENDING_KEY);
       if (savedPending) {
         pendingMessage.value = JSON.parse(savedPending);
+      }
+
+      const savedLoading = localStorage.getItem(LOADING_KEY);
+      if (savedLoading) {
+        isLoading.value = savedLoading === 'true';
       }
     } catch (e) {
       console.error('Failed to load chat state:', e);
@@ -48,6 +54,14 @@ export function useChatPersistence() {
     }
   };
 
+  const saveLoading = (loading: boolean) => {
+    try {
+      localStorage.setItem(LOADING_KEY, String(loading));
+    } catch (e) {
+      console.error('Failed to save loading:', e);
+    }
+  };
+
   const addMessage = (message: Message) => {
     messages.value.push(message);
     saveMessages();
@@ -55,6 +69,7 @@ export function useChatPersistence() {
 
   const setLoading = (loading: boolean) => {
     isLoading.value = loading;
+    saveLoading(loading);
   };
 
   const setPending = (text: string | null) => {
@@ -74,8 +89,10 @@ export function useChatPersistence() {
   const clearAll = () => {
     messages.value = [];
     pendingMessage.value = null;
+    isLoading.value = false;
     localStorage.removeItem(MESSAGES_KEY);
     localStorage.removeItem(PENDING_KEY);
+    localStorage.removeItem(LOADING_KEY);
   };
 
   return {

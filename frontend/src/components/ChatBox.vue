@@ -108,30 +108,27 @@ const sendMessage = async () => {
 
 const checkPendingResponse = async () => {
   if (pendingMessage.value && !isLoading.value) {
-    const timeSincePending = Date.now() - pendingMessage.value.timestamp;
-    if (timeSincePending > 2000) {
-      setLoading(true);
-      try {
-        const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value);
-        addMessage({
-          id: Date.now(),
-          role: "assistant",
-          content: response.content,
-          timestamp: new Date(),
-          sources: response.sources as Source[],
-        });
-      } catch (error) {
-        console.error(error);
-        addMessage({
-          id: Date.now(),
-          role: "assistant",
-          content: "I'm having trouble connecting to the server right now. Please try again later.",
-          timestamp: new Date(),
-        });
-      } finally {
-        clearPending();
-        await scrollToBottom();
-      }
+    setLoading(true);
+    try {
+      const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value);
+      addMessage({
+        id: Date.now(),
+        role: "assistant",
+        content: response.content,
+        timestamp: new Date(),
+        sources: response.sources as Source[],
+      });
+    } catch (error) {
+      console.error(error);
+      addMessage({
+        id: Date.now(),
+        role: "assistant",
+        content: "I'm having trouble connecting to the server right now. Please try again later.",
+        timestamp: new Date(),
+      });
+    } finally {
+      clearPending();
+      await scrollToBottom();
     }
   }
 };
