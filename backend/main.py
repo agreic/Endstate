@@ -310,19 +310,30 @@ def send_chat_message(session_id: str, request: ChatRequest):
         response_text = ""
         summary_saved = False
         
-        user_message_lower = request.message.lower()
+        user_message_lower = request.message.lower().strip()
         
-        if any(x in user_message_lower for x in ["yes", "agree", "that sounds good", "sure", "let's do it"]):
+        acceptance_patterns = [
+            "i accept", "i agree", "yes, i accept", "yes i accept",
+            "that sounds good", "sounds good", "sounds great",
+            "let's do it", "lets do it", "yes please", "yes, please",
+            "i agree to this", "accepted", "i'm in", "im in",
+            "this looks good", "looks good", "perfect"
+        ]
+        
+        is_acceptance = any(pattern in user_message_lower for pattern in acceptance_patterns)
+        
+        if is_acceptance:
             has_summary, summary_data, _ = extract_summary_simple(history)
             if has_summary and summary_data:
                 if summary_cache.save(session_id, summary_data):
-                    response_text = f"Wonderful! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**. View it in the Projects tab."
+                    response_text = f"Excellent! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**. View it in the Projects tab."
                     service.db.add_chat_message(session_id, "assistant", response_text)
                     summary_saved = True
                 else:
                     response_text = "I had trouble saving the summary. Let me try again."
-        
-        if not summary_saved:
+            else:
+                response_text = "I don't have a clear project proposal to accept yet. Let's continue discussing your goals."
+        else:
             response = llm.invoke(messages)
             response_text = response.content if hasattr(response, 'content') else str(response)
         
@@ -341,7 +352,7 @@ def send_chat_message(session_id: str, request: ChatRequest):
 
 def extract_summary_simple(history: list[dict]) -> tuple[bool, dict | None, str]:
     """
-    Simple summary extraction that only triggers when user agrees.
+    Simple summary extraction that only triggers when user accepts.
     """
     from backend.llm.provider import get_llm
     
@@ -349,22 +360,40 @@ def extract_summary_simple(history: list[dict]) -> tuple[bool, dict | None, str]
     if len(user_msgs) < 3:
         return False, None, "Not enough conversation history"
     
-    prompt = """You are a learning project planner. Based on the conversation, extract a project summary ONLY if:
-1. The user has agreed to a specific project
-2. At least 2 skills or topics are mentioned
+    last_assistant_msg = None
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            last_assistant_msg = msg["content"]
+            break
+    
+    if not last_assistant_msg:
+        return False, None, "No assistant message found"
+    
+    if "accept" not in last_assistant_msg.lower():
+        return False, None, "No project proposal in last assistant message"
+    
+    prompt = """You are a learning project planner. Extract a structured project summary from the conversation.
 
-If both conditions are met, output JSON:
+Look for:
+1. A project the user has agreed to
+2. Their interests (list of 2+)
+3. Skills to develop (list of 2+)
+4. Topics to learn (list of 2+)
+5. Timeline if mentioned
+6. Milestones if mentioned
+
+Output ONLY valid JSON:
 {"user_profile": {"interests": [], "skill_level": "", "time_available": "", "learning_style": ""}, "agreed_project": {"name": "", "description": "", "timeline": "", "milestones": []}, "topics": [], "skills": [], "concepts": []}
 
-If not ready, output: NOT_READY
+If you cannot find all required fields, output: NOT_READY
 
 Conversation:
 """
     
-    for msg in history[-8:]:
+    for msg in history[-10:]:
         prompt += f"{msg['role']}: {msg['content']}\n"
     
-    prompt += "\nOutput:"
+    prompt += "\nOutput JSON only:"
     
     try:
         llm = get_llm()
