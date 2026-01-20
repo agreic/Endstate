@@ -73,8 +73,6 @@ def health_check():
         return results
     except Exception as e:
         return {"database": False, "llm": False, "error": str(e)}
-    finally:
-        service.close()
 
 
 @app.get("/api/graph")
@@ -98,8 +96,6 @@ def get_graph():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/graph/stats")
@@ -111,8 +107,6 @@ def get_graph_stats():
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/nodes")
@@ -124,8 +118,6 @@ def get_nodes(label: Optional[str] = None, limit: int = 100):
         return {"nodes": nodes, "count": len(nodes)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/relationships")
@@ -137,8 +129,6 @@ def get_relationships(limit: int = 100):
         return {"relationships": relationships, "count": len(relationships)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.post("/api/extract")
@@ -161,8 +151,6 @@ def extract_from_text(text: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.post("/api/clean")
@@ -178,8 +166,6 @@ def clean_graph(label: Optional[str] = None):
             return {"message": "Graph cleaned successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.post("/api/merge")
@@ -200,8 +186,6 @@ def merge_duplicates(label: str, match_property: str = "id"):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/query")
@@ -228,8 +212,6 @@ def execute_query(cypher: str, params: Optional[str] = None):
         return {"results": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/stats/dashboard", response_model=DashboardStatsResponse)
@@ -247,8 +229,6 @@ def get_dashboard_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.post("/api/chat/{session_id}/messages")
