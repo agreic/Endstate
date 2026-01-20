@@ -294,6 +294,7 @@ def send_chat_message(session_id: str, request: ChatRequest):
         Chat response with content and optional sources
     """
     from backend.services.summary_cache import summary_cache
+    from backend.services.agent_prompts import get_chat_system_prompt
     
     service = get_service()
     try:
@@ -303,7 +304,7 @@ def send_chat_message(session_id: str, request: ChatRequest):
         llm = get_llm()
         history = service.db.get_chat_history(session_id)
         
-        messages = []
+        messages = [("system", get_chat_system_prompt())]
         for msg in history:
             messages.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
         
@@ -317,7 +318,7 @@ def send_chat_message(session_id: str, request: ChatRequest):
             "that sounds good", "sounds good", "sounds great",
             "let's do it", "lets do it", "yes please", "yes, please",
             "i agree to this", "accepted", "i'm in", "im in",
-            "this looks good", "looks good", "perfect"
+            "this looks good", "looks good", "perfect", "option 1", "option 2", "option 3"
         ]
         
         is_acceptance = any(pattern in user_message_lower for pattern in acceptance_patterns)
