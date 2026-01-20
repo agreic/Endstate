@@ -38,6 +38,7 @@ const inputMessage = ref("");
 const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const isResetting = ref(false);
+const abortController = ref<AbortController | null>(null);
 
 const { 
   messages, 
@@ -69,17 +70,28 @@ const formatTime = (date: Date) => {
   });
 };
 
+const cancelPendingRequest = () => {
+  if (abortController.value) {
+    abortController.value.abort();
+    abortController.value = null;
+  }
+};
+
 const resetConversation = async () => {
-  if (isResetting.value || isLoading.value) return;
+  if (isResetting.value || isLoading.value) {
+    cancelPendingRequest();
+  }
   
   if (!confirm("Reset the conversation? This will clear all messages.")) return;
   
   isResetting.value = true;
+  cancelPendingRequest();
+  setLoading(false);
+  clearPending();
+  
   try {
     await resetChatSession(sessionId.value);
     clearMessages();
-    clearPending();
-    setLoading(false);
   } catch (e) {
     console.error('Failed to reset chat:', e);
     alert('Failed to reset. Make sure the backend is running.');
@@ -104,8 +116,11 @@ const sendMessage = async () => {
   setPending(userText);
   await scrollToBottom();
 
+  cancelPendingRequest();
+  abortController.value = new AbortController();
+  
   try {
-    const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value);
+    const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value, abortController.value.signal);
 
     addMessage({
       id: Date.now(),
@@ -114,7 +129,11 @@ const sendMessage = async () => {
       timestamp: new Date(),
       sources: response.sources as Source[],
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.log('Request was cancelled');
+      return;
+    }
     console.error(error);
     addMessage({
       id: Date.now(),
@@ -123,6 +142,7 @@ const sendMessage = async () => {
       timestamp: new Date(),
     });
   } finally {
+    abortController.value = null;
     clearPending();
     await scrollToBottom();
   }
@@ -130,9 +150,12 @@ const sendMessage = async () => {
 
 const checkPendingResponse = async () => {
   if (pendingMessage.value && !isLoading.value) {
+    cancelPendingRequest();
+    abortController.value = new AbortController();
     setLoading(true);
+    
     try {
-      const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value);
+      const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value, abortController.value.signal);
       addMessage({
         id: Date.now(),
         role: "assistant",
@@ -140,7 +163,11 @@ const checkPendingResponse = async () => {
         timestamp: new Date(),
         sources: response.sources as Source[],
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Request was cancelled');
+        return;
+      }
       console.error(error);
       addMessage({
         id: Date.now(),
@@ -149,6 +176,7 @@ const checkPendingResponse = async () => {
         timestamp: new Date(),
       });
     } finally {
+      abortController.value = null;
       clearPending();
       await scrollToBottom();
     }

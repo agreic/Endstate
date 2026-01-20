@@ -186,13 +186,14 @@ export async function resetChatSession(sessionId: string): Promise<{ message: st
 export async function sendChatMessage(
   message: string,
   enableSearch: boolean = false,
-  sessionId?: string
+  sessionId?: string,
+  signal?: AbortSignal
 ): Promise<ChatResponse> {
   const endpoint = sessionId 
     ? `${API_URL}/api/chat/${sessionId}/messages`
     : `${API_URL}/api/chat`;
   
-  const response = await fetch(endpoint, {
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -201,7 +202,13 @@ export async function sendChatMessage(
       message,
       enable_web_search: enableSearch,
     }),
-  });
+  };
+  
+  if (signal) {
+    init.signal = signal;
+  }
+  
+  const response = await fetch(endpoint, init);
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
