@@ -163,6 +163,26 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistoryResp
   return response.json();
 }
 
+export async function deleteChatSession(sessionId: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_URL}/api/chat/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function resetChatSession(sessionId: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_URL}/api/chat/${encodeURIComponent(sessionId)}/reset`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function sendChatMessage(
   message: string,
   enableSearch: boolean = false,

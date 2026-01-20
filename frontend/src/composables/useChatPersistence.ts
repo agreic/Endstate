@@ -1,44 +1,65 @@
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 import type { Message } from '../components/ChatBox.vue';
+import { getChatHistory } from '../services/api';
 
-const MESSAGES_KEY = 'endstate_chat_messages';
 const PENDING_KEY = 'endstate_chat_pending';
-const LOADING_KEY = 'endstate_chat_loading';
 
 export function useChatPersistence() {
   const messages = ref<Message[]>([]);
   const pendingMessage = ref<{ text: string; timestamp: number } | null>(null);
   const isLoading = ref(false);
+  const hasError = ref(false);
 
-  const loadState = () => {
+  const loadState = async (sessionId: string) => {
     try {
-      const savedMessages = localStorage.getItem(MESSAGES_KEY);
-      if (savedMessages) {
-        messages.value = JSON.parse(savedMessages).map((m: any) => ({
-          ...m,
-          timestamp: new Date(m.timestamp),
-        }));
+      hasError.value = false;
+      const response = await getChatHistory(sessionId);
+      if (response.messages && response.messages.length > 0) {
+        messages.value = response.messages.map((msg: any, index: number) => {
+          let timestamp = new Date();
+          if (msg.timestamp) {
+            const parsed = new Date(msg.timestamp);
+            if (!isNaN(parsed.getTime())) {
+              timestamp = parsed;
+            }
+          }
+          return {
+            id: index,
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+            timestamp,
+          };
+        });
+      } else {
+        messages.value = [
+          {
+            id: 0,
+            role: "assistant",
+            content: "Hello! I'm Endstate AI. What would you like to learn today?",
+            timestamp: new Date(),
+          },
+        ];
       }
+    } catch (e) {
+      console.error('Failed to load chat history:', e);
+      hasError.value = true;
+      messages.value = [
+        {
+          id: 0,
+          role: "assistant",
+          content: "Unable to connect to server. Make sure the backend is running.",
+          timestamp: new Date(),
+        },
+      ];
+    }
 
+    try {
       const savedPending = localStorage.getItem(PENDING_KEY);
       if (savedPending) {
         pendingMessage.value = JSON.parse(savedPending);
       }
-
-      const savedLoading = localStorage.getItem(LOADING_KEY);
-      if (savedLoading) {
-        isLoading.value = savedLoading === 'true';
-      }
     } catch (e) {
-      console.error('Failed to load chat state:', e);
-    }
-  };
-
-  const saveMessages = () => {
-    try {
-      localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages.value));
-    } catch (e) {
-      console.error('Failed to save messages:', e);
+      console.error('Failed to load pending:', e);
     }
   };
 
@@ -54,22 +75,12 @@ export function useChatPersistence() {
     }
   };
 
-  const saveLoading = (loading: boolean) => {
-    try {
-      localStorage.setItem(LOADING_KEY, String(loading));
-    } catch (e) {
-      console.error('Failed to save loading:', e);
-    }
-  };
-
   const addMessage = (message: Message) => {
     messages.value.push(message);
-    saveMessages();
   };
 
   const setLoading = (loading: boolean) => {
     isLoading.value = loading;
-    saveLoading(loading);
   };
 
   const setPending = (text: string | null) => {
@@ -86,24 +97,36 @@ export function useChatPersistence() {
     savePending(null);
   };
 
-  const clearAll = () => {
+  const clearMessages = () => {
+    messages.value = [
+      {
+        id: 0,
+        role: "assistant",
+        content: "Hello! I'm Endstate AI. What would you like to learn today?",
+        timestamp: new Date(),
+      },
+    ];
+  };
+
+  const resetState = () => {
     messages.value = [];
     pendingMessage.value = null;
     isLoading.value = false;
-    localStorage.removeItem(MESSAGES_KEY);
+    hasError.value = false;
     localStorage.removeItem(PENDING_KEY);
-    localStorage.removeItem(LOADING_KEY);
   };
 
   return {
     messages,
     pendingMessage,
     isLoading,
+    hasError,
     loadState,
     addMessage,
     setLoading,
     setPending,
     clearPending,
-    clearAll,
+    clearMessages,
+    resetState,
   };
 }

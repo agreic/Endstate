@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from "vue";
-import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next";
+import { Send, Bot, User, Globe, ExternalLink, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
-import { sendChatMessage as apiSendChatMessage } from "../services/api";
+import { sendChatMessage as apiSendChatMessage, resetChatSession } from "../services/api";
 import { useChatPersistence } from "../composables/useChatPersistence";
 
 interface Source {
@@ -37,16 +37,19 @@ const sessionId = ref(getSessionId());
 const inputMessage = ref("");
 const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
+const isResetting = ref(false);
 
 const { 
   messages, 
   pendingMessage, 
   isLoading, 
+  hasError,
   loadState, 
   addMessage, 
   setLoading, 
   setPending, 
-  clearPending 
+  clearPending,
+  clearMessages,
 } = useChatPersistence();
 
 const scrollToBottom = async () => {
@@ -64,6 +67,25 @@ const formatTime = (date: Date) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const resetConversation = async () => {
+  if (isResetting.value || isLoading.value) return;
+  
+  if (!confirm("Reset the conversation? This will clear all messages.")) return;
+  
+  isResetting.value = true;
+  try {
+    await resetChatSession(sessionId.value);
+    clearMessages();
+    clearPending();
+    setLoading(false);
+  } catch (e) {
+    console.error('Failed to reset chat:', e);
+    alert('Failed to reset. Make sure the backend is running.');
+  } finally {
+    isResetting.value = false;
+  }
 };
 
 const sendMessage = async () => {
@@ -133,18 +155,8 @@ const checkPendingResponse = async () => {
   }
 };
 
-onMounted(() => {
-  loadState();
-  if (messages.value.length === 0) {
-    messages.value = [
-      {
-        id: 0,
-        role: "assistant",
-        content: "Hello! I'm Endstate AI. What would you like to learn today?",
-        timestamp: new Date(),
-      },
-    ];
-  }
+onMounted(async () => {
+  await loadState(sessionId.value);
   checkPendingResponse();
 });
 </script>
@@ -152,6 +164,10 @@ onMounted(() => {
 <template>
   <div class="flex flex-col h-full bg-surface-50">
     <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
+      <div v-if="hasError" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+        <p class="text-amber-700 text-sm">Unable to connect to backend. Make sure the server is running.</p>
+      </div>
+
       <div
         v-for="message in messages"
         :key="message.id"
@@ -283,9 +299,19 @@ onMounted(() => {
             </button>
           </div>
         </div>
-        <p class="text-center text-[10px] text-surface-400 mt-2">
-          Chat history is saved. Agree to a project to create a project summary.
-        </p>
+        <div class="flex items-center justify-between mt-2">
+          <p class="text-[10px] text-surface-400">
+            Chat history stored on backend. Agree to a project to create a summary.
+          </p>
+          <button
+            @click="resetConversation"
+            :disabled="isResetting || isLoading"
+            class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
+          >
+            <RotateCcw :size="12" />
+            Reset
+          </button>
+        </div>
       </div>
     </div>
   </div>

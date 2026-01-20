@@ -458,11 +458,25 @@ def list_chat_sessions():
 
 @app.delete("/api/chat/{session_id}")
 def delete_chat_session(session_id: str):
-    """Delete a chat session."""
+    """Delete a chat session and clear all messages."""
     service = get_service()
     try:
         service.db.delete_chat_session(session_id)
         return {"message": "Session deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.post("/api/chat/{session_id}/reset")
+def reset_chat_session(session_id: str):
+    """Reset a chat session by deleting it and creating a new one."""
+    service = get_service()
+    try:
+        service.db.delete_chat_session(session_id)
+        service.db.create_chat_session(session_id)
+        return {"message": "Session reset", "session_id": session_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
