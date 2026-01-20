@@ -378,3 +378,86 @@ class Neo4jClient:
             "MATCH (s:ChatSession {id: $session_id}) DETACH DELETE s",
             {"session_id": session_id}
         )
+
+    def get_node_by_id(self, node_id: str) -> Optional[dict]:
+        """Get a node by its ID."""
+        result = self.query(
+            "MATCH (n) WHERE n.id = $node_id RETURN n",
+            {"node_id": node_id}
+        )
+        if result:
+            return {"node": result[0]["n"]}
+        return None
+
+    def delete_node(self, node_id: str) -> dict:
+        """
+        Delete a node and all its connected relationships.
+        
+        Args:
+            node_id: The ID of the node to delete
+            
+        Returns:
+            Dictionary with deleted node id and count of deleted relationships
+        """
+        result = self.query(
+            """
+            MATCH (n {id: $node_id})
+            OPTIONAL MATCH (n)-[r]-()
+            WITH n, COUNT(r) as rel_count
+            DETACH DELETE n
+            RETURN n.id as id, rel_count
+            """,
+            {"node_id": node_id}
+        )
+        if result:
+            return {"deleted_node_id": node_id, "relationships_deleted": result[0].get("rel_count", 0)}
+        return {"deleted_node_id": node_id, "relationships_deleted": 0, "error": "Node not found"}
+
+    def delete_relationship(self, source_id: str, target_id: str, rel_type: str) -> dict:
+        """
+        Delete a specific relationship between two nodes.
+        
+        Args:
+            source_id: Source node ID
+            target_id: Target node ID
+            rel_type: Relationship type
+            
+        Returns:
+            Dictionary with deletion status
+        """
+        result = self.query(
+            """
+            MATCH (n {id: $source_id})-[r:`$rel_type`]->(m {id: $target_id})
+            DELETE r
+            RETURN COUNT(r) as deleted_count
+            """,
+            {"source_id": source_id, "target_id": target_id, "rel_type": rel_type}
+        )
+        if result:
+            return {
+                "deleted": True,
+                "source": source_id,
+                "target": target_id,
+                "relationship_type": rel_type,
+                "count": result[0].get("deleted_count", 0)
+            }
+        return {"deleted": False, "error": "Relationship not found"}
+
+    def get_connected_nodes(self, node_id: str) -> list[dict]:
+        """
+        Get all nodes connected to a specific node.
+        
+        Args:
+            node_id: The ID of the node
+            
+        Returns:
+            List of connected node info with relationship types
+        """
+        result = self.query(
+            """
+            MATCH (n {id: $node_id})-[r]-(connected)
+            RETURN connected.id as id, labels(connected) as labels, type(r) as rel_type
+            """,
+            {"node_id": node_id}
+        )
+        return result

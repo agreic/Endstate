@@ -284,6 +284,7 @@ def chat(request: ChatRequest):
 def send_chat_message(session_id: str, request: ChatRequest):
     """
     Send a message in a persistent chat session.
+    Uses project planning agent that proposes projects and extracts summaries.
     
     Args:
         session_id: Chat session identifier
@@ -292,27 +293,69 @@ def send_chat_message(session_id: str, request: ChatRequest):
     Returns:
         Chat response with content and optional sources
     """
+    from backend.services.summary_cache import summary_cache
+    from backend.services.summary_extractor import (
+        extract_summary,
+        should_propose_projects,
+        generate_project_proposals,
+        should_ask_question,
+    )
+    
     service = get_service()
     try:
         service.db.create_chat_session(session_id)
-        
         service.db.add_chat_message(session_id, "user", request.message)
         
         llm = get_llm()
-        
         history = service.db.get_chat_history(session_id)
+        
         messages = []
         for msg in history:
             messages.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
         
-        response = llm.invoke(messages)
-        content = response.content if hasattr(response, 'content') else str(response)
+        # Get the user's latest message
+        user_messages = [m for m in history if m["role"] == "user"]
+        recent_messages = [{"role": m["role"], "content": m["content"]} for m in history[-10:]]
         
-        service.db.add_chat_message(session_id, "assistant", str(content))
+        response_text = ""
+        summary_saved = False
+        
+        # Check if we should extract a summary (after user's agreement)
+        if "yes" in request.message.lower() or "agree" in request.message.lower() or "that sounds good" in request.message.lower():
+            has_summary, summary_data, _ = extract_summary(recent_messages)
+            if has_summary and summary_data:
+                # Save the summary
+                if summary_cache.save(session_id, summary_data):
+                    response_text = f"Wonderful! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**\n\nThis summary is now stored and you can view it in the Projects tab. Would you like to start working on this, or do you have questions?"
+                    service.db.add_chat_message(session_id, "assistant", response_text)
+                    summary_saved = True
+                else:
+                    response_text = "I had trouble saving the summary. Let me try again."
+        
+        if not summary_saved:
+            # Check if we should propose projects
+            if should_propose_projects(recent_messages):
+                proposals = generate_project_proposals(recent_messages)
+                response_text = f"Based on what you've shared, here are some project ideas:\n\n{proposals}\n\nDoes any of these appeal to you? Or would you like me to suggest different approaches?"
+            elif len(user_messages) >= 3:
+                # After a few exchanges, ask if ready to define a project
+                should_ask, question = should_ask_question(recent_messages)
+                if should_ask:
+                    response_text = question
+                else:
+                    # Enough info - prompt to formalize
+                    response_text = "We've discussed quite a bit! Would you like to formalize this into a project plan? If so, say 'yes' and I'll create a structured summary of what we've discussed."
+            else:
+                # Regular chat - just continue the conversation
+                response = llm.invoke(messages)
+                response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        service.db.add_chat_message(session_id, "assistant", str(response_text))
         
         return {
-            "content": content,
+            "content": response_text,
             "sources": None,
+            "summary_saved": summary_saved,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -365,6 +408,145 @@ def delete_chat_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         service.close()
+
+
+@app.delete("/api/graph/nodes/{node_id}")
+def delete_node(node_id: str):
+    """
+    Delete a node and all its connected relationships.
+    
+    Args:
+        node_id: The ID of the node to delete
+        
+    Returns:
+        Deletion result with count of deleted relationships
+    """
+    service = get_service()
+    try:
+        result = service.db.delete_node(node_id)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.delete("/api/graph/relationships")
+def delete_relationship(source_id: str, target_id: str, rel_type: str):
+    """
+    Delete a specific relationship between two nodes.
+    
+    Args:
+        source_id: Source node ID
+        target_id: Target node ID
+        rel_type: Relationship type
+        
+    Returns:
+        Deletion result
+    """
+    service = get_service()
+    try:
+        result = service.db.delete_relationship(source_id, target_id, rel_type)
+        if not result.get("deleted"):
+            raise HTTPException(status_code=404, detail="Relationship not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.get("/api/graph/node/{node_id}/connections")
+def get_node_connections(node_id: str):
+    """
+    Get all connections for a node.
+    
+    Args:
+        node_id: The ID of the node
+        
+    Returns:
+        List of connected nodes with relationship types
+    """
+    service = get_service()
+    try:
+        connections = service.db.get_connected_nodes(node_id)
+        return {"node_id": node_id, "connections": connections}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.get("/api/projects")
+def list_projects():
+    """List all project summaries."""
+    import os
+    from pathlib import Path
+    
+    cache_dir = Path.home() / ".endstate" / "summaries"
+    if not cache_dir.exists():
+        return {"projects": []}
+    
+    projects = []
+    for file_path in cache_dir.glob("*.json"):
+        try:
+            import json
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+                projects.append({
+                    "id": data.get("session_id"),
+                    "name": data.get("agreed_project", {}).get("name", "Untitled"),
+                    "created_at": data.get("created_at"),
+                    "interests": data.get("user_profile", {}).get("interests", []),
+                })
+        except Exception:
+            continue
+    
+    return {"projects": sorted(projects, key=lambda x: x.get("created_at", ""), reverse=True)}
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: str):
+    """Get a specific project summary."""
+    import json
+    from pathlib import Path
+    
+    cache_dir = Path.home() / ".endstate" / "summaries"
+    file_path = cache_dir / f"{project_id}.json"
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str):
+    """Delete a project summary."""
+    from pathlib import Path
+    
+    cache_dir = Path.home() / ".endstate" / "summaries"
+    file_path = cache_dir / f"{project_id}.json"
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    try:
+        file_path.unlink()
+        return {"message": "Project deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():

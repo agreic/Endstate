@@ -42,6 +42,7 @@ export interface ChatResponse {
     title: string;
     url: string;
   }>;
+  summary_saved?: boolean;
 }
 
 export interface DashboardStats {
@@ -57,6 +58,34 @@ export interface ChatHistoryResponse {
     content: string;
     timestamp: string;
   }>;
+}
+
+export interface ProjectSummary {
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  user_profile: {
+    interests: string[];
+    skill_level: string;
+    time_available: string;
+    learning_style: string;
+  };
+  agreed_project: {
+    name: string;
+    description: string;
+    timeline: string;
+    milestones: string[];
+  };
+  topics: string[];
+  skills: string[];
+  concepts: string[];
+}
+
+export interface ProjectListItem {
+  id: string;
+  name: string;
+  created_at: string;
+  interests: string[];
 }
 
 export async function fetchGraphData(): Promise<GraphData> {
@@ -85,6 +114,41 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
 
 export async function fetchHealth(): Promise<{ database: boolean; llm: boolean; database_error?: string; llm_error?: string }> {
   const response = await fetch(`${API_URL}/api/health`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function deleteNode(nodeId: string): Promise<{ deleted_node_id: string; relationships_deleted: number }> {
+  const response = await fetch(`${API_URL}/api/graph/nodes/${encodeURIComponent(nodeId)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete node' }));
+    throw new Error(error.detail || 'Failed to delete node');
+  }
+  return response.json();
+}
+
+export async function deleteRelationship(sourceId: string, targetId: string, relType: string): Promise<{ deleted: boolean }> {
+  const params = new URLSearchParams({
+    source_id: sourceId,
+    target_id: targetId,
+    rel_type: relType,
+  });
+  const response = await fetch(`${API_URL}/api/graph/relationships?${params}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete relationship' }));
+    throw new Error(error.detail || 'Failed to delete relationship');
+  }
+  return response.json();
+}
+
+export async function getNodeConnections(nodeId: string): Promise<{ node_id: string; connections: Array<{ id: string; labels: string[]; rel_type: string }> }> {
+  const response = await fetch(`${API_URL}/api/graph/node/${encodeURIComponent(nodeId)}/connections`);
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -152,6 +216,32 @@ export async function cleanGraph(label?: string): Promise<{ message: string }> {
 export async function mergeDuplicates(label: string, matchProperty: string = 'id'): Promise<{ message: string; merged_count: number }> {
   const response = await fetch(`${API_URL}/api/merge?label=${encodeURIComponent(label)}&match_property=${encodeURIComponent(matchProperty)}`, {
     method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function listProjects(): Promise<{ projects: ProjectListItem[] }> {
+  const response = await fetch(`${API_URL}/api/projects`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function getProject(projectId: string): Promise<ProjectSummary> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function deleteProject(projectId: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
   });
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);

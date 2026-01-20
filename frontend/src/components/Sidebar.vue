@@ -4,7 +4,7 @@ import {
   Home, 
   MessageSquare, 
   Network, 
-  Database, 
+  FolderOpen,
   Settings, 
   ChevronLeft,
   ChevronRight,
@@ -13,27 +13,27 @@ import {
 
 const props = defineProps<{
   isOpen: boolean
-  activeTab: 'dashboard' | 'chat' | 'graph'
+  activeTab: 'dashboard' | 'chat' | 'graph' | 'projects'
 }>()
 
 const emit = defineEmits<{
   toggle: []
-  navigate: [tab: 'dashboard' | 'chat' | 'graph']
+  navigate: [tab: 'dashboard' | 'chat' | 'graph' | 'projects']
 }>()
 
 const menuItems = [
   { icon: Home, label: 'Dashboard', tab: 'dashboard' as const },
   { icon: MessageSquare, label: 'Chat', tab: 'chat' as const },
   { icon: Network, label: 'Knowledge Graph', tab: 'graph' as const },
-  { icon: Database, label: 'Data Sources', tab: null as 'dashboard' | 'chat' | 'graph' | null },
+  { icon: FolderOpen, label: 'Projects', tab: 'projects' as const },
 ]
 
 const secondaryItems = [
-  { icon: Settings, label: 'Settings', tab: null as 'dashboard' | 'chat' | 'graph' | null },
-  { icon: HelpCircle, label: 'Help', tab: null as 'dashboard' | 'chat' | 'graph' | null },
+  { icon: Settings, label: 'Settings', tab: null as 'dashboard' | 'chat' | 'graph' | 'projects' | null },
+  { icon: HelpCircle, label: 'Help', tab: null as 'dashboard' | 'chat' | 'graph' | 'projects' | null },
 ]
 
-const handleNavigate = (tab: 'dashboard' | 'chat' | 'graph' | null) => {
+const handleNavigate = (tab: 'dashboard' | 'chat' | 'graph' | 'projects' | null) => {
   if (tab) {
     emit('navigate', tab)
   }

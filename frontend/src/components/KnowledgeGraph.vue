@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Database } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, type ApiNode, type ApiRelationship } from "../services/api";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, X } from "lucide-vue-next";
+import { fetchGraphData, extractFromText, deleteNode, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -23,6 +23,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   value: number;
   label?: string;
   type?: string;
+  id?: string;
 }
 
 interface GraphData {
@@ -40,6 +41,9 @@ const isLoading = ref(false);
 const loadError = ref<string | null>(null);
 const graphStats = ref<{ total_nodes: number; total_relationships: number } | null>(null);
 const isAddingSample = ref(false);
+const showDeleteConfirm = ref(false);
+const deletingNode = ref<GraphNode | null>(null);
+const deleteMessage = ref("");
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
@@ -56,7 +60,10 @@ const groupColors: Record<string, string> = {
   'Milestone': "#84cc16",
 };
 
-const getNodeColor = (node: GraphNode): string => {
+const getNodeColor = (node: GraphNode, isSelected: boolean = false): string => {
+  if (isSelected) {
+    return "#ef4444";
+  }
   return groupColors[node.labels?.[0] || 'Skill'] || groupColors['Skill'];
 };
 
@@ -90,6 +97,7 @@ const formatPropertyValue = (value: any): string => {
 const loadGraphData = async () => {
   isLoading.value = true;
   loadError.value = null;
+  selectedNode.value = null;
   
   try {
     const data = await fetchGraphData();
@@ -119,12 +127,13 @@ const loadGraphData = async () => {
       };
     });
     
-    graphData.value.links = data.relationships.map((rel: ApiRelationship) => ({
+    graphData.value.links = data.relationships.map((rel: ApiRelationship, index: number) => ({
       source: rel.source,
       target: rel.target,
       value: 1,
       type: rel.type,
       label: rel.type,
+      id: `link-${index}`,
     }));
     
     setTimeout(() => {
@@ -161,6 +170,37 @@ const addSampleData = async () => {
   }
 };
 
+const confirmDelete = (node: GraphNode) => {
+  const connections = getConnectionCount(node.id);
+  deletingNode.value = node;
+  deleteMessage.value = connections > 0
+    ? `Delete "${node.label}" and its ${connections} connection${connections === 1 ? '' : 's'}?`
+    : `Delete "${node.label}"?`;
+  showDeleteConfirm.value = true;
+};
+
+const handleDelete = async () => {
+  if (!deletingNode.value) return;
+  
+  const nodeToDelete = deletingNode.value;
+  showDeleteConfirm.value = false;
+  isLoading.value = true;
+  
+  try {
+    await deleteNode(nodeToDelete.id);
+    selectedNode.value = null;
+    await loadGraphData();
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Failed to delete node';
+    isLoading.value = false;
+  }
+};
+
+const cancelDelete = () => {
+  showDeleteConfirm.value = false;
+  deletingNode.value = null;
+};
+
 const isNodeMatching = (node: GraphNode): boolean => {
   if (!searchQuery.value) return true;
   const query = searchQuery.value.toLowerCase();
@@ -172,14 +212,6 @@ const isNodeMatching = (node: GraphNode): boolean => {
   );
 };
 
-const isLinkMatching = (link: GraphLink): boolean => {
-  if (!searchQuery.value) return true;
-  const sourceNode = link.source as GraphNode;
-  const targetNode = link.target as GraphNode;
-  if (!sourceNode || !targetNode) return false;
-  return isNodeMatching(sourceNode) && isNodeMatching(targetNode);
-};
-
 const updateNodeStyles = () => {
   if (!nodesSelection) return;
 
@@ -189,29 +221,24 @@ const updateNodeStyles = () => {
       const node = d as GraphNode;
       const isMatch = isNodeMatching(node);
       const isHovered = hoveredNodeId.value === node.id;
-      const baseColor = getNodeColor(node);
+      const isSelected = selectedNode.value?.id === node.id;
+      const baseColor = getNodeColor(node, isSelected);
 
       if (!isMatch) {
         return "#d4d4d8";
       }
-      if (isHovered) {
+      if (isHovered || isSelected) {
         return d3.color(baseColor)?.brighter(0.3)?.toString() || baseColor;
       }
       return baseColor;
     })
-    .attr("opacity", (d) => {
-      const node = d as GraphNode;
-      return isNodeMatching(node) ? 1 : 0.3;
-    })
     .attr("stroke", (d) => {
       const node = d as GraphNode;
-      return isNodeMatching(node) && hoveredNodeId.value === node.id
-        ? "#1e40af"
-        : "#fff";
+      return selectedNode.value?.id === node.id ? "#dc2626" : "#fff";
     })
     .attr("stroke-width", (d) => {
       const node = d as GraphNode;
-      return isNodeMatching(node) && hoveredNodeId.value === node.id ? 3 : 2;
+      return selectedNode.value?.id === node.id ? 4 : 2;
     });
 
   nodesSelection
@@ -222,7 +249,7 @@ const updateNodeStyles = () => {
     })
     .attr("font-weight", (d) => {
       const node = d as GraphNode;
-      return hoveredNodeId.value === node.id ? "700" : "500";
+      return hoveredNodeId.value === node.id || selectedNode.value?.id === node.id ? "700" : "500";
     });
 };
 
@@ -230,14 +257,8 @@ const updateLinkStyles = () => {
   if (!linksSelection) return;
 
   linksSelection
-    .attr("opacity", (d) => {
-      const link = d as GraphLink;
-      return isLinkMatching(link) ? 0.6 : 0.1;
-    })
-    .attr("stroke", (d) => {
-      const link = d as GraphLink;
-      return isLinkMatching(link) ? "#d4d4d8" : "#e4e4e7";
-    });
+    .attr("opacity", 0.6)
+    .attr("stroke", "#d4d4d8");
 };
 
 watch(searchQuery, () => {
@@ -348,12 +369,16 @@ const initGraph = () => {
     .style("pointer-events", "none");
 
   nodesSelection.on("click", (event, d) => {
-    selectedNode.value = d;
+    selectedNode.value = selectedNode.value?.id === d.id ? null : d;
     event.stopPropagation();
+    updateNodeStyles();
   });
 
   svgElement.on("click", () => {
-    selectedNode.value = null;
+    if (selectedNode.value) {
+      selectedNode.value = null;
+      updateNodeStyles();
+    }
   });
 
   simulation.on("tick", () => {
@@ -579,12 +604,21 @@ const legendItems = computed(() => {
         v-if="selectedNode"
         class="absolute bottom-4 left-4 bg-white rounded-xl shadow-lg p-4 max-w-xs z-10 animate-fade-in"
       >
-        <div class="flex items-center gap-3 mb-2">
-          <span
-            class="w-4 h-4 rounded-full"
-            :style="{ backgroundColor: getNodeColor(selectedNode) }"
-          ></span>
-          <h3 class="font-semibold text-surface-800">{{ selectedNode.label }}</h3>
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-3">
+            <span
+              class="w-4 h-4 rounded-full"
+              :style="{ backgroundColor: getNodeColor(selectedNode, true) }"
+            ></span>
+            <h3 class="font-semibold text-surface-800">{{ selectedNode.label }}</h3>
+          </div>
+          <button
+            @click="confirmDelete(selectedNode)"
+            class="p-1 rounded hover:bg-red-100 text-red-500 transition-colors"
+            title="Delete node"
+          >
+            <Trash2 :size="16" />
+          </button>
         </div>
         
         <p v-if="selectedNode.description" class="text-sm text-surface-600 mb-3">
@@ -593,7 +627,7 @@ const legendItems = computed(() => {
         
         <div v-if="selectedNode.labels?.length" class="mb-3">
           <p class="text-xs text-surface-400 uppercase mb-1">Type</p>
-          <div class="flex gap-1">
+          <div class="flex gap-1 flex-wrap">
             <span
               v-for="label in selectedNode.labels"
               :key="label"
@@ -623,7 +657,36 @@ const legendItems = computed(() => {
       <div
         class="absolute bottom-4 right-4 text-xs text-surface-400 bg-white/80 px-3 py-1 rounded-full"
       >
-        Drag nodes to reposition · Scroll to zoom · Click for details
+        Drag nodes to reposition · Scroll to zoom · Click node for details · Red = Selected
+      </div>
+    </div>
+
+    <div
+      v-if="showDeleteConfirm"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+    >
+      <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm mx-4">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-red-100 rounded-full">
+            <Trash2 :size="24" class="text-red-500" />
+          </div>
+          <h3 class="text-lg font-semibold text-surface-800">Delete Node?</h3>
+        </div>
+        <p class="text-surface-600 mb-6">{{ deleteMessage }}</p>
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="cancelDelete"
+            class="px-4 py-2 text-surface-600 hover:bg-surface-100 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            @click="handleDelete"
+            class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   </div>

@@ -4,16 +4,17 @@ import Sidebar from './components/Sidebar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChatBox from './components/ChatBox.vue'
 import KnowledgeGraph from './components/KnowledgeGraph.vue'
-import { MessageSquare, Network, Settings } from 'lucide-vue-next'
+import Projects from './components/Projects.vue'
+import { MessageSquare, Network, FolderOpen, Settings } from 'lucide-vue-next'
 
 const sidebarOpen = ref(true)
-const activeTab = ref<'dashboard' | 'chat' | 'graph'>('dashboard')
+const activeTab = ref<'dashboard' | 'chat' | 'graph' | 'projects'>('dashboard')
 
 const toggleSidebar = () => {
   sidebarOpen.value = !sidebarOpen.value
 }
 
-const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
+const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
   activeTab.value = tab
 }
 </script>
@@ -34,7 +35,6 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
       <header class="h-14 bg-white border-b border-surface-200 flex items-center justify-between px-4 shadow-sm">
         <div class="flex items-center gap-3">
           <h1 class="text-lg font-semibold text-surface-800">Endstate</h1>
-          <span class="text-xs px-2 py-0.5 bg-primary-100 text-primary-700 rounded-full">Demo</span>
         </div>
         
         <div class="flex items-center gap-2">
@@ -68,6 +68,16 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
               <Network :size="16" />
               Knowledge Graph
             </button>
+            <button
+              @click="activeTab = 'projects'"
+              class="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all"
+              :class="activeTab === 'projects' 
+                ? 'bg-white text-primary-600 shadow-sm' 
+                : 'text-surface-500 hover:text-surface-700'"
+            >
+              <FolderOpen :size="16" />
+              Projects
+            </button>
           </nav>
         </div>
         
@@ -83,6 +93,7 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph') => {
         <Dashboard v-if="activeTab === 'dashboard'" @navigate="setActiveTab" />
         <ChatBox v-if="activeTab === 'chat'" />
         <KnowledgeGraph v-if="activeTab === 'graph'" />
+        <Projects v-if="activeTab === 'projects'" />
       </div>
     </main>
   </div>
