@@ -119,6 +119,7 @@ const sendMessage = async () => {
 
   cancelPendingRequest();
   abortController.value = new AbortController();
+  setLoading(true);
   
   try {
     const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value, abortController.value.signal);
@@ -142,6 +143,7 @@ const sendMessage = async () => {
       });
     }
   } catch (error: any) {
+    setLoading(false);
     if (error.name === 'AbortError') {
       console.log('Request was cancelled');
       return;
@@ -155,6 +157,7 @@ const sendMessage = async () => {
     });
   } finally {
     if (!isProcessing.value) {
+      setLoading(false);
       abortController.value = null;
       clearPending();
     }
@@ -175,6 +178,7 @@ const pollForProcessingComplete = async () => {
       const result = await checkSessionLocked(sessionId.value);
       if (!result.locked) {
         isProcessing.value = false;
+        setLoading(false);
         abortController.value = null;
         clearPending();
         await loadState(sessionId.value);
@@ -188,6 +192,7 @@ const pollForProcessingComplete = async () => {
 
   if (isProcessing.value && attempts >= maxAttempts) {
     isProcessing.value = false;
+    setLoading(false);
     abortController.value = null;
     clearPending();
   }
