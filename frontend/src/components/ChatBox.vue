@@ -2,7 +2,21 @@
 import { ref, nextTick, onMounted } from "vue";
 import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next";
 import { marked } from "marked";
-import { getChatHistory, sendChatMessage as apiSendChatMessage, type ChatMessage } from "../services/api";
+import { sendChatMessage as apiSendChatMessage } from "../services/api";
+import { useChatPersistence } from "../composables/useChatPersistence";
+
+interface Source {
+  title: string;
+  url: string;
+}
+
+interface Message {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  sources?: Source[];
+}
 
 const SESSION_ID_KEY = 'endstate_chat_session_id';
 
@@ -19,108 +33,26 @@ const renderMarkdown = (content: string) => {
   return marked.parse(content);
 };
 
-interface Source {
-  title: string;
-  url: string;
-}
-
-interface Message {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  sources?: Source[];
-}
-
-const messages = ref<Message[]>([]);
+const sessionId = ref(getSessionId());
 const inputMessage = ref("");
-const isLoading = ref(false);
 const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
-const sessionId = ref(getSessionId());
+
+const { 
+  messages, 
+  pendingMessage, 
+  isLoading, 
+  loadState, 
+  addMessage, 
+  setLoading, 
+  setPending, 
+  clearPending 
+} = useChatPersistence();
 
 const scrollToBottom = async () => {
   await nextTick();
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-  }
-};
-
-const loadChatHistory = async () => {
-  try {
-    const response = await getChatHistory(sessionId.value);
-    if (response.messages && response.messages.length > 0) {
-      messages.value = response.messages.map((msg: any, index: number) => {
-        let timestamp = new Date();
-        if (msg.timestamp) {
-          const parsed = new Date(msg.timestamp);
-          if (!isNaN(parsed.getTime())) {
-            timestamp = parsed;
-          }
-        }
-        return {
-          id: index,
-          role: msg.role as "user" | "assistant",
-          content: msg.content,
-          timestamp,
-        };
-      });
-      if (messages.value.length > 0) {
-        await scrollToBottom();
-        return;
-      }
-    }
-  } catch (error) {
-    console.error("Failed to load chat history:", error);
-  }
-  
-  messages.value = [
-    {
-      id: 0,
-      role: "assistant",
-      content: "Hello! I'm Endstate AI. What would you like to learn today?",
-      timestamp: new Date(),
-    },
-  ];
-};
-
-const sendMessage = async () => {
-  if (!inputMessage.value.trim() || isLoading.value) return;
-
-  const userText = inputMessage.value.trim();
-
-  messages.value.push({
-    id: Date.now(),
-    role: "user",
-    content: userText,
-    timestamp: new Date(),
-  });
-
-  inputMessage.value = "";
-  isLoading.value = true;
-  await scrollToBottom();
-
-  try {
-    const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value);
-
-    messages.value.push({
-      id: Date.now(),
-      role: "assistant",
-      content: response.content,
-      timestamp: new Date(),
-      sources: response.sources as Source[],
-    });
-  } catch (error) {
-    console.error(error);
-    messages.value.push({
-      id: Date.now(),
-      role: "assistant",
-      content: "I'm having trouble connecting to the server right now. Please try again later.",
-      timestamp: new Date(),
-    });
-  } finally {
-    isLoading.value = false;
-    await scrollToBottom();
   }
 };
 
@@ -134,8 +66,89 @@ const formatTime = (date: Date) => {
   });
 };
 
+const sendMessage = async () => {
+  if (!inputMessage.value.trim() || isLoading.value) return;
+
+  const userText = inputMessage.value.trim();
+
+  addMessage({
+    id: Date.now(),
+    role: "user",
+    content: userText,
+    timestamp: new Date(),
+  });
+
+  inputMessage.value = "";
+  setPending(userText);
+  await scrollToBottom();
+
+  try {
+    const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value);
+
+    addMessage({
+      id: Date.now(),
+      role: "assistant",
+      content: response.content,
+      timestamp: new Date(),
+      sources: response.sources as Source[],
+    });
+  } catch (error) {
+    console.error(error);
+    addMessage({
+      id: Date.now(),
+      role: "assistant",
+      content: "I'm having trouble connecting to the server right now. Please try again later.",
+      timestamp: new Date(),
+    });
+  } finally {
+    clearPending();
+    await scrollToBottom();
+  }
+};
+
+const checkPendingResponse = async () => {
+  if (pendingMessage.value && !isLoading.value) {
+    const timeSincePending = Date.now() - pendingMessage.value.timestamp;
+    if (timeSincePending > 2000) {
+      setLoading(true);
+      try {
+        const response = await apiSendChatMessage(pendingMessage.value.text, isSearchEnabled.value, sessionId.value);
+        addMessage({
+          id: Date.now(),
+          role: "assistant",
+          content: response.content,
+          timestamp: new Date(),
+          sources: response.sources as Source[],
+        });
+      } catch (error) {
+        console.error(error);
+        addMessage({
+          id: Date.now(),
+          role: "assistant",
+          content: "I'm having trouble connecting to the server right now. Please try again later.",
+          timestamp: new Date(),
+        });
+      } finally {
+        clearPending();
+        await scrollToBottom();
+      }
+    }
+  }
+};
+
 onMounted(() => {
-  loadChatHistory();
+  loadState();
+  if (messages.value.length === 0) {
+    messages.value = [
+      {
+        id: 0,
+        role: "assistant",
+        content: "Hello! I'm Endstate AI. What would you like to learn today?",
+        timestamp: new Date(),
+      },
+    ];
+  }
+  checkPendingResponse();
 });
 </script>
 
