@@ -144,6 +144,7 @@ export function useChat() {
       const response = await sendChatMessage(content, false, sessionId.value, requestId);
       
       if (response.already_processed) {
+        state.status = 'idle';
         await loadMessages();
         return;
       }
@@ -159,6 +160,12 @@ export function useChat() {
       console.error('Failed to send message:', e);
       state.status = 'error';
       state.error = e.message || 'Failed to send message';
+      
+      if (e.message?.includes('423') || e.message?.includes('processing')) {
+        state.status = 'processing';
+        state.isLocked = true;
+        state.error = null;
+      }
     }
   };
   
