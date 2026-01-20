@@ -14,8 +14,10 @@ export function useChatPersistence() {
     try {
       hasError.value = false;
       const response = await getChatHistory(sessionId);
+      
+      const newMessages: Message[] = [];
       if (response.messages && response.messages.length > 0) {
-        messages.value = response.messages.map((msg: any, index: number) => {
+        for (const msg of response.messages) {
           let timestamp = new Date();
           if (msg.timestamp) {
             const parsed = new Date(msg.timestamp);
@@ -23,22 +25,38 @@ export function useChatPersistence() {
               timestamp = parsed;
             }
           }
-          return {
-            id: index,
+          newMessages.push({
+            id: newMessages.length,
             role: msg.role as "user" | "assistant",
             content: msg.content,
             timestamp,
-          };
-        });
+          });
+        }
       } else {
-        messages.value = [
-          {
-            id: 0,
-            role: "assistant",
-            content: "Hello! I'm Endstate AI. What would you like to learn today?",
-            timestamp: new Date(),
-          },
-        ];
+        newMessages.push({
+          id: 0,
+          role: "assistant",
+          content: "Hello! I'm Endstate AI. What would you like to learn today?",
+          timestamp: new Date(),
+        });
+      }
+      
+      messages.value = newMessages;
+      
+      const savedPending = localStorage.getItem(PENDING_KEY);
+      if (savedPending) {
+        try {
+          const pending = JSON.parse(savedPending);
+          const alreadySent = newMessages.some(m => m.role === 'user' && m.content === pending.text);
+          if (alreadySent) {
+            localStorage.removeItem(PENDING_KEY);
+            pendingMessage.value = null;
+          } else {
+            pendingMessage.value = pending;
+          }
+        } catch (e) {
+          console.error('Failed to load pending:', e);
+        }
       }
     } catch (e) {
       console.error('Failed to load chat history:', e);
@@ -51,15 +69,6 @@ export function useChatPersistence() {
           timestamp: new Date(),
         },
       ];
-    }
-
-    try {
-      const savedPending = localStorage.getItem(PENDING_KEY);
-      if (savedPending) {
-        pendingMessage.value = JSON.parse(savedPending);
-      }
-    } catch (e) {
-      console.error('Failed to load pending:', e);
     }
   };
 

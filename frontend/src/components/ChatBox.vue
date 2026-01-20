@@ -178,6 +178,15 @@ onMounted(async () => {
   await scrollToBottom();
   
   if (pendingMessage.value && !isLoading.value) {
+    const alreadySent = messages.value.some(
+      m => m.role === 'user' && m.content === pendingMessage.value?.text
+    );
+    
+    if (alreadySent) {
+      clearPending();
+      return;
+    }
+    
     cancelPendingRequest();
     abortController.value = new AbortController();
     setLoading(true);
