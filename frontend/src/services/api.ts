@@ -43,6 +43,7 @@ export interface ChatResponse {
     url: string;
   }>;
   summary_saved?: boolean;
+  is_processing?: boolean;
 }
 
 export interface DashboardStats {
@@ -155,8 +156,16 @@ export async function getNodeConnections(nodeId: string): Promise<{ node_id: str
   return response.json();
 }
 
-export async function getChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
+export async function getChatHistory(sessionId: string): Promise<{ messages: Array<{ role: string; content: string; timestamp: string }>; is_locked?: boolean }> {
   const response = await fetch(`${API_URL}/api/chat/${sessionId}/messages`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function checkSessionLocked(sessionId: string): Promise<{ locked: boolean }> {
+  const response = await fetch(`${API_URL}/api/chat/${sessionId}/locked`);
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }

@@ -327,7 +327,7 @@ class Neo4jClient:
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        pass  # Don't close - let connection pool manage lifecycle
 
     def create_chat_session(self, session_id: str) -> None:
         """Create a new chat session node."""
@@ -378,6 +378,21 @@ class Neo4jClient:
             "MATCH (s:ChatSession {id: $session_id}) DETACH DELETE s",
             {"session_id": session_id}
         )
+
+    def set_session_locked(self, session_id: str, locked: bool) -> None:
+        """Set the locked state of a chat session."""
+        self.query(
+            "MATCH (s:ChatSession {id: $session_id}) SET s.is_processing = $locked",
+            {"session_id": session_id, "locked": locked}
+        )
+
+    def is_session_locked(self, session_id: str) -> bool:
+        """Check if a chat session is locked (processing)."""
+        result = self.query(
+            "MATCH (s:ChatSession {id: $session_id}) RETURN s.is_processing as locked",
+            {"session_id": session_id}
+        )
+        return result[0].get("locked", False) if result else False
 
     def get_node_by_id(self, node_id: str) -> Optional[dict]:
         """Get a node by its ID."""

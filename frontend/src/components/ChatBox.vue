@@ -2,7 +2,7 @@
 import { ref, nextTick, onMounted } from "vue";
 import { Send, Bot, User, Globe, ExternalLink, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
-import { sendChatMessage as apiSendChatMessage, resetChatSession } from "../services/api";
+import { sendChatMessage as apiSendChatMessage, resetChatSession, checkSessionLocked } from "../services/api";
 import { useChatPersistence } from "../composables/useChatPersistence";
 
 interface Source {
@@ -39,6 +39,7 @@ const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const isResetting = ref(false);
 const abortController = ref<AbortController | null>(null);
+const isProcessing = ref(false);
 
 const { 
   messages, 
@@ -101,7 +102,7 @@ const resetConversation = async () => {
 };
 
 const sendMessage = async () => {
-  if (!inputMessage.value.trim() || isLoading.value) return;
+  if (!inputMessage.value.trim() || isLoading.value || isProcessing.value) return;
 
   const userText = inputMessage.value.trim();
 
@@ -122,13 +123,24 @@ const sendMessage = async () => {
   try {
     const response = await apiSendChatMessage(userText, isSearchEnabled.value, sessionId.value, abortController.value.signal);
 
-    addMessage({
-      id: Date.now(),
-      role: "assistant",
-      content: response.content,
-      timestamp: new Date(),
-      sources: response.sources as Source[],
-    });
+    if (response.is_processing) {
+      isProcessing.value = true;
+      addMessage({
+        id: Date.now(),
+        role: "assistant",
+        content: response.content,
+        timestamp: new Date(),
+      });
+      pollForProcessingComplete();
+    } else {
+      addMessage({
+        id: Date.now(),
+        role: "assistant",
+        content: response.content,
+        timestamp: new Date(),
+        sources: response.sources as Source[],
+      });
+    }
   } catch (error: any) {
     if (error.name === 'AbortError') {
       console.log('Request was cancelled');
@@ -142,9 +154,42 @@ const sendMessage = async () => {
       timestamp: new Date(),
     });
   } finally {
+    if (!isProcessing.value) {
+      abortController.value = null;
+      clearPending();
+    }
+    await scrollToBottom();
+  }
+};
+
+const pollForProcessingComplete = async () => {
+  const pollInterval = 2000;
+  let attempts = 0;
+  const maxAttempts = 30;
+
+  while (isProcessing.value && attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    attempts++;
+
+    try {
+      const result = await checkSessionLocked(sessionId.value);
+      if (!result.locked) {
+        isProcessing.value = false;
+        abortController.value = null;
+        clearPending();
+        await loadState(sessionId.value);
+        await scrollToBottom();
+        break;
+      }
+    } catch (e) {
+      console.error('Error polling for processing status:', e);
+    }
+  }
+
+  if (isProcessing.value && attempts >= maxAttempts) {
+    isProcessing.value = false;
     abortController.value = null;
     clearPending();
-    await scrollToBottom();
   }
 };
 
@@ -290,6 +335,35 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <div v-else-if="isProcessing" class="flex gap-3 animate-fade-in">
+        <div
+          class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0"
+        >
+          <Bot :size="16" class="text-white" />
+        </div>
+        <div
+          class="bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200"
+        >
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-amber-600 mr-2">Creating project plan...</span>
+            <div class="flex gap-1">
+              <span
+                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
+                style="animation-delay: 0ms"
+              ></span>
+              <span
+                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
+                style="animation-delay: 150ms"
+              ></span>
+              <span
+                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
+                style="animation-delay: 300ms"
+              ></span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="p-4 bg-white border-t border-surface-200">
@@ -308,20 +382,21 @@ onMounted(async () => {
             <Globe :size="18" />
           </button>
 
-          <div class="relative flex-1">
+            <div class="relative flex-1">
             <textarea
               v-model="inputMessage"
               @keydown.enter.prevent="sendMessage"
               placeholder="Ask anything about your learning goals..."
               rows="1"
-              class="w-full h-full min-h-[44px] px-4 py-2.5 pr-10 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal"
+              class="w-full h-full min-h-[44px] px-4 py-2.5 pr-10 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal disabled:opacity-50"
+              :disabled="isProcessing"
             ></textarea>
 
             <button
               @click="sendMessage"
-              :disabled="!inputMessage.trim() || isLoading"
+              :disabled="!inputMessage.trim() || isLoading || isProcessing"
               class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors text-surface-300 hover:text-primary-600 disabled:cursor-not-allowed"
-              :class="{ 'text-primary-600': inputMessage.trim() && !isLoading }"
+              :class="{ 'text-primary-600': inputMessage.trim() && !isLoading && !isProcessing }"
             >
               <Send :size="18" />
             </button>
@@ -329,11 +404,11 @@ onMounted(async () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            Chat history stored on backend. Agree to a project to create a summary.
+            {{ isProcessing ? 'Creating project plan... Please wait.' : 'Chat history stored on backend. Agree to a project to create a summary.' }}
           </p>
           <button
             @click="resetConversation"
-            :disabled="isResetting || isLoading"
+            :disabled="isResetting || isLoading || isProcessing"
             class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
           >
             <RotateCcw :size="12" />

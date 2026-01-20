@@ -2,13 +2,13 @@
 Endstate API Server
 FastAPI backend for the knowledge graph visualization, management, and chat interface.
 """
+import asyncio
+import json
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime
 
-from backend.config import Config
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.llm.provider import get_llm
 
@@ -27,6 +27,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     content: str
     sources: Optional[List[dict]] = None
+    summary_saved: bool = False
+    is_processing: bool = False
 
 
 class DashboardStatsResponse(BaseModel):
@@ -284,20 +286,14 @@ def chat(request: ChatRequest):
 def send_chat_message(session_id: str, request: ChatRequest):
     """
     Send a message in a persistent chat session.
-    Uses project planning agent that proposes projects and extracts summaries.
-    
-    Args:
-        session_id: Chat session identifier
-        request: Chat request with message and web search option
-        
-    Returns:
-        Chat response with content and optional sources
     """
-    from backend.services.summary_cache import summary_cache
     from backend.services.agent_prompts import get_chat_system_prompt
     
     service = get_service()
     try:
+        if service.db.is_session_locked(session_id):
+            raise HTTPException(status_code=423, detail="Session is processing. Please wait.")
+        
         service.db.create_chat_session(session_id)
         service.db.add_chat_message(session_id, "user", request.message)
         
@@ -310,6 +306,7 @@ def send_chat_message(session_id: str, request: ChatRequest):
         
         response_text = ""
         summary_saved = False
+        is_processing = False
         
         user_message_lower = request.message.lower().strip()
         
@@ -324,14 +321,20 @@ def send_chat_message(session_id: str, request: ChatRequest):
         is_acceptance = any(pattern in user_message_lower for pattern in acceptance_patterns)
         
         if is_acceptance:
-            has_summary, summary_data, _ = extract_summary_simple(history)
+            has_summary, summary_data = extract_summary_fast(history)
             if has_summary and summary_data:
-                if summary_cache.save(session_id, summary_data):
-                    response_text = f"Excellent! I've saved your project plan: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**. View it in the Projects tab."
-                    service.db.add_chat_message(session_id, "assistant", response_text)
-                    summary_saved = True
-                else:
-                    response_text = "I had trouble saving the summary. Let me try again."
+                service.db.set_session_locked(session_id, True)
+                response_text = f"Excellent! I'm creating a detailed project plan for you: **{summary_data.get('agreed_project', {}).get('name', 'Untitled')}**. This will just a moment..."
+                service.db.add_chat_message(session_id, "assistant", response_text)
+                
+                asyncio.create_task(extract_summary_async(session_id, history.copy()))
+                
+                return {
+                    "content": response_text,
+                    "sources": None,
+                    "summary_saved": False,
+                    "is_processing": True,
+                }
             else:
                 response_text = "I don't have a clear project proposal to accept yet. Let's continue discussing your goals."
         else:
@@ -344,22 +347,47 @@ def send_chat_message(session_id: str, request: ChatRequest):
             "content": response_text,
             "sources": None,
             "summary_saved": summary_saved,
+            "is_processing": is_processing,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def extract_summary_async(session_id: str, history: list[dict]):
+    """Extract summary asynchronously in the background."""
+    from backend.services.summary_cache import summary_cache
+    
+    try:
+        has_llm_summary, llm_summary = extract_summary_llm(history)
+        if has_llm_summary and llm_summary:
+            if summary_cache.save(session_id, llm_summary):
+                service = get_service()
+                project_name = llm_summary.get('agreed_project', {}).get('name', 'Untitled')
+                msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
+                service.db.add_chat_message(session_id, "assistant", msg)
+        else:
+            has_fast, fast_summary = extract_summary_fast(history)
+            if has_fast and fast_summary:
+                summary_cache.save(session_id, fast_summary)
+    except Exception as e:
+        print(f"Error extracting summary for session {session_id}: {e}")
     finally:
-        service.close()
+        try:
+            service = get_service()
+            service.db.set_session_locked(session_id, False)
+        except Exception:
+            pass
 
 
-def extract_summary_simple(history: list[dict]) -> tuple[bool, dict | None, str]:
-    """
-    Simple summary extraction that only triggers when user accepts.
-    """
+def extract_summary_llm(history: list[dict]) -> tuple[bool, dict | None]:
+    """Extract summary using LLM for high-quality results."""
     from backend.llm.provider import get_llm
     
     user_msgs = [m for m in history if m["role"] == "user"]
     if len(user_msgs) < 3:
-        return False, None, "Not enough conversation history"
+        return False, None
     
     last_assistant_msg = None
     for msg in reversed(history):
@@ -367,11 +395,8 @@ def extract_summary_simple(history: list[dict]) -> tuple[bool, dict | None, str]
             last_assistant_msg = msg["content"]
             break
     
-    if not last_assistant_msg:
-        return False, None, "No assistant message found"
-    
-    if "accept" not in last_assistant_msg.lower():
-        return False, None, "No project proposal in last assistant message"
+    if not last_assistant_msg or "accept" not in last_assistant_msg.lower():
+        return False, None
     
     prompt = """You are a learning project planner. Extract a structured project summary from the conversation.
 
@@ -399,48 +424,111 @@ Conversation:
     try:
         llm = get_llm()
         response = llm.invoke([("human", prompt)])
-        content = response.content if hasattr(response, 'content') else str(response)
+        content = str(response.content if hasattr(response, 'content') else response)
         
         if "NOT_READY" in content.upper():
-            return False, None, content
+            return False, None
         
-        import json
         try:
             data = json.loads(content)
-            return True, data, content
+            return True, data
         except json.JSONDecodeError:
             import re
             json_match = re.search(r'\{[^{}]+\}', content)
             if json_match:
                 try:
                     data = json.loads(json_match.group())
-                    return True, data, content
-                except:
+                    return True, data
+                except (json.JSONDecodeError, ValueError):
                     pass
-            return False, None, content
+            return False, None
     except Exception as e:
-        return False, None, str(e)
+        print(f"LLM summary extraction error: {e}")
+        return False, None
+
+
+def extract_summary_fast(history: list[dict]) -> tuple[bool, dict]:
+    """Fast summary extraction without extra LLM call."""
+    user_msgs = [m for m in history if m["role"] == "user"]
+    if len(user_msgs) < 3:
+        return False, {}
+    
+    last_assistant = None
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            last_assistant = msg["content"]
+            break
+    
+    if not last_assistant or "accept" not in last_assistant.lower():
+        return False, {}
+    
+    interests = set()
+    skills = set()
+    topics = set()
+    
+    for msg in history[-8:]:
+        content = msg.get("content", "").lower()
+        if "machine learning" in content or "ml" in content:
+            interests.add("machine learning")
+        if "python" in content:
+            topics.add("python")
+        if "deep learning" in content or "neural network" in content:
+            topics.add("deep learning")
+        if "computer vision" in content:
+            topics.add("computer vision")
+        if "nlp" in content or "natural language" in content:
+            topics.add("nlp")
+        if "data" in content and "science" in content:
+            interests.add("data science")
+        if "web" in content and "develop" in content:
+            interests.add("web development")
+    
+    if len(interests) == 0 and len(topics) == 0:
+        return False, {}
+    
+    summary = {
+        "user_profile": {
+            "interests": list(interests)[:5],
+            "skill_level": "not specified",
+            "time_available": "not specified",
+            "learning_style": "not specified"
+        },
+        "agreed_project": {
+            "name": "Learning Project",
+            "description": last_assistant.split("?")[0] + "?",
+            "timeline": "2-4 weeks",
+            "milestones": ["Set up environment", "Learn fundamentals", "Build project"]
+        },
+        "topics": list(topics)[:10],
+        "skills": list(skills)[:10],
+        "concepts": []
+    }
+    return True, summary
 
 
 @app.get("/api/chat/{session_id}/messages")
 def get_chat_history(session_id: str):
     """
     Get chat history for a session.
-    
-    Args:
-        session_id: Chat session identifier
-        
-    Returns:
-        List of chat messages
     """
     service = get_service()
     try:
         history = service.db.get_chat_history(session_id)
-        return {"messages": history}
+        is_locked = service.db.is_session_locked(session_id)
+        return {"messages": history, "is_locked": is_locked}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
+
+
+@app.get("/api/chat/{session_id}/locked")
+def check_session_locked(session_id: str):
+    """Check if a chat session is locked (processing)."""
+    service = get_service()
+    try:
+        locked = service.db.is_session_locked(session_id)
+        return {"locked": locked}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/chat")
@@ -452,8 +540,6 @@ def list_chat_sessions():
         return {"sessions": sessions}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.delete("/api/chat/{session_id}")
@@ -465,8 +551,6 @@ def delete_chat_session(session_id: str):
         return {"message": "Session deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.post("/api/chat/{session_id}/reset")
@@ -479,20 +563,12 @@ def reset_chat_session(session_id: str):
         return {"message": "Session reset", "session_id": session_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.delete("/api/graph/nodes/{node_id}")
 def delete_node(node_id: str):
     """
     Delete a node and all its connected relationships.
-    
-    Args:
-        node_id: The ID of the node to delete
-        
-    Returns:
-        Deletion result with count of deleted relationships
     """
     service = get_service()
     try:
@@ -504,22 +580,12 @@ def delete_node(node_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.delete("/api/graph/relationships")
 def delete_relationship(source_id: str, target_id: str, rel_type: str):
     """
     Delete a specific relationship between two nodes.
-    
-    Args:
-        source_id: Source node ID
-        target_id: Target node ID
-        rel_type: Relationship type
-        
-    Returns:
-        Deletion result
     """
     service = get_service()
     try:
@@ -531,20 +597,12 @@ def delete_relationship(source_id: str, target_id: str, rel_type: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/graph/node/{node_id}/connections")
 def get_node_connections(node_id: str):
     """
     Get all connections for a node.
-    
-    Args:
-        node_id: The ID of the node
-        
-    Returns:
-        List of connected nodes with relationship types
     """
     service = get_service()
     try:
@@ -552,14 +610,11 @@ def get_node_connections(node_id: str):
         return {"node_id": node_id, "connections": connections}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        service.close()
 
 
 @app.get("/api/projects")
 def list_projects():
     """List all project summaries."""
-    import os
     from pathlib import Path
     
     cache_dir = Path.home() / ".endstate" / "summaries"
