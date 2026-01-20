@@ -95,6 +95,15 @@ const formatPropertyValue = (value: any): string => {
 };
 
 const loadGraphData = async () => {
+  // Stop any existing simulation
+  if (simulation) {
+    simulation.stop();
+    simulation = null;
+  }
+  if (svgElement) {
+    svgElement.selectAll("*").remove();
+  }
+  
   isLoading.value = true;
   loadError.value = null;
   selectedNode.value = null;
@@ -182,16 +191,25 @@ const confirmDelete = (node: GraphNode) => {
 const handleDelete = async () => {
   if (!deletingNode.value) return;
   
-  const nodeToDelete = deletingNode.value;
+  const nodeIdToDelete = deletingNode.value.id;
+  const nodeLabel = deletingNode.value.label;
   showDeleteConfirm.value = false;
+  deletingNode.value = null;
+  selectedNode.value = null;
+  
+  // Stop current simulation to clean up
+  if (simulation) {
+    simulation.stop();
+    simulation = null;
+  }
+  
   isLoading.value = true;
   
   try {
-    await deleteNode(nodeToDelete.id);
-    selectedNode.value = null;
+    await deleteNode(nodeIdToDelete);
     await loadGraphData();
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : 'Failed to delete node';
+    loadError.value = error instanceof Error ? error.message : `Failed to delete "${nodeLabel}"`;
     isLoading.value = false;
   }
 };

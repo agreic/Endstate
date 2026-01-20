@@ -399,19 +399,29 @@ class Neo4jClient:
         Returns:
             Dictionary with deleted node id and count of deleted relationships
         """
-        result = self.query(
+        # First get the count of relationships
+        count_result = self.query(
             """
-            MATCH (n {id: $node_id})
-            OPTIONAL MATCH (n)-[r]-()
-            WITH n, COUNT(r) as rel_count
-            DETACH DELETE n
-            RETURN n.id as id, rel_count
+            MATCH (n {id: $node_id})-[r]-()
+            RETURN COUNT(r) as rel_count
             """,
             {"node_id": node_id}
         )
-        if result:
-            return {"deleted_node_id": node_id, "relationships_deleted": result[0].get("rel_count", 0)}
-        return {"deleted_node_id": node_id, "relationships_deleted": 0, "error": "Node not found"}
+        rel_count = count_result[0].get("rel_count", 0) if count_result else 0
+        
+        # Then delete the node with relationships
+        self.query(
+            """
+            MATCH (n {id: $node_id})
+            DETACH DELETE n
+            """,
+            {"node_id": node_id}
+        )
+        
+        return {
+            "deleted_node_id": node_id,
+            "relationships_deleted": rel_count
+        }
 
     def delete_relationship(self, source_id: str, target_id: str, rel_type: str) -> dict:
         """
