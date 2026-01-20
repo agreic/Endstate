@@ -37,12 +37,9 @@ export interface ChatMessage {
 }
 
 export interface ChatResponse {
-  content: string;
-  sources?: Array<{
-    title: string;
-    url: string;
-  }>;
-  summary_saved?: boolean;
+  success: boolean;
+  content?: string;
+  already_processed?: boolean;
   is_processing?: boolean;
 }
 
@@ -196,17 +193,24 @@ export async function sendChatMessage(
   message: string,
   enableSearch: boolean = false,
   sessionId?: string,
+  requestId?: string,
   signal?: AbortSignal
 ): Promise<ChatResponse> {
   const endpoint = sessionId 
     ? `${API_URL}/api/chat/${sessionId}/messages`
     : `${API_URL}/api/chat`;
   
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  if (requestId) {
+    headers['X-Request-ID'] = requestId;
+  }
+  
   const init: RequestInit = {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       message,
       enable_web_search: enableSearch,
