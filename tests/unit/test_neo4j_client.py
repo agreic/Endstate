@@ -604,11 +604,11 @@ class TestNeo4jClientContextManager:
     @patch.object(Neo4jClient, "graph", new_callable=PropertyMock)
     @patch.object(Neo4jClient, "close")
     def test_context_manager_exit(self, mock_close, mock_graph_prop):
-        """Test context manager exit calls close."""
+        """Test context manager exit does NOT close connection (connection pool manages lifecycle)."""
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)
 
         with client:
             pass
 
-        mock_close.assert_called_once()
+        mock_close.assert_not_called()

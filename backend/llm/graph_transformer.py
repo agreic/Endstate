@@ -1,8 +1,7 @@
 """
 Graph transformer module for converting text to knowledge graphs.
 """
-from typing import Optional, Union
-import asyncio
+from typing import Optional
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel

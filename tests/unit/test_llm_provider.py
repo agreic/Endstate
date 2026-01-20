@@ -3,7 +3,7 @@ Unit tests for LLM provider module.
 Tests focus on Ollama (local) as requested.
 """
 import os
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 import pytest
 
 from backend.llm.provider import (

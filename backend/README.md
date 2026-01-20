@@ -21,10 +21,85 @@ backend/
 │   └── skill_graph.py    # Skill dependency schemas
 ├── services/             # Service layer
 │   ├── __init__.py
+│   ├── chat_service.py   # Chat with SSE real-time updates
 │   └── knowledge_graph.py  # High-level KG service
-└── examples/             # Usage examples
-    └── basic_usage.py
+└── main.py               # FastAPI application
 ```
+
+## Chat Service (`services/chat_service.py`)
+
+The chat service provides persistent conversations with real-time SSE updates.
+
+### Quick Start
+
+```python
+from backend.services.chat_service import chat_service
+
+# Send a message (idempotent via request_id)
+response = await chat_service.send_message(
+    session_id="user-123",
+    content="I want to learn Python",
+    request_id="unique-request-id"  # For idempotency
+)
+# Response: ChatResponse(success=True, content="...", is_processing=False)
+
+# Get all messages
+messages = chat_service.get_messages("user-123")
+# Returns: [{"role": "user", "content": "...", "timestamp": "...", "request_id": "..."}]
+
+# Check if session is locked (processing)
+is_locked = chat_service.is_locked("user-123")
+
+# Reset session (cancels any ongoing processing)
+chat_service.delete_session("user-123")
+chat_service.create_session("user-123")
+```
+
+### Key Classes
+
+**ChatService:**
+- `send_message(session_id, content, request_id)` - Send message, returns `ChatResponse`
+- `get_messages(session_id)` - Get all messages with timestamps
+- `is_locked(session_id)` - Check if processing
+- `event_stream(session_id)` - Generate SSE events
+
+**BackgroundTaskStore:**
+- Stores running background tasks (like async summary extraction)
+- `store(session_id, task)` - Store a task
+- `cancel(session_id)` - Cancel a task
+- `notify(session_id, event, data)` - Notify subscribers via SSE
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/{id}/messages` | POST | Send message (idempotent) |
+| `/api/chat/{id}/stream` | GET | SSE event stream |
+| `/api/chat/{id}/messages` | GET | Get all messages |
+| `/api/chat/{id}/reset` | POST | Reset and cancel processing |
+| `/api/chat/{id}/locked` | GET | Check lock status |
+
+### SSE Events
+
+The `/api/chat/{id}/stream` endpoint emits:
+
+- `initial_messages` - Initial message history and lock status
+- `message_added` - New message added
+- `processing_started` - Started async processing
+- `processing_complete` - Finished async processing
+- `processing_cancelled` - Processing was cancelled (reset)
+- `session_reset` - Session was reset
+
+### Project Acceptance & Summary Extraction
+
+When user accepts a project proposal:
+1. Session is locked (prevents new messages)
+2. "Creating project plan..." message added
+3. Background task extracts summary via LLM
+4. Completion message added with project plan
+5. Session unlocked
+
+The `X-Request-ID` header ensures idempotency - duplicate requests are detected and ignored.
 
 ## Quick Start
 

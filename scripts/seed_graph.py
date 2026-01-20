@@ -145,7 +145,7 @@ def seed_sample_data():
         
         # Get stats
         stats = client.get_graph_stats()
-        print(f"\nGraph created successfully!")
+        print("\nGraph created successfully!")
         print(f"  Total nodes: {stats['total_nodes']}")
         print(f"  Total relationships: {stats['total_relationships']}")
         print(f"  Nodes by type: {stats['nodes']}")

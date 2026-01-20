@@ -9,7 +9,6 @@ This module provides the core chat functionality with:
 """
 import asyncio
 import json
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, AsyncGenerator

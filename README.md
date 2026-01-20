@@ -16,11 +16,54 @@ For more info, see the [[IDEA.md]] file.
 endstate/
 ├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
 │   ├── src/           # Source code
+│   │   ├── components/# Vue components (ChatBox.vue, etc.)
+│   │   ├── composables/# Vue composables (useChat.ts)
+│   │   └── services/  # API client (api.ts)
 │   ├── public/        # Static assets
 │   └── dist/          # Build output
-├── src/               # Python backend services
+├── backend/            # Python FastAPI backend
+│   ├── services/      # Service layer (chat_service.py, knowledge_graph.py)
+│   ├── db/            # Database layer (neo4j_client.py)
+│   └── main.py        # FastAPI application
 └── tests/             # Test files
 ```
+
+## Key Features
+
+### Chat System
+
+The chat system provides persistent, real-time conversations with the following architecture:
+
+**Backend (`backend/services/chat_service.py`):**
+- `ChatService` - Main service for chat operations
+- `BackgroundTaskStore` - Manages background tasks (like async summary extraction) with cancellation support
+- `send_message()` - Idempotent message sending via `X-Request-ID` header
+- `event_stream()` - SSE endpoint for real-time updates
+- Automatic project summary extraction after user accepts a project proposal
+
+**Frontend (`frontend/src/composables/useChat.ts`):**
+- `useChat()` - Composable for chat state management
+- SSE event stream connection with automatic reconnection
+- Single `status` state: `idle` | `loading` | `processing` | `error`
+- Backend is source of truth - no local message duplication
+
+**Flow:**
+1. User sends message → Frontend calls `POST /api/chat/{id}/messages`
+2. Message stored in Neo4j with `request_id` for idempotency
+3. Response returned (with `is_processing: true` if project accepted)
+4. Frontend shows loading/processing indicator
+5. SSE stream updates messages in real-time
+6. Reset button cancels ongoing processing and clears session
+
+**Endpoints:**
+- `POST /api/chat/{id}/messages` - Send message (idempotent)
+- `GET /api/chat/{id}/stream` - SSE event stream
+- `GET /api/chat/{id}/messages` - Get all messages
+- `POST /api/chat/{id}/reset` - Reset session (cancels processing)
+
+### Knowledge Graph
+
+See [[backend/README.md]] for detailed knowledge graph documentation.
 
 ## Installation
 

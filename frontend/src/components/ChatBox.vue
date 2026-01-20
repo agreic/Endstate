@@ -198,11 +198,11 @@ const handleReset = async () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            {{ state.status === 'processing' ? 'Creating project plan... Please wait.' : 'Chat history stored on backend. Agree to a project to create a summary.' }}
+            {{ state.status === 'processing' ? 'Creating project plan... Please wait or reset.' : 'Chat history stored on backend. Agree to a project to create a summary.' }}
           </p>
           <button
             @click="handleReset"
-            :disabled="state.status !== 'idle'"
+            :disabled="state.status === 'loading'"
             class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
           >
             <RotateCcw :size="12" />

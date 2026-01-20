@@ -2,8 +2,7 @@
 Neo4j database client for Endstate.
 Provides connection management and graph operations.
 """
-from typing import Any, Optional
-from contextlib import contextmanager
+from typing import Optional
 
 from langchain_neo4j import Neo4jGraph
 from neo4j import GraphDatabase, Result, RoutingControl

@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.services.knowledge_graph import KnowledgeGraphService
-from backend.services.chat_service import chat_service
+from backend.services.chat_service import chat_service, BackgroundTaskStore
 
 
 class ChatMessage(BaseModel):
@@ -284,6 +284,12 @@ async def reset_chat_session(session_id: str):
     """Reset a chat session and cancel any ongoing processing."""
     chat_service.delete_session(session_id)
     chat_service.create_session(session_id)
+    
+    # Notify all subscribers that session was reset
+    await BackgroundTaskStore.notify(session_id, "session_reset", {
+        "message": "Session reset",
+    })
+    
     return {"message": "Session reset", "session_id": session_id}
 
 

@@ -172,8 +172,19 @@ export function useChat() {
   const resetChat = async (): Promise<void> => {
     if (state.status === 'loading') return;
     
+    // Cancel any pending requests
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    
     try {
       await resetChatSession(sessionId.value);
+      
       state.messages = [{
         id: 0,
         role: 'assistant',
@@ -183,6 +194,9 @@ export function useChat() {
       state.status = 'idle';
       state.error = null;
       state.isLocked = false;
+      
+      // Reconnect to the new session
+      connectEventStream();
     } catch (e) {
       console.error('Failed to reset chat:', e);
       state.error = 'Failed to reset chat';

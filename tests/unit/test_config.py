@@ -2,8 +2,7 @@
 Unit tests for configuration module.
 """
 import os
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from backend.config import (
     Neo4jConfig,
@@ -102,10 +101,10 @@ class TestLLMConfig:
     """Tests for LLMConfig class."""
 
     def test_default_provider(self):
-        """Test default LLM provider."""
+        """Test default LLM provider is ollama."""
         with patch.dict(os.environ, {}, clear=True):
             config = LLMConfig()
-            assert config.provider == "gemini"
+            assert config.provider == "ollama"
 
     def test_ollama_provider(self):
         """Test Ollama provider configuration."""

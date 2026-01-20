@@ -4,7 +4,6 @@ Tests require running Neo4j and Ollama instances.
 Run with: uv run pytest tests/integration/ -v
 """
 import os
-from typing import Optional
 import pytest
 
 from backend.config import Config, Neo4jConfig, LLMConfig, OllamaConfig

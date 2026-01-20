@@ -3,7 +3,6 @@ Project Summary Cache Service
 Handles storing and retrieving project summaries.
 """
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any

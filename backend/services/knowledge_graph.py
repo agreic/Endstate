@@ -3,9 +3,7 @@ Knowledge Graph Service for Endstate.
 High-level service that combines LLM extraction with database operations.
 """
 from typing import Optional, Union
-import asyncio
 
-from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
 
 from ..config import config, Config

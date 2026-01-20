@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { 
   Home, 
   MessageSquare, 
@@ -19,6 +19,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   toggle: []
   navigate: [tab: 'dashboard' | 'chat' | 'graph' | 'projects']
+  openSettings: []
+  openHelp: []
 }>()
 
 const menuItems = [
@@ -28,14 +30,9 @@ const menuItems = [
   { icon: FolderOpen, label: 'Projects', tab: 'projects' as const },
 ]
 
-const secondaryItems = [
-  { icon: Settings, label: 'Settings', tab: null as 'dashboard' | 'chat' | 'graph' | 'projects' | null },
-  { icon: HelpCircle, label: 'Help', tab: null as 'dashboard' | 'chat' | 'graph' | 'projects' | null },
-]
-
-const handleNavigate = (tab: 'dashboard' | 'chat' | 'graph' | 'projects' | null) => {
+const handleNavigate = (tab: string | null) => {
   if (tab) {
-    emit('navigate', tab)
+    emit('navigate', tab as 'dashboard' | 'chat' | 'graph' | 'projects')
   }
 }
 </script>
@@ -85,28 +82,35 @@ const handleNavigate = (tab: 'dashboard' | 'chat' | 'graph' | 'projects' | null)
           <span class="text-xs text-surface-500 uppercase tracking-wider font-medium">Support</span>
         </div>
         <ul class="space-y-1 px-2">
-          <li v-for="item in secondaryItems" :key="item.label">
+          <li>
             <button 
-              @click="handleNavigate(item.tab)"
-              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-              :class="item.tab && activeTab === item.tab 
-                ? 'bg-primary-600 text-white' 
-                : 'text-surface-300 hover:bg-surface-800 hover:text-white'"
+              @click="emit('openSettings')"
+              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-surface-300 hover:bg-surface-800 hover:text-white"
             >
-              <component :is="item.icon" :size="20" />
-              <span v-if="isOpen" class="text-sm font-medium">{{ item.label }}</span>
+              <Settings :size="20" />
+              <span v-if="isOpen" class="text-sm font-medium">Settings</span>
+            </button>
+          </li>
+          <li>
+            <button 
+              @click="emit('openHelp')"
+              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-surface-300 hover:bg-surface-800 hover:text-white"
+            >
+              <HelpCircle :size="20" />
+              <span v-if="isOpen" class="text-sm font-medium">Help</span>
             </button>
           </li>
         </ul>
       </nav>
 
       <div v-if="isOpen" class="p-4 border-t border-surface-700">
-        <div class="bg-surface-800 rounded-lg p-3">
-          <p class="text-xs text-surface-400 mb-2">Need help?</p>
-          <button class="w-full py-1.5 bg-surface-700 hover:bg-surface-600 rounded text-xs font-medium transition-colors">
-            Documentation
-          </button>
-        </div>
+        <button 
+          @click="emit('openHelp')"
+          class="w-full bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-700 hover:to-primary-600 rounded-lg p-3 transition-all"
+        >
+          <p class="text-sm font-medium text-white">Getting Started</p>
+          <p class="text-xs text-primary-100 mt-0.5">Learn how to use Endstate</p>
+        </button>
       </div>
     </div>
   </aside>

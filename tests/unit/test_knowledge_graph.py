@@ -2,12 +2,10 @@
 Unit tests for knowledge graph service.
 Tests service layer combining LLM and database operations.
 """
-from unittest.mock import patch, MagicMock, PropertyMock
-import pytest
+from unittest.mock import patch, MagicMock
 
 from backend.services.knowledge_graph import KnowledgeGraphService
-from backend.config import Config, Neo4jConfig, LLMConfig, OllamaConfig
-from backend.llm.provider import LLMProvider
+from backend.config import Config, Neo4jConfig, LLMConfig
 
 
 class TestKnowledgeGraphServiceInit:
@@ -179,7 +177,7 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        result = service.test_connection()
+        _ = service.test_connection()
 
         assert result["database"] is True
         assert result["llm"] is True
@@ -203,7 +201,7 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        result = service.test_connection()
+        _ = service.test_connection()
 
         assert result["database"] is False
         assert "Connection refused" in result["database_error"]
@@ -226,7 +224,7 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        result = service.test_connection()
+        _ = service.test_connection()
 
         assert result["database"] is True
         assert result["llm"] is False
@@ -251,7 +249,7 @@ class TestKnowledgeGraphServiceExtract:
 
         service = KnowledgeGraphService()
 
-        result = service.extract("Python is a programming language")
+        _ = service.extract("Python is a programming language")
 
         mock_transformer_instance.process_text.assert_called_once_with(
             "Python is a programming language"
@@ -274,7 +272,7 @@ class TestKnowledgeGraphServiceExtract:
         service = KnowledgeGraphService()
 
         texts = ["Text 1", "Text 2"]
-        result = service.extract_many(texts)
+        _ = service.extract_many(texts)
 
         mock_transformer_instance.process_texts.assert_called_once_with(texts)
 
@@ -323,7 +321,7 @@ class TestKnowledgeGraphServiceExtractAndAdd:
 
         service = KnowledgeGraphService()
 
-        result = service.extract_and_add("Python is great")
+        _ = service.extract_and_add("Python is great")
 
         mock_transformer_instance.process_text.assert_called_once_with("Python is great")
         mock_db.add_graph_documents.assert_called_once_with(
@@ -463,7 +461,7 @@ class TestKnowledgeGraphServiceQuery:
 
         service = KnowledgeGraphService()
 
-        result = service.query("MATCH (n) RETURN n LIMIT 1")
+        _ = service.query("MATCH (n) RETURN n LIMIT 1")
 
         mock_db.query.assert_called_once_with("MATCH (n) RETURN n LIMIT 1", None)
 
@@ -482,7 +480,7 @@ class TestKnowledgeGraphServiceQuery:
 
         service = KnowledgeGraphService()
 
-        result = service.query("MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"})
+        result = _ = service.query("MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"})
 
         mock_db.query.assert_called_once_with(
             "MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"}

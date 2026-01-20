@@ -1,7 +1,6 @@
 """
 Unit tests for graph schema classes.
 """
-import pytest
 
 from backend.schemas.base import GraphSchema
 from backend.schemas.skill_graph import SkillGraphSchema, MinimalSkillSchema, ContentExtractionSchema
