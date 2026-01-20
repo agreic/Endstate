@@ -240,39 +240,37 @@ onMounted(() => {
 
     <div class="p-4 bg-white border-t border-surface-200">
       <div class="max-w-4xl mx-auto">
-        <div class="flex gap-3 items-end">
+        <div class="flex items-center gap-3">
           <button
             @click="isSearchEnabled = !isSearchEnabled"
-            class="p-3 rounded-xl border transition-all flex items-center justify-center gap-2 group"
+            class="p-2.5 rounded-lg border transition-all flex items-center justify-center"
             :class="
               isSearchEnabled
-                ? 'bg-primary-50 border-primary-200 text-primary-600 ring-2 ring-primary-500/10'
+                ? 'bg-primary-50 border-primary-200 text-primary-600'
                 : 'bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300'
             "
+            title="Toggle web search"
           >
-            <Globe :size="20" :class="isSearchEnabled ? 'animate-pulse' : ''" />
-            <span v-if="isSearchEnabled" class="text-xs font-bold pr-1"
-              >Search On</span
-            >
+            <Globe :size="18" :class="isSearchEnabled ? 'animate-pulse' : ''" />
           </button>
 
           <div class="flex-1 relative">
             <textarea
               v-model="inputMessage"
               @keydown.enter.prevent="sendMessage"
-              placeholder="Ask anything..."
+              placeholder="Ask anything about your learning goals..."
               rows="1"
-              class="w-full px-4 py-3 pr-12 bg-surface-50 border border-surface-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all text-sm resize-none"
+              class="w-full px-4 py-2.5 pr-11 bg-surface-50 border border-surface-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal"
             ></textarea>
 
             <button
               @click="sendMessage"
               :disabled="!inputMessage.trim() || isLoading"
-              class="absolute right-2 bottom-2 p-2 rounded-lg transition-all"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all"
               :class="
                 inputMessage.trim() && !isLoading
-                  ? 'bg-primary-600 text-white shadow-md hover:bg-primary-700'
-                  : 'bg-surface-200 text-surface-400 cursor-not-allowed'
+                  ? 'text-primary-600 hover:bg-primary-50'
+                  : 'text-surface-300 cursor-not-allowed'
               "
             >
               <Send :size="18" />
@@ -280,7 +278,7 @@ onMounted(() => {
           </div>
         </div>
         <p class="text-center text-[10px] text-surface-400 mt-2">
-          Endstate AI processes requests through the backend server. Chat history is saved.
+          Chat history is saved. Agree to a project to create a project summary.
         </p>
       </div>
     </div>
