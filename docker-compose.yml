@@ -16,6 +16,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    environment:
+      - OLLAMA_CONTEXT_LENGTH=32000
     container_name: ollama-local
     ports:
       - "11434:11434"
