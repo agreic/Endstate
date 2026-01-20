@@ -31,6 +31,26 @@ export interface GraphStats {
   total_relationships: number;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatResponse {
+  content: string;
+  sources?: Array<{
+    title: string;
+    url: string;
+  }>;
+}
+
+export interface DashboardStats {
+  total_nodes: number;
+  total_relationships: number;
+  conversations?: number;
+  insights?: number;
+}
+
 export async function fetchGraphData(): Promise<GraphData> {
   const response = await fetch(`${API_URL}/api/graph`);
   if (!response.ok) {
@@ -47,8 +67,34 @@ export async function fetchGraphStats(): Promise<GraphStats> {
   return response.json();
 }
 
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const response = await fetch(`${API_URL}/api/stats/dashboard`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function fetchHealth(): Promise<{ database: boolean; llm: boolean; database_error?: string; llm_error?: string }> {
   const response = await fetch(`${API_URL}/api/health`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function sendChatMessage(message: string, history: ChatMessage[], enableSearch: boolean = false): Promise<ChatResponse> {
+  const response = await fetch(`${API_URL}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message,
+      history,
+      enable_web_search: enableSearch,
+    }),
+  });
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }

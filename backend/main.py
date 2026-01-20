@@ -1,14 +1,39 @@
 """
 Endstate API Server
-FastAPI backend for the knowledge graph visualization.
+FastAPI backend for the knowledge graph visualization, management, and chat interface.
 """
-from typing import Optional
+from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from datetime import datetime
 
 from backend.config import Config
 from backend.services.knowledge_graph import KnowledgeGraphService
+from backend.llm.provider import get_llm
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+    enable_web_search: bool = False
+
+
+class ChatResponse(BaseModel):
+    content: str
+    sources: Optional[List[dict]] = None
+
+
+class DashboardStatsResponse(BaseModel):
+    total_nodes: int
+    total_relationships: int
+    conversations: int = 0
+    insights: int = 0
 
 
 app = FastAPI(
@@ -204,6 +229,55 @@ def execute_query(cypher: str, params: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         service.close()
+
+
+@app.get("/api/stats/dashboard", response_model=DashboardStatsResponse)
+def get_dashboard_stats():
+    """Get statistics for the dashboard."""
+    service = get_service()
+    try:
+        stats = service.get_stats()
+        
+        return {
+            "total_nodes": stats.get("total_nodes", 0),
+            "total_relationships": stats.get("total_relationships", 0),
+            "conversations": 0,
+            "insights": 0,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        service.close()
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
+    """
+    Send a chat message to the LLM.
+    
+    Args:
+        request: Chat request with message, history, and web search option
+        
+    Returns:
+        Chat response with content and optional sources
+    """
+    try:
+        llm = get_llm()
+        
+        messages = []
+        for msg in request.history:
+            messages.append(("human" if msg.role == "user" else "ai", msg.content))
+        messages.append(("human", request.message))
+        
+        response = llm.invoke(messages)
+        content = response.content if hasattr(response, 'content') else str(response)
+        
+        return {
+            "content": content,
+            "sources": None,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():

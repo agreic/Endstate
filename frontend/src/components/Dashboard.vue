@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import {
   MessageSquare,
   Network,
@@ -9,31 +9,29 @@ import {
   ArrowRight,
   Sparkles,
 } from "lucide-vue-next";
+import { fetchGraphStats } from "../services/api";
+
 const emit = defineEmits<{
   navigate: [tab: "dashboard" | "chat" | "graph"];
 }>();
-const recentActivity = ref([
-  {
-    id: 1,
-    type: "chat",
-    title: "Discussed neural network architecture",
-    time: "2 hours ago",
-  },
-  {
-    id: 2,
-    type: "graph",
-    title: "Updated knowledge graph connections",
-    time: "5 hours ago",
-  },
-  { id: 3, type: "data", title: "Imported new data source", time: "1 day ago" },
-]);
 
-const stats = ref([
-  { label: "Conversations", value: "127", change: "+12%", icon: MessageSquare },
-  { label: "Graph Nodes", value: "1,542", change: "+8%", icon: Network },
-  { label: "Data Sources", value: "23", change: "+2", icon: Database },
-  { label: "Insights", value: "89", change: "+15%", icon: TrendingUp },
-]);
+interface Activity {
+  id: number;
+  type: string;
+  title: string;
+  time: string;
+}
+
+interface Stat {
+  label: string;
+  value: string;
+  change: string;
+  icon: any;
+}
+
+const recentActivity = ref<Activity[]>([]);
+const stats = ref<Stat[]>([]);
+const isLoading = ref(true);
 
 const quickActions = [
   {
@@ -55,6 +53,53 @@ const quickActions = [
     tab: null,
   },
 ];
+
+const loadDashboardData = async () => {
+  isLoading.value = true;
+  try {
+    const graphStatsData = await fetchGraphStats();
+    
+    stats.value = [
+      { label: "Graph Nodes", value: formatNumber(graphStatsData.total_nodes), change: "+--", icon: Network },
+      { label: "Relationships", value: formatNumber(graphStatsData.total_relationships), change: "+--", icon: TrendingUp },
+      { label: "Data Sources", value: "--", change: "+--", icon: Database },
+      { label: "Insights", value: "--", change: "+--", icon: Sparkles },
+    ];
+    
+    recentActivity.value = [
+      {
+        id: 1,
+        type: "graph",
+        title: "Knowledge graph data loaded",
+        time: "Just now",
+      },
+    ];
+  } catch (error) {
+    console.error("Failed to load dashboard data:", error);
+    stats.value = [
+      { label: "Graph Nodes", value: "--", change: "+--", icon: Network },
+      { label: "Relationships", value: "--", change: "+--", icon: TrendingUp },
+      { label: "Data Sources", value: "--", change: "+--", icon: Database },
+      { label: "Insights", value: "--", change: "+--", icon: Sparkles },
+    ];
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const formatNumber = (num: number): string => {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1) + 'M';
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1) + 'K';
+  }
+  return num.toString();
+};
+
+onMounted(() => {
+  loadDashboardData();
+});
 </script>
 
 <template>
@@ -80,7 +125,7 @@ const quickActions = [
               <component :is="stat.icon" :size="20" class="text-primary-600" />
             </div>
             <span
-              class="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full"
+              class="text-xs font-medium text-surface-400 bg-surface-50 px-2 py-1 rounded-full"
             >
               {{ stat.change }}
             </span>

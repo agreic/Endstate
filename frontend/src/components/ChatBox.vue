@@ -1,37 +1,12 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from "vue";
-import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next"; // Added Globe and ExternalLink
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Send, Bot, User, Globe, ExternalLink } from "lucide-vue-next";
 import { marked } from "marked";
-
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
-
-// State for Web Search Toggle
-const isSearchEnabled = ref(false);
+import { sendChatMessage, type ChatMessage } from "../services/api";
 
 const renderMarkdown = (content: string) => {
   return marked.parse(content);
 };
-
-const systemPrompt = `
-You are Endstate AI. You provide clear, structured, and professional responses.
-- Use ### for headers.
-- Always use bullet points for lists.
-- If web search results are provided, synthesize them naturally.
-`;
-
-// Initialize Model WITH Google Search Tool
-const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash", // 2.0/2.5 Flash supports grounding best
-  systemInstruction: systemPrompt,
-  tools: [
-    {
-      //@ts-ignore - Some TS definitions might not have googleSearch yet
-      googleSearch: {},
-    },
-  ],
-});
 
 interface Source {
   title: string;
@@ -43,7 +18,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  sources?: Source[]; // Store sources here
+  sources?: Source[];
 }
 
 const messages = ref<Message[]>([
@@ -57,12 +32,8 @@ const messages = ref<Message[]>([
 
 const inputMessage = ref("");
 const isLoading = ref(false);
+const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
-
-// History management
-const chat = model.startChat({
-  history: [],
-});
 
 const scrollToBottom = async () => {
   await nextTick();
@@ -83,53 +54,31 @@ const sendMessage = async () => {
     timestamp: new Date(),
   });
 
+  const history: ChatMessage[] = messages.value.map(msg => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+
   inputMessage.value = "";
   isLoading.value = true;
   await scrollToBottom();
 
   try {
-    // If search is disabled, we could technically use a different model instance,
-    // but Gemini is smart enough to only search if the prompt requires it.
-    const result = await chat.sendMessage(userText);
-    const response = await result.response;
-
-    // Extract Grounding Metadata (Sources)
-    const metadata = response.candidates?.[0]?.groundingMetadata;
-    const sources: Source[] = [];
-
-    if (metadata?.searchEntryPoint?.sdkBlob) {
-      // This is where the visual Google Search chips come from if using the widget
-    }
-
-    if (metadata?.groundingChunks) {
-      metadata.groundingChunks.forEach((chunk: any) => {
-        if (chunk.web) {
-          sources.push({
-            title: chunk.web.title,
-            url: chunk.web.uri,
-          });
-        }
-      });
-    }
-
-    // Remove duplicates
-    const uniqueSources = sources
-      .filter((v, i, a) => a.findIndex((t) => t.url === v.url) === i)
-      .slice(0, 3);
+    const response = await sendChatMessage(userText, history, isSearchEnabled.value);
 
     messages.value.push({
       id: Date.now(),
       role: "assistant",
-      content: response.text(),
+      content: response.content,
       timestamp: new Date(),
-      sources: uniqueSources,
+      sources: response.sources as Source[],
     });
   } catch (error) {
     console.error(error);
     messages.value.push({
       id: Date.now(),
       role: "assistant",
-      content: "I'm having trouble connecting to the web right now.",
+      content: "I'm having trouble connecting to the server right now. Please try again later.",
       timestamp: new Date(),
     });
   } finally {
@@ -269,7 +218,7 @@ onMounted(() => scrollToBottom());
             <textarea
               v-model="inputMessage"
               @keydown.enter.prevent="sendMessage"
-              placeholder="Ask anything or use web search..."
+              placeholder="Ask anything..."
               rows="1"
               class="w-full px-4 py-3 pr-12 bg-surface-50 border border-surface-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all text-sm resize-none"
             ></textarea>
@@ -289,7 +238,7 @@ onMounted(() => scrollToBottom());
           </div>
         </div>
         <p class="text-center text-[10px] text-surface-400 mt-2">
-          Endstate AI can browse the web to provide real-time information.
+          Endstate AI processes requests through the backend server.
         </p>
       </div>
     </div>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Database, FileText, Loader2 } from "lucide-vue-next";
-import { fetchGraphData, fetchGraphStats, type ApiNode, type ApiRelationship } from "../services/api";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2 } from "lucide-vue-next";
+import { fetchGraphData, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -36,61 +36,13 @@ const selectedNode = ref<GraphNode | null>(null);
 const searchQuery = ref("");
 const zoomLevel = ref(1);
 const hoveredNodeId = ref<string | null>(null);
-const dataSource = ref<'demo' | 'database'>('demo');
 const isLoading = ref(false);
 const loadError = ref<string | null>(null);
 const graphStats = ref<{ total_nodes: number; total_relationships: number } | null>(null);
 
-const demoGraphData: GraphData = {
-  nodes: [
-    { id: "1", group: 1, label: "Machine Learning", description: "Field of AI that enables systems to learn" },
-    { id: "2", group: 1, label: "Deep Learning", description: "Subset of ML using neural networks" },
-    { id: "3", group: 1, label: "Neural Networks", description: "Computing systems inspired by biological brains" },
-    { id: "4", group: 2, label: "Python", description: "Programming language popular in AI" },
-    { id: "5", group: 2, label: "TensorFlow", description: "Open source ML framework by Google" },
-    { id: "6", group: 2, label: "PyTorch", description: "Open source ML framework by Meta" },
-    { id: "7", group: 3, label: "Computer Vision", description: "Enabling computers to see and understand images" },
-    { id: "8", group: 3, label: "NLP", description: "Processing human language by computers" },
-    { id: "9", group: 3, label: "Speech Recognition", description: "Converting spoken words to text" },
-    { id: "10", group: 4, label: "GPT", description: "Generative Pre-trained Transformer models" },
-    { id: "11", group: 4, label: "BERT", description: "Bidirectional Encoder Representations" },
-    { id: "12", group: 4, label: "Transformer", description: "Architecture using attention mechanism" },
-    { id: "13", group: 1, label: "Reinforcement Learning", description: "Learning through rewards and punishments" },
-    { id: "14", group: 5, label: "Data Science", description: "Extracting insights from data" },
-    { id: "15", group: 5, label: "Analytics", description: "Analyzing data for decisions" },
-  ],
-  links: [
-    { source: "1", target: "2", value: 3, label: "includes" },
-    { source: "2", target: "3", value: 3, label: "uses" },
-    { source: "1", target: "13", value: 2, label: "includes" },
-    { source: "3", target: "7", value: 2, label: "enables" },
-    { source: "3", target: "8", value: 2, label: "enables" },
-    { source: "3", target: "9", value: 2, label: "enables" },
-    { source: "2", target: "5", value: 2, label: "implemented in" },
-    { source: "2", target: "6", value: 2, label: "implemented in" },
-    { source: "4", target: "5", value: 2, label: "primary language" },
-    { source: "4", target: "6", value: 2, label: "primary language" },
-    { source: "12", target: "10", value: 3, label: "architecture" },
-    { source: "12", target: "11", value: 3, label: "architecture" },
-    { source: "8", target: "10", value: 2, label: "powers" },
-    { source: "8", target: "11", value: 2, label: "powers" },
-    { source: "1", target: "14", value: 2, label: "part of" },
-    { source: "14", target: "15", value: 2, label: "includes" },
-    { source: "7", target: "12", value: 1, label: "uses" },
-  ],
-};
-
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
-const demoGroupColors: Record<number, string> = {
-  1: "#0ea5e9",
-  2: "#8b5cf6",
-  3: "#10b981",
-  4: "#f59e0b",
-  5: "#ef4444",
-};
-
-const dbGroupColors: Record<string, string> = {
+const groupColors: Record<string, string> = {
   'Skill': "#0ea5e9",
   'Concept': "#8b5cf6",
   'Topic': "#10b981",
@@ -104,32 +56,20 @@ const dbGroupColors: Record<string, string> = {
 };
 
 const getNodeColor = (node: GraphNode): string => {
-  if (dataSource.value === 'demo') {
-    return demoGroupColors[node.group] || demoGroupColors[1];
-  }
-  return dbGroupColors[node.labels?.[0] || 'Skill'] || dbGroupColors['Skill'];
+  return groupColors[node.labels?.[0] || 'Skill'] || groupColors['Skill'];
 };
 
 const getUniqueLabels = (): string[] => {
-  if (dataSource.value === 'demo') {
-    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
-  }
   const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
   return Array.from(labels).sort();
 };
 
 const getLabelDisplayName = (label: string): string => {
-  if (dataSource.value === 'demo') {
-    return label;
-  }
   return label;
 };
 
-const getColorForLegendItem = (index: number, label: string): string => {
-  if (dataSource.value === 'demo') {
-    return demoGroupColors[index + 1] || demoGroupColors[1];
-  }
-  return dbGroupColors[label] || dbGroupColors['Skill'];
+const getColorForLegendItem = (_index: number, label: string): string => {
+  return groupColors[label] || groupColors['Skill'];
 };
 
 let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
@@ -146,7 +86,7 @@ const formatPropertyValue = (value: any): string => {
   return String(value);
 };
 
-const loadFromDatabase = async () => {
+const loadGraphData = async () => {
   isLoading.value = true;
   loadError.value = null;
   
@@ -154,7 +94,8 @@ const loadFromDatabase = async () => {
     const data = await fetchGraphData();
     
     if (data.total_nodes === 0) {
-      loadError.value = "No data found in database. Add some content first!";
+      loadError.value = "No data found in database.";
+      graphData.value = { nodes: [], links: [] };
       isLoading.value = false;
       return;
     }
@@ -193,15 +134,6 @@ const loadFromDatabase = async () => {
     loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
     isLoading.value = false;
   }
-};
-
-const loadDemoData = () => {
-  dataSource.value = 'demo';
-  graphData.value = { nodes: [...demoGraphData.nodes], links: [...demoGraphData.links] };
-  graphStats.value = null;
-  setTimeout(() => {
-    initGraph();
-  }, 50);
 };
 
 const isNodeMatching = (node: GraphNode): boolean => {
@@ -470,7 +402,7 @@ const handleResize = () => {
 };
 
 onMounted(() => {
-  loadDemoData();
+  loadGraphData();
   window.addEventListener("resize", handleResize);
 });
 
@@ -503,9 +435,6 @@ const totalRelationships = computed(() => {
 });
 
 const legendItems = computed(() => {
-  if (dataSource.value === 'demo') {
-    return ['Core AI', 'Frameworks', 'Applications', 'LLMs', 'Data'];
-  }
   const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
   return Array.from(labels).sort();
 });
@@ -534,31 +463,20 @@ const legendItems = computed(() => {
           </button>
         </div>
         
-        <div class="flex items-center gap-2 mb-3">
-          <button
-            @click="loadDemoData"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            :class="dataSource === 'demo' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600 hover:bg-surface-200'"
-          >
-            <FileText :size="14" />
-            Demo
-          </button>
-          <button
-            @click="loadFromDatabase"
-            :disabled="isLoading"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            :class="dataSource === 'database' ? 'bg-primary-100 text-primary-700' : 'bg-surface-100 text-surface-600 hover:bg-surface-200'"
-          >
-            <template v-if="isLoading">
-              <Loader2 :size="14" class="animate-spin" />
-              Loading...
-            </template>
-            <template v-else>
-              <Database :size="14" />
-              Database
-            </template>
-          </button>
-        </div>
+        <button
+          @click="loadGraphData"
+          :disabled="isLoading"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors mb-3"
+          :class="isLoading ? 'bg-surface-100 text-surface-400' : 'bg-primary-100 text-primary-700 hover:bg-primary-200'"
+        >
+          <template v-if="isLoading">
+            <Loader2 :size="14" class="animate-spin" />
+            Loading...
+          </template>
+          <template v-else>
+            Refresh
+          </template>
+        </button>
         
         <div v-if="loadError" class="text-xs text-red-500 mb-2">
           {{ loadError }}
@@ -578,7 +496,7 @@ const legendItems = computed(() => {
           </div>
         </div>
         
-        <div v-if="dataSource === 'database' && graphStats" class="mt-3 pt-3 border-t border-surface-100">
+        <div v-if="graphStats" class="mt-3 pt-3 border-t border-surface-100">
           <p class="text-xs text-surface-400">
             {{ totalNodes }} nodes, {{ totalRelationships }} relationships
           </p>
