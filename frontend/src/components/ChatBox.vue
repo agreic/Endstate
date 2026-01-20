@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from "vue";
+import { ref, nextTick, onMounted, onUpdated } from "vue";
 import { Send, Bot, User, Globe, ExternalLink, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
 import { sendChatMessage as apiSendChatMessage, resetChatSession, checkSessionLocked } from "../services/api";
@@ -236,6 +236,10 @@ const checkPendingResponse = async () => {
 onMounted(async () => {
   await loadState(sessionId.value);
   checkPendingResponse();
+});
+
+onUpdated(() => {
+  scrollToBottom();
 });
 </script>
 
