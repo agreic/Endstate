@@ -217,3 +217,7 @@ node_modules/                    # All node_modules (regenerate with npm install
 
 # Notebooks used for testing
 notebooks/*
+notebooks/*.ipynb
+
+# Mac
+.DS_Store
