@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Loader2 } from "lucide-vue-next";
-import { fetchGraphData, type ApiNode, type ApiRelationship } from "../services/api";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Database } from "lucide-vue-next";
+import { fetchGraphData, extractFromText, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -39,6 +39,7 @@ const hoveredNodeId = ref<string | null>(null);
 const isLoading = ref(false);
 const loadError = ref<string | null>(null);
 const graphStats = ref<{ total_nodes: number; total_relationships: number } | null>(null);
+const isAddingSample = ref(false);
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
@@ -94,8 +95,9 @@ const loadGraphData = async () => {
     const data = await fetchGraphData();
     
     if (data.total_nodes === 0) {
-      loadError.value = "No data found in database.";
+      loadError.value = null;
       graphData.value = { nodes: [], links: [] };
+      graphStats.value = null;
       isLoading.value = false;
       return;
     }
@@ -133,6 +135,29 @@ const loadGraphData = async () => {
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
     isLoading.value = false;
+  }
+};
+
+const addSampleData = async () => {
+  isAddingSample.value = true;
+  try {
+    const sampleText = `
+      Machine Learning is a subset of AI that enables systems to learn from data.
+      Deep Learning uses neural networks with multiple layers.
+      Python is a programming language popular for AI development.
+      TensorFlow is an open source ML framework by Google.
+      PyTorch is an open source ML framework by Meta.
+      Computer Vision enables computers to see and understand images.
+      Natural Language Processing processes human language by computers.
+      Neural Networks are computing systems inspired by biological brains.
+      Large Language Models like GPT are transformer-based models.
+    `;
+    await extractFromText(sampleText);
+    await loadGraphData();
+  } catch (error) {
+    loadError.value = "Failed to add sample data";
+  } finally {
+    isAddingSample.value = false;
   }
 };
 
@@ -480,6 +505,24 @@ const legendItems = computed(() => {
         
         <div v-if="loadError" class="text-xs text-red-500 mb-2">
           {{ loadError }}
+        </div>
+        
+        <div v-if="graphData.nodes.length === 0 && !isLoading" class="mb-3">
+          <p class="text-xs text-surface-500 mb-2">No data in database</p>
+          <button
+            @click="addSampleData"
+            :disabled="isAddingSample"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+          >
+            <template v-if="isAddingSample">
+              <Loader2 :size="14" class="animate-spin" />
+              Adding...
+            </template>
+            <template v-else>
+              <Plus :size="14" />
+              Add Sample Data
+            </template>
+          </button>
         </div>
         
         <div class="space-y-1">
