@@ -738,6 +738,19 @@ class Neo4jClient:
         )
         return result
 
+    def get_project_lesson_by_node(self, project_id: str, node_id: str) -> list[dict]:
+        """Get latest lesson for a node in a project."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at
+            ORDER BY l.created_at DESC
+            LIMIT 1
+            """,
+            {"project_id": project_id, "node_id": node_id},
+        )
+        return result
+
     def save_project_assessment(
         self,
         project_id: str,

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, generateNodeLesson, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, extractFromText, deleteNode, queueProjectLesson, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -46,7 +46,7 @@ const deletingNode = ref<GraphNode | null>(null);
 const deleteMessage = ref("");
 const lessonLoading = ref(false);
 const lessonError = ref<string | null>(null);
-const lessonResult = ref<{ explanation: string; task: string } | null>(null);
+const lessonQueued = ref(false);
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
@@ -220,16 +220,19 @@ const loadLesson = async () => {
   if (!selectedNode.value) return;
   lessonLoading.value = true;
   lessonError.value = null;
-  lessonResult.value = null;
+  lessonQueued.value = false;
   try {
     const projectId = localStorage.getItem("endstate_active_project_id") || undefined;
-    const response = await generateNodeLesson(selectedNode.value.id, projectId || undefined);
-    lessonResult.value = {
-      explanation: response.explanation,
-      task: response.task,
-    };
-    if (projectId) {
+    if (!projectId) {
+      lessonError.value = "Select a project before generating lessons.";
+      return;
+    }
+    const response = await queueProjectLesson(projectId, selectedNode.value.id);
+    lessonQueued.value = true;
+    if (response.status === "exists" && response.lesson) {
       window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId } }));
+    } else {
+      window.dispatchEvent(new CustomEvent("endstate:lesson-queued", { detail: { projectId } }));
     }
   } catch (e) {
     lessonError.value = "Failed to generate lesson";
@@ -304,9 +307,9 @@ watch(searchQuery, () => {
 });
 
 watch(selectedNode, () => {
-  lessonResult.value = null;
   lessonError.value = null;
   lessonLoading.value = false;
+  lessonQueued.value = false;
 });
 
 const initGraph = () => {
@@ -338,6 +341,10 @@ const initGraph = () => {
       if (gElement) {
         gElement.attr("transform", event.transform);
         zoomLevel.value = event.transform.k;
+        if (nodesSelection) {
+          const labelOpacity = event.transform.k < 0.6 ? 0 : 1;
+          nodesSelection.selectAll("text").attr("opacity", labelOpacity);
+        }
       }
     });
 
@@ -728,16 +735,9 @@ const legendItems = computed(() => {
             {{ lessonLoading ? 'Generating lesson...' : 'Generate lesson' }}
           </button>
           <p v-if="lessonError" class="mt-2 text-xs text-red-500">{{ lessonError }}</p>
-          <div v-if="lessonResult" class="mt-3 text-xs text-surface-600 space-y-2">
-            <div>
-              <p class="font-semibold text-surface-700 mb-1">Explanation</p>
-              <p>{{ lessonResult.explanation }}</p>
-            </div>
-            <div v-if="lessonResult.task">
-              <p class="font-semibold text-surface-700 mb-1">Task</p>
-              <p>{{ lessonResult.task }}</p>
-            </div>
-          </div>
+          <p v-else-if="lessonQueued" class="mt-2 text-xs text-surface-500">
+            Lesson queued. Check the Projects tab.
+          </p>
         </div>
         
         <div class="mt-3 pt-3 border-t border-surface-100">

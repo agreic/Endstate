@@ -229,7 +229,7 @@ const generateAssessment = async (lessonId: string) => {
       ...assessments.value,
     ];
   } catch (e) {
-    assessmentError.value = "Failed to generate assessment";
+    assessmentError.value = e instanceof Error ? e.message : "Failed to generate assessment";
   }
 };
 
@@ -249,7 +249,7 @@ const submitAssessment = async (assessmentId: string) => {
         : assessment,
     );
   } catch (e) {
-    assessmentError.value = "Failed to submit assessment";
+    assessmentError.value = e instanceof Error ? e.message : "Failed to submit assessment";
   }
 };
 
@@ -362,10 +362,12 @@ const handleLessonEvent = (event: CustomEvent) => {
 onMounted(() => {
   loadProjects();
   window.addEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
+  window.addEventListener("endstate:lesson-queued", handleLessonEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
+  window.removeEventListener("endstate:lesson-queued", handleLessonEvent as EventListener);
 });
 </script>
 
@@ -651,6 +653,40 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <div v-if="selectedLesson" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h4 class="font-semibold text-surface-800">{{ selectedLesson.title }}</h4>
+                <button
+                  @click="closeLesson"
+                  class="text-xs text-surface-500 hover:text-surface-700"
+                >
+                  Close
+                </button>
+              </div>
+              <div class="text-sm text-surface-700 mb-3 markdown-container" v-html="renderMarkdown(selectedLesson.explanation)"></div>
+              <div v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4 markdown-container" v-html="renderMarkdown(selectedLesson.task)"></div>
+              <button
+                @click="openAssessmentPanel"
+                class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+              >
+                Open task
+              </button>
+              <div v-if="showAssessmentPanel" class="mt-4 p-3 bg-surface-50 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-xs font-semibold text-surface-600">Assessment</p>
+                  <button @click="closeAssessmentPanel" class="text-xs text-surface-500 hover:text-surface-700">
+                    Back
+                  </button>
+                </div>
+                <button
+                  @click="generateAssessment(selectedLesson.id)"
+                  class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
+                >
+                  Generate assessment
+                </button>
+              </div>
+            </div>
+
             <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
               <div class="flex items-center gap-2 mb-4">
                 <CheckCircle :size="18" class="text-emerald-500" />
@@ -684,40 +720,6 @@ onUnmounted(() => {
                 </div>
               </div>
               <p v-if="assessmentError" class="mt-2 text-xs text-red-500">{{ assessmentError }}</p>
-            </div>
-
-            <div v-if="selectedLesson" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
-              <div class="flex items-center justify-between mb-4">
-                <h4 class="font-semibold text-surface-800">{{ selectedLesson.title }}</h4>
-                <button
-                  @click="closeLesson"
-                  class="text-xs text-surface-500 hover:text-surface-700"
-                >
-                  Close
-                </button>
-              </div>
-              <div class="text-sm text-surface-700 mb-3 markdown-container" v-html="renderMarkdown(selectedLesson.explanation)"></div>
-              <div v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4 markdown-container" v-html="renderMarkdown(selectedLesson.task)"></div>
-              <button
-                @click="openAssessmentPanel"
-                class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
-              >
-                Open task
-              </button>
-              <div v-if="showAssessmentPanel" class="mt-4 p-3 bg-surface-50 rounded-lg">
-                <div class="flex items-center justify-between mb-2">
-                  <p class="text-xs font-semibold text-surface-600">Assessment</p>
-                  <button @click="closeAssessmentPanel" class="text-xs text-surface-500 hover:text-surface-700">
-                    Back
-                  </button>
-                </div>
-                <button
-                  @click="generateAssessment(selectedLesson.id)"
-                  class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
-                >
-                  Generate assessment
-                </button>
-              </div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">

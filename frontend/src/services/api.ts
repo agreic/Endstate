@@ -373,6 +373,16 @@ export async function listProjectLessons(projectId: string): Promise<{ lessons: 
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons`);
 }
 
+export async function queueProjectLesson(projectId: string, nodeId: string): Promise<{ status: string; lesson?: ProjectLesson }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ node_id: nodeId }),
+  });
+}
+
 export async function listProjectAssessments(projectId: string): Promise<{ assessments: ProjectAssessment[] }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments`);
 }

@@ -88,3 +88,23 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
 
     content = str(response.content if hasattr(response, "content") else response)
     return parse_lesson_content(content)
+
+
+async def generate_and_store_lesson(db, project_id: str, node: dict, profile: dict | None) -> dict:
+    result = await generate_lesson(node, profile)
+    if "error" in result:
+        return result
+
+    from uuid import uuid4
+
+    lesson_id = f"lesson-{uuid4().hex[:8]}"
+    title = node.get("properties", {}).get("name") or node.get("id")
+    db.save_project_lesson(
+        project_id,
+        lesson_id,
+        node.get("id"),
+        title,
+        result.get("explanation", ""),
+        result.get("task", ""),
+    )
+    return {"lesson_id": lesson_id, **result}

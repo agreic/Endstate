@@ -16,7 +16,7 @@ from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 from backend.schemas.skill_graph import SkillGraphSchema
-from backend.services.lesson_service import generate_lesson, parse_lesson_content
+from backend.services.lesson_service import generate_lesson, generate_and_store_lesson, parse_lesson_content
 from backend.services.assessment_service import generate_assessment, evaluate_assessment, parse_assessment_content
 
 
@@ -47,6 +47,10 @@ class ProjectRenameRequest(BaseModel):
 
 class LessonRequest(BaseModel):
     project_id: Optional[str] = None
+
+
+class LessonGenerateRequest(BaseModel):
+    node_id: str
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -709,6 +713,57 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
         )
 
     return {"node_id": node_id, "lesson_id": lesson_id, **result}
+
+
+@app.post("/api/projects/{project_id}/lessons/generate")
+async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
+    """Queue lesson generation for a project node."""
+    from backend.db.neo4j_client import Neo4jClient, _serialize_node
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    summary_records = db.get_project_summary(project_id)
+    if not summary_records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    existing = db.get_project_lesson_by_node(project_id, request.node_id)
+    if existing:
+        created_at = existing[0].get("created_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return {
+            "status": "exists",
+            "lesson": {
+                "id": existing[0].get("id"),
+                "node_id": existing[0].get("node_id"),
+                "title": existing[0].get("title"),
+                "explanation": existing[0].get("explanation"),
+                "task": existing[0].get("task"),
+                "created_at": created_at,
+            },
+        }
+
+    node_result = db.get_node_by_id(request.node_id)
+    if not node_result:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    summary_json = summary_records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    node = _serialize_node(node_result.get("node"))
+    profile = summary.get("user_profile")
+
+    async def _task():
+        result = await generate_and_store_lesson(db, project_id, node, profile)
+        if "error" in result:
+            print(f"[Lessons] Generation failed: {result['error']}")
+
+    asyncio.create_task(_task())
+
+    return {"status": "queued"}
 
 
 @app.get("/api/projects/{project_id}/lessons")
