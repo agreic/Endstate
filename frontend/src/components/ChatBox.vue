@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, computed } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { Send, Bot, User, Globe, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
 import { useChat } from "../composables/useChat";
@@ -12,12 +12,10 @@ const inputMessage = ref("");
 const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 
-const { state, sendMessage, resetChat } = useChat();
+const { messages, isLoading, isProcessing, error, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
-  // Allow typing when idle or error (can retry after error)
-  const canType = state.status === 'idle' || state.status === 'error';
-  return !canType || !inputMessage.value.trim();
+  return isLoading.value || isProcessing.value || !inputMessage.value.trim();
 });
 
 const formatTime = (date: Date) => {
@@ -30,40 +28,39 @@ const formatTime = (date: Date) => {
   });
 };
 
-const scrollToBottom = async () => {
-  await nextTick();
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-  }
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    }
+  });
 };
 
+watch(messages, () => {
+  scrollToBottom();
+}, { deep: true });
+
 const handleSend = async () => {
-  if (!inputMessage.value.trim() || state.status !== 'idle') return;
+  if (isInputDisabled.value) return;
   
   const text = inputMessage.value.trim();
   inputMessage.value = "";
   
   await sendMessage(text);
-  await scrollToBottom();
-};
-
-const handleReset = async () => {
-  if (!confirm("Reset the conversation? This will clear all messages.")) return;
-  await resetChat();
 };
 </script>
 
 <template>
   <div class="flex flex-col h-full bg-surface-50">
-    <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
-      <div v-if="state.error" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-        <p class="text-amber-700 text-sm">{{ state.error }}</p>
-      </div>
+    <div v-if="error" class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 mx-4 mt-4 rounded-lg text-sm">
+      {{ error }}
+    </div>
 
+    <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
       <div
-        v-for="message in state.messages"
+        v-for="message in messages"
         :key="message.id"
-        class="flex gap-3 animate-fade-in"
+        class="flex gap-3"
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
         <div
@@ -101,7 +98,7 @@ const handleReset = async () => {
         </div>
       </div>
 
-      <div v-if="state.status === 'loading'" class="flex gap-3 animate-fade-in">
+      <div v-if="isLoading" class="flex gap-3">
         <div
           class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0"
         >
@@ -111,28 +108,17 @@ const handleReset = async () => {
           class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-surface-100"
         >
           <div class="flex items-center gap-1.5">
-            <span class="text-xs text-surface-400 mr-2">{{
-              isSearchEnabled ? "Searching web..." : "Thinking..."
-            }}</span>
+            <span class="text-xs text-surface-400 mr-2">Thinking...</span>
             <div class="flex gap-1">
-              <span
-                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
-                style="animation-delay: 0ms"
-              ></span>
-              <span
-                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
-                style="animation-delay: 150ms"
-              ></span>
-              <span
-                class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce"
-                style="animation-delay: 300ms"
-              ></span>
+              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-else-if="state.status === 'processing'" class="flex gap-3 animate-fade-in">
+      <div v-else-if="isProcessing" class="flex gap-3">
         <div
           class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0"
         >
@@ -144,18 +130,9 @@ const handleReset = async () => {
           <div class="flex items-center gap-1.5">
             <span class="text-xs text-amber-600 mr-2">Creating project plan...</span>
             <div class="flex gap-1">
-              <span
-                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
-                style="animation-delay: 0ms"
-              ></span>
-              <span
-                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
-                style="animation-delay: 150ms"
-              ></span>
-              <span
-                class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"
-                style="animation-delay: 300ms"
-              ></span>
+              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
             </div>
           </div>
         </div>
@@ -173,7 +150,6 @@ const handleReset = async () => {
                 ? 'bg-primary-50 border-primary-200 text-primary-600'
                 : 'bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300'
             "
-            title="Toggle web search"
           >
             <Globe :size="18" />
           </button>
@@ -184,15 +160,15 @@ const handleReset = async () => {
               @keydown.enter.prevent="handleSend"
               placeholder="Ask anything about your learning goals..."
               rows="1"
-              class="w-full h-full min-h-[44px] px-4 py-2.5 pr-10 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal disabled:opacity-50"
+              class="w-full h-full min-h-[44px] px-4 py-2.5 pr-10 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal"
               :disabled="isInputDisabled"
             ></textarea>
 
             <button
               @click="handleSend"
               :disabled="isInputDisabled"
-              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors text-surface-300 hover:text-primary-600 disabled:cursor-not-allowed"
-              :class="{ 'text-primary-600': inputMessage.trim() && state.status === 'idle' }"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors"
+              :class="inputMessage.trim() && !isLoading && !isProcessing ? 'text-primary-600' : 'text-surface-300'"
             >
               <Send :size="18" />
             </button>
@@ -200,11 +176,11 @@ const handleReset = async () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            {{ state.status === 'processing' ? 'Creating project plan... Please wait or reset.' : 'Chat history stored on backend. Agree to a project to create a summary.' }}
+            {{ isProcessing ? 'Creating project plan... Please wait.' : 'Chat history stored on backend.' }}
           </p>
           <button
-            @click="handleReset"
-            :disabled="state.status === 'loading'"
+            @click="resetChat"
+            :disabled="isLoading || isProcessing"
             class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
           >
             <RotateCcw :size="12" />

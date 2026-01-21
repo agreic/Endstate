@@ -1,9 +1,7 @@
-import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import type { Message } from '../components/ChatBox.vue';
-import { getChatHistory, sendChatMessage, resetChatSession } from '../services/api';
 
 const SESSION_ID_KEY = 'endstate_chat_session_id';
-const REQUEST_ID_KEY = 'endstate_last_request_id';
 
 function getSessionId(): string {
   let sessionId = localStorage.getItem(SESSION_ID_KEY);
@@ -14,237 +12,133 @@ function getSessionId(): string {
   return sessionId;
 }
 
-export type ChatStatus = 'idle' | 'loading' | 'processing' | 'error';
-
-interface ChatState {
-  status: ChatStatus;
-  messages: Message[];
-  error: string | null;
-  isLocked: boolean;
-}
-
 export function useChat() {
   const sessionId = ref(getSessionId());
-  const state = reactive<ChatState>({
-    status: 'idle',
-    messages: [],
-    error: null,
-    isLocked: false,
-  });
-  
-  let eventSource: EventSource | null = null;
-  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-  
-  const getLastRequestId = (): string | null => {
-    return localStorage.getItem(REQUEST_ID_KEY);
-  };
-  
-  const setLastRequestId = (id: string): void => {
-    localStorage.setItem(REQUEST_ID_KEY, id);
-  };
-  
-  const connectEventStream = (): void => {
-    if (eventSource) {
-      eventSource.close();
-    }
+  const isLoading = ref(false);
+  const isProcessing = ref(false);
+  const error = ref<string | null>(null);
+  const messages = ref<Message[]>([]);
+
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+  const loadMessages = async () => {
+    isLoading.value = true;
+    error.value = null;
     
-    eventSource = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/chat/${sessionId.value}/stream`);
-    
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        switch (data.event) {
-          case 'initial_messages':
-            state.messages = (data.messages || []).map((msg: any, index: number) => ({
-              id: index,
-              role: msg.role as 'user' | 'assistant',
-              content: msg.content,
-              timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-            }));
-            state.isLocked = data.locked || false;
-            if (state.isLocked) {
-              state.status = 'processing';
-            } else if (state.status === 'processing') {
-              state.status = 'idle';
-            }
-            break;
-            
-          case 'message_added':
-            const newMessage: Message = {
-              id: state.messages.length,
-              role: data.role as 'user' | 'assistant',
-              content: data.content,
-              timestamp: new Date(),
-            };
-            state.messages.push(newMessage);
-            break;
-            
-          case 'processing_started':
-            state.status = 'processing';
-            state.isLocked = true;
-            break;
-            
-          case 'processing_complete':
-          case 'processing_cancelled':
-            state.status = 'idle';
-            state.isLocked = false;
-            break;
-        }
-      } catch (e) {
-        console.error('Error parsing SSE message:', e);
-      }
-    };
-    
-    eventSource.onerror = () => {
-      // Set status to idle so user can still type even if SSE fails
-      if (state.status === 'loading') {
-        state.status = 'idle';
-      }
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
-      
-      reconnectTimeout = setTimeout(() => {
-        connectEventStream();
-      }, 3000);
-    };
-  };
-  
-  const loadMessages = async (): Promise<void> => {
     try {
-      const response = await getChatHistory(sessionId.value);
-      state.messages = (response.messages || []).map((msg: any, index: number) => ({
-        id: index,
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-        timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-      }));
-      state.isLocked = response.is_locked || false;
+      const response = await fetch(`${API_URL}/api/chat/${sessionId.value}/messages`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
-      // Show greeting if no messages
-      if (state.messages.length === 0) {
-        state.messages = [{
+      const data = await response.json();
+      const msgs = data.messages || [];
+      
+      if (msgs.length === 0) {
+        // Show greeting
+        messages.value = [{
           id: 0,
           role: 'assistant',
           content: "Hello! I'm Endstate AI. What would you like to learn today?",
           timestamp: new Date(),
         }];
+      } else {
+        messages.value = msgs.map((m: any, i: number) => ({
+          id: i,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+        }));
       }
       
-      if (state.isLocked) {
-        state.status = 'processing';
-      } else {
-        state.status = 'idle';
-      }
-      state.error = null;
-    } catch (e) {
-      console.error('Failed to load messages:', e);
-      // Show greeting even on error
-      state.messages = [{
+      isProcessing.value = data.is_locked || false;
+    } catch (e: any) {
+      console.error('Load error:', e);
+      error.value = e.message;
+      // Still show greeting on error
+      messages.value = [{
         id: 0,
         role: 'assistant',
         content: "Hello! I'm Endstate AI. What would you like to learn today?",
         timestamp: new Date(),
       }];
-      state.error = 'Failed to connect to server';
-      state.status = 'idle';
+    } finally {
+      isLoading.value = false;
     }
   };
-  
-  const sendMessage = async (content: string): Promise<void> => {
-    if (state.status !== 'idle') return;
+
+  const sendMessage = async (content: string) => {
+    if (isLoading.value || isProcessing.value) return;
     
-    state.status = 'loading';
-    state.error = null;
+    isLoading.value = true;
+    error.value = null;
     
-    const requestId = crypto.randomUUID();
-    setLastRequestId(requestId);
+    // Optimistically add user message
+    messages.value.push({
+      id: messages.value.length,
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    });
     
     try {
-      const response = await sendChatMessage(content, false, sessionId.value, requestId);
+      const requestId = crypto.randomUUID();
+      const response = await fetch(`${API_URL}/api/chat/${sessionId.value}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-ID': requestId,
+        },
+        body: JSON.stringify({ message: content }),
+      });
       
-      if (response.already_processed) {
-        state.status = 'idle';
-        await loadMessages();
-        return;
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${response.status}`);
       }
       
-      if (response.is_processing) {
-        state.status = 'processing';
-        state.isLocked = true;
+      const data = await response.json();
+      
+      if (data.is_processing) {
+        isProcessing.value = true;
       } else {
-        state.status = 'idle';
+        // Reload messages from backend
         await loadMessages();
       }
     } catch (e: any) {
-      console.error('Failed to send message:', e);
-      state.status = 'error';
-      state.error = e.message || 'Failed to send message';
-      
-      if (e.message?.includes('423') || e.message?.includes('processing')) {
-        state.status = 'processing';
-        state.isLocked = true;
-        state.error = null;
-      }
+      console.error('Send error:', e);
+      error.value = e.message;
+    } finally {
+      isLoading.value = false;
     }
   };
-  
-  const resetChat = async (): Promise<void> => {
-    if (state.status === 'loading') return;
-    
-    // Cancel any pending requests
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = null;
-    }
+
+  const resetChat = async () => {
+    if (isLoading.value) return;
     
     try {
-      await resetChatSession(sessionId.value);
-      
-      // Show greeting for reset session
-      state.messages = [{
+      await fetch(`${API_URL}/api/chat/${sessionId.value}/reset`, { method: 'POST' });
+      messages.value = [{
         id: 0,
         role: 'assistant',
         content: "Hello! I'm Endstate AI. What would you like to learn today?",
         timestamp: new Date(),
       }];
-      state.status = 'idle';
-      state.error = null;
-      state.isLocked = false;
-      
-      // Reconnect to the new session
-      connectEventStream();
-    } catch (e) {
-      console.error('Failed to reset chat:', e);
-      state.error = 'Failed to reset chat';
+      isProcessing.value = false;
+      error.value = null;
+    } catch (e: any) {
+      error.value = e.message;
     }
   };
-  
+
   onMounted(() => {
     loadMessages();
-    connectEventStream();
   });
-  
-  onUnmounted(() => {
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = null;
-    }
-  });
-  
+
   return {
     sessionId,
-    state,
+    messages,
+    isLoading,
+    isProcessing,
+    error,
     sendMessage,
     resetChat,
     loadMessages,
