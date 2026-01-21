@@ -627,6 +627,12 @@ async def start_project(project_id: str):
     node_count = sum(len(doc.nodes) for doc in normalized)
     rel_count = sum(len(doc.relationships) for doc in normalized)
 
+    for label in SkillGraphSchema.allowed_nodes:
+        try:
+            service.merge_duplicates(label, match_property="name")
+        except Exception as e:
+            print(f"[Projects] Merge duplicates failed for {label}: {e}")
+
     summary["project_status"] = "started"
     summary["started_at"] = datetime.utcnow().isoformat()
     db.upsert_project_summary(project_id, project_name, json.dumps(summary))
