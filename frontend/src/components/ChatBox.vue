@@ -15,7 +15,11 @@ const showError = ref(true);
 const { messages, connectionStatus, isSending, isLocked, error, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
-  return isSending.value || isLocked.value || !inputMessage.value.trim();
+  return isSending.value || isLocked.value;
+});
+
+const canSend = computed(() => {
+  return !isInputDisabled.value && !!inputMessage.value.trim();
 });
 
 const formatTime = (date: Date) => {
@@ -175,9 +179,9 @@ const dismissError = () => {
 
             <button
               @click="handleSend"
-              :disabled="isInputDisabled"
+              :disabled="!canSend"
               class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors"
-              :class="inputMessage.trim() && !isSending && !isLocked ? 'text-primary-600' : 'text-surface-300'"
+              :class="canSend ? 'text-primary-600' : 'text-surface-300'"
             >
               <Send :size="18" />
             </button>
