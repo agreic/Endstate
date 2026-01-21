@@ -16,6 +16,7 @@ from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 from backend.schemas.skill_graph import SkillGraphSchema
+from backend.services.lesson_service import generate_lesson
 
 
 class ChatMessage(BaseModel):
@@ -41,6 +42,10 @@ class ChatResponse(BaseModel):
 
 class ProjectRenameRequest(BaseModel):
     name: str
+
+
+class LessonRequest(BaseModel):
+    project_id: Optional[str] = None
 
 
 class DashboardStatsResponse(BaseModel):
@@ -588,6 +593,36 @@ def get_project_chat(project_id: str):
         })
 
     return {"messages": messages}
+
+
+@app.post("/api/graph/nodes/{node_id}/lesson")
+async def generate_node_lesson(node_id: str, request: LessonRequest):
+    """Generate a lesson for a KG node."""
+    from backend.db.neo4j_client import Neo4jClient, _serialize_node
+
+    db = Neo4jClient()
+    node_result = db.get_node_by_id(node_id)
+    if not node_result:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    node = _serialize_node(node_result.get("node"))
+    profile = None
+
+    if request.project_id:
+        records = db.get_project_summary(request.project_id)
+        if records:
+            summary_json = records[0].get("summary_json") or "{}"
+            try:
+                summary = json.loads(summary_json)
+                profile = summary.get("user_profile")
+            except Exception:
+                profile = None
+
+    result = await generate_lesson(node, profile)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return {"node_id": node_id, **result}
 
 
 @app.post("/api/projects/{project_id}/start")

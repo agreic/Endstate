@@ -12,6 +12,10 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _is_specified(value: str) -> bool:
+    return bool(value and value.strip().lower() not in {"not specified", "not set", "unknown"})
+
+
 def extract_profile_from_history(
     summary: dict[str, Any],
     history: list[dict],
@@ -24,6 +28,13 @@ def extract_profile_from_history(
     time_available = profile.get("time_available") or ""
     learning_style = profile.get("learning_style") or ""
     interests = profile.get("interests") if isinstance(profile.get("interests"), list) else []
+
+    if not _is_specified(skill_level):
+        skill_level = ""
+    if not _is_specified(time_available):
+        time_available = ""
+    if not _is_specified(learning_style):
+        learning_style = ""
 
     for msg in history:
         if msg.get("role") != "user":
@@ -43,19 +54,19 @@ def extract_profile_from_history(
         if not learning_style:
             if "theoretical" in content:
                 learning_style = "theoretical"
-            elif "hands-on" in content or "hands on" in content:
+            elif "hands-on" in content or "hands on" in content or "coding" in content:
                 learning_style = "hands-on"
-            elif "hybrid" in content or "mix" in content:
+            elif "hybrid" in content or "mix" in content or "mixed" in content:
                 learning_style = "hybrid"
 
         if not time_available:
             match = re.search(r"(\d+(?:\.\d+)?)\s*(hours?|hrs?)", content)
             if match:
                 hours = match.group(1)
-                if "week" in content:
-                    time_available = _clean_text(match.group(0)) + " per week"
+                if "week" in content or "wk" in content:
+                    time_available = f"{hours} hours/week"
                 else:
-                    time_available = _clean_text(match.group(0))
+                    time_available = f"{hours} hours"
 
         if not interests:
             learn_match = re.search(r"learn(?: about)?\s+(.+)", content)
@@ -66,7 +77,9 @@ def extract_profile_from_history(
     if not interests and project_name:
         interests = [project_name]
 
-    profile["interests"] = interests
+    topics = summary.get("topics") if isinstance(summary.get("topics"), list) else []
+    interests = [i for i in interests + topics if i]
+    profile["interests"] = list(dict.fromkeys(interests))
     profile["skill_level"] = skill_level or "not specified"
     profile["time_available"] = time_available or "not specified"
     profile["learning_style"] = learning_style or "not specified"
