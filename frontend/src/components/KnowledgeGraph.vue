@@ -228,6 +228,9 @@ const loadLesson = async () => {
       explanation: response.explanation,
       task: response.task,
     };
+    if (projectId) {
+      window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId } }));
+    }
   } catch (e) {
     lessonError.value = "Failed to generate lesson";
   } finally {
@@ -417,6 +420,9 @@ const initGraph = () => {
     .attr("fill", "#3f3f46")
     .attr("font-size", "12px")
     .attr("font-weight", "500")
+    .attr("paint-order", "stroke")
+    .attr("stroke", "white")
+    .attr("stroke-width", 3)
     .style("pointer-events", "none");
 
   nodesSelection.on("click", (event, d) => {

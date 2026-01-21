@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play } from "lucide-vue-next";
 import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
 
@@ -27,6 +27,8 @@ const profileDraft = ref({
 const profileSaving = ref(false);
 const profileError = ref<string | null>(null);
 const lessons = ref<ProjectLesson[]>([]);
+const selectedLesson = ref<ProjectLesson | null>(null);
+const showAssessmentPanel = ref(false);
 const assessments = ref<ProjectAssessment[]>([]);
 const assessmentAnswers = ref<Record<string, string>>({});
 const assessmentError = ref<string | null>(null);
@@ -105,7 +107,11 @@ const loadProjectExtras = async (projectId: string) => {
       listProjectLessons(projectId),
       listProjectAssessments(projectId),
     ]);
-    lessons.value = lessonsResponse.lessons;
+    lessons.value = [...lessonsResponse.lessons].sort((a, b) => {
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return aTime - bTime;
+    });
     assessments.value = assessmentsResponse.assessments;
   } catch (e) {
     console.error("Failed to load project extras", e);
@@ -181,6 +187,24 @@ const saveProfile = async () => {
   } finally {
     profileSaving.value = false;
   }
+};
+
+const openLesson = (lesson: ProjectLesson) => {
+  selectedLesson.value = lesson;
+  showAssessmentPanel.value = false;
+};
+
+const closeLesson = () => {
+  selectedLesson.value = null;
+  showAssessmentPanel.value = false;
+};
+
+const openAssessmentPanel = () => {
+  showAssessmentPanel.value = true;
+};
+
+const closeAssessmentPanel = () => {
+  showAssessmentPanel.value = false;
 };
 
 const generateAssessment = async (lessonId: string) => {
@@ -294,6 +318,7 @@ const handleStartProject = async () => {
       relationships: response.relationships_added ?? 0,
     };
     localStorage.setItem("endstate_active_project_id", selectedProject.value.session_id);
+    await loadProjectExtras(selectedProject.value.session_id);
   } catch (e) {
     startError.value = "Failed to start project";
   } finally {
@@ -320,8 +345,20 @@ const formatTime = (dateStr?: string): string => {
   });
 };
 
+const handleLessonEvent = (event: CustomEvent) => {
+  const projectId = event.detail?.projectId;
+  if (selectedProject.value?.session_id === projectId) {
+    loadProjectExtras(projectId);
+  }
+};
+
 onMounted(() => {
   loadProjects();
+  window.addEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
 });
 </script>
 
@@ -595,19 +632,15 @@ onMounted(() => {
               <div v-if="lessonsLoading" class="text-sm text-surface-400">Loading lessons...</div>
               <div v-else-if="lessons.length === 0" class="text-sm text-surface-400">No lessons yet.</div>
               <div v-else class="space-y-3">
-                <div v-for="lesson in lessons" :key="lesson.id" class="p-3 bg-surface-50 rounded-lg">
+                <button
+                  v-for="lesson in lessons"
+                  :key="lesson.id"
+                  @click="openLesson(lesson)"
+                  class="w-full text-left p-3 bg-surface-50 rounded-lg hover:bg-surface-100 transition-colors"
+                >
                   <p class="text-sm font-semibold text-surface-700">{{ lesson.title }}</p>
-                  <p class="text-xs text-surface-500 mt-1">{{ lesson.explanation }}</p>
-                  <p v-if="lesson.task" class="text-xs text-surface-600 mt-2">Task: {{ lesson.task }}</p>
-                  <div class="mt-2">
-                    <button
-                      @click="generateAssessment(lesson.id)"
-                      class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
-                    >
-                      Generate assessment
-                    </button>
-                  </div>
-                </div>
+                  <p class="text-xs text-surface-500 mt-1 line-clamp-2">{{ lesson.explanation }}</p>
+                </button>
               </div>
             </div>
 
@@ -644,6 +677,40 @@ onMounted(() => {
                 </div>
               </div>
               <p v-if="assessmentError" class="mt-2 text-xs text-red-500">{{ assessmentError }}</p>
+            </div>
+
+            <div v-if="selectedLesson" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h4 class="font-semibold text-surface-800">{{ selectedLesson.title }}</h4>
+                <button
+                  @click="closeLesson"
+                  class="text-xs text-surface-500 hover:text-surface-700"
+                >
+                  Close
+                </button>
+              </div>
+              <p class="text-sm text-surface-700 mb-3">{{ selectedLesson.explanation }}</p>
+              <p v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4">Task: {{ selectedLesson.task }}</p>
+              <button
+                @click="openAssessmentPanel"
+                class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+              >
+                Open task
+              </button>
+              <div v-if="showAssessmentPanel" class="mt-4 p-3 bg-surface-50 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-xs font-semibold text-surface-600">Assessment</p>
+                  <button @click="closeAssessmentPanel" class="text-xs text-surface-500 hover:text-surface-700">
+                    Back
+                  </button>
+                </div>
+                <button
+                  @click="generateAssessment(selectedLesson.id)"
+                  class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
+                >
+                  Generate assessment
+                </button>
+              </div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
