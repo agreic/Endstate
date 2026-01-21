@@ -159,6 +159,25 @@ export interface ProjectSummary {
   concepts: string[];
 }
 
+export interface ProjectLesson {
+  id: string;
+  node_id: string;
+  title: string;
+  explanation: string;
+  task: string;
+  created_at?: string;
+}
+
+export interface ProjectAssessment {
+  id: string;
+  lesson_id: string;
+  prompt: string;
+  status?: string;
+  feedback?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ProjectListItem {
   id: string;
   name: string;
@@ -340,13 +359,58 @@ export async function startProject(projectId: string): Promise<{ message: string
   });
 }
 
-export async function generateNodeLesson(nodeId: string, projectId?: string): Promise<{ node_id: string; explanation: string; task: string }> {
+export async function generateNodeLesson(nodeId: string, projectId?: string): Promise<{ node_id: string; lesson_id?: string; explanation: string; task: string }> {
   return requestJson(`/api/graph/nodes/${encodeURIComponent(nodeId)}/lesson`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ project_id: projectId }),
+  });
+}
+
+export async function listProjectLessons(projectId: string): Promise<{ lessons: ProjectLesson[] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons`);
+}
+
+export async function listProjectAssessments(projectId: string): Promise<{ assessments: ProjectAssessment[] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments`);
+}
+
+export async function updateProjectProfile(
+  projectId: string,
+  profile: Partial<ProjectSummary['user_profile']>,
+): Promise<{ project_id: string; user_profile: ProjectSummary['user_profile'] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/profile`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function createProjectAssessment(projectId: string, lessonId: string): Promise<{ assessment_id: string; prompt: string }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ lesson_id: lessonId }),
+  });
+}
+
+export async function submitProjectAssessment(
+  projectId: string,
+  assessmentId: string,
+  answer: string,
+): Promise<{ assessment_id: string; result: string; feedback: string }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/submit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ answer }),
   });
 }
 

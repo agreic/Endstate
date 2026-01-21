@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play } from "lucide-vue-next";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -17,6 +17,33 @@ const renameError = ref<string | null>(null);
 const isStarting = ref(false);
 const startError = ref<string | null>(null);
 const startStats = ref<{ nodes: number; relationships: number } | null>(null);
+const profileDraft = ref({
+  interests: [] as string[],
+  interestsText: "",
+  skill_level: "intermediate",
+  time_available: "2 hours/week",
+  learning_style: "hybrid",
+});
+const profileSaving = ref(false);
+const profileError = ref<string | null>(null);
+const lessons = ref<ProjectLesson[]>([]);
+const assessments = ref<ProjectAssessment[]>([]);
+const assessmentAnswers = ref<Record<string, string>>({});
+const assessmentError = ref<string | null>(null);
+const lessonsLoading = ref(false);
+const assessmentsLoading = ref(false);
+
+const SKILL_LEVELS = ["Beginner", "Intermediate", "Experienced", "Advanced"];
+const TIME_OPTIONS = [
+  "10 minutes/week",
+  "30 minutes/week",
+  "1 hour/week",
+  "2 hours/week",
+  "5 hours/week",
+  "10 hours/week",
+  "10+ hours/week",
+];
+const STYLE_OPTIONS = ["Theoretical", "Hands-on", "Hybrid"];
 
 const loadProjects = async () => {
   isLoading.value = true;
@@ -38,6 +65,8 @@ const selectProject = async (projectId: string) => {
     chatMessages.value = [];
     showChatHistory.value = false;
     startStats.value = null;
+    lessons.value = [];
+    assessments.value = [];
     return;
   }
   
@@ -45,15 +74,44 @@ const selectProject = async (projectId: string) => {
   showChatHistory.value = false;
   chatMessages.value = [];
   startStats.value = null;
+  lessons.value = [];
+  assessments.value = [];
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
     renameValue.value = project.agreed_project?.name || "";
+    const interests = project.user_profile?.interests || [];
+    profileDraft.value = {
+      interests,
+      interestsText: interests.join(", "),
+      skill_level: project.user_profile?.skill_level || "intermediate",
+      time_available: project.user_profile?.time_available || "2 hours/week",
+      learning_style: project.user_profile?.learning_style || "hybrid",
+    };
+    await loadProjectExtras(projectId);
   } catch (e) {
     error.value = "Failed to load project details";
     console.error(e);
   } finally {
     isLoadingProject.value = false;
+  }
+};
+
+const loadProjectExtras = async (projectId: string) => {
+  lessonsLoading.value = true;
+  assessmentsLoading.value = true;
+  try {
+    const [lessonsResponse, assessmentsResponse] = await Promise.all([
+      listProjectLessons(projectId),
+      listProjectAssessments(projectId),
+    ]);
+    lessons.value = lessonsResponse.lessons;
+    assessments.value = assessmentsResponse.assessments;
+  } catch (e) {
+    console.error("Failed to load project extras", e);
+  } finally {
+    lessonsLoading.value = false;
+    assessmentsLoading.value = false;
   }
 };
 
@@ -98,6 +156,69 @@ const saveRename = async () => {
     isRenaming.value = false;
   } catch (e) {
     renameError.value = "Failed to rename project";
+  }
+};
+
+const saveProfile = async () => {
+  if (!selectedProject.value) return;
+  profileSaving.value = true;
+  profileError.value = null;
+  try {
+    const interests = profileDraft.value.interestsText
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const response = await updateProjectProfile(selectedProject.value.session_id, {
+      interests,
+      skill_level: profileDraft.value.skill_level,
+      time_available: profileDraft.value.time_available,
+      learning_style: profileDraft.value.learning_style,
+    });
+    selectedProject.value.user_profile = response.user_profile;
+    profileDraft.value.interests = interests;
+  } catch (e) {
+    profileError.value = "Failed to update profile";
+  } finally {
+    profileSaving.value = false;
+  }
+};
+
+const generateAssessment = async (lessonId: string) => {
+  if (!selectedProject.value) return;
+  assessmentError.value = null;
+  try {
+    const response = await createProjectAssessment(selectedProject.value.session_id, lessonId);
+    assessments.value = [
+      {
+        id: response.assessment_id,
+        lesson_id: lessonId,
+        prompt: response.prompt,
+        status: "pending",
+      },
+      ...assessments.value,
+    ];
+  } catch (e) {
+    assessmentError.value = "Failed to generate assessment";
+  }
+};
+
+const submitAssessment = async (assessmentId: string) => {
+  if (!selectedProject.value) return;
+  assessmentError.value = null;
+  const answer = assessmentAnswers.value[assessmentId] || "";
+  if (!answer.trim()) {
+    assessmentError.value = "Answer cannot be empty";
+    return;
+  }
+  try {
+    const response = await submitProjectAssessment(selectedProject.value.session_id, assessmentId, answer);
+    assessments.value = assessments.value.map((assessment) =>
+      assessment.id === assessmentId
+        ? { ...assessment, status: response.result, feedback: response.feedback }
+        : assessment,
+    );
+  } catch (e) {
+    assessmentError.value = "Failed to submit assessment";
   }
 };
 
@@ -152,7 +273,15 @@ const handleStartProject = async () => {
   try {
     const response = await startProject(selectedProject.value.session_id);
     if (response.user_profile) {
+      const interests = response.user_profile.interests || [];
       selectedProject.value.user_profile = response.user_profile;
+      profileDraft.value = {
+        interests,
+        interestsText: interests.join(", "),
+        skill_level: response.user_profile.skill_level || "intermediate",
+        time_available: response.user_profile.time_available || "2 hours/week",
+        learning_style: response.user_profile.learning_style || "hybrid",
+      };
     }
     if (response.project_status) {
       selectedProject.value.project_status = response.project_status;
@@ -389,6 +518,54 @@ onMounted(() => {
                   <p class="text-sm font-medium text-surface-700 capitalize">{{ selectedProject.user_profile?.learning_style || 'Not set' }}</p>
                 </div>
               </div>
+              <div class="mt-4 border-t border-surface-100 pt-4">
+                <p class="text-xs text-surface-400 mb-2">Update Profile</p>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div class="md:col-span-2">
+                    <label class="text-xs text-surface-500 mb-1 block">Interests (comma separated)</label>
+                    <input
+                      v-model="profileDraft.interestsText"
+                      type="text"
+                      class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200"
+                      placeholder="e.g. Python, Lambdas"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-surface-500 mb-1 block">Skill Level</label>
+                    <select v-model="profileDraft.skill_level" class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200">
+                      <option v-for="level in SKILL_LEVELS" :key="level" :value="level.toLowerCase()">
+                        {{ level }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-xs text-surface-500 mb-1 block">Style</label>
+                    <select v-model="profileDraft.learning_style" class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200">
+                      <option v-for="style in STYLE_OPTIONS" :key="style" :value="style.toLowerCase()">
+                        {{ style }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="md:col-span-2">
+                    <label class="text-xs text-surface-500 mb-1 block">Time / Week</label>
+                    <select v-model="profileDraft.time_available" class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200">
+                      <option v-for="time in TIME_OPTIONS" :key="time" :value="time">
+                        {{ time }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="md:col-span-2 flex items-end justify-end gap-3">
+                    <p v-if="profileError" class="text-xs text-red-500">{{ profileError }}</p>
+                    <button
+                      @click="saveProfile"
+                      :disabled="profileSaving"
+                      class="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-60"
+                    >
+                      {{ profileSaving ? 'Saving...' : 'Save Profile' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div v-if="selectedProject.agreed_project?.milestones?.length" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
@@ -408,6 +585,65 @@ onMounted(() => {
                   <span class="text-sm text-surface-700">{{ milestone }}</span>
                 </div>
               </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center gap-2 mb-4">
+                <MessageSquare :size="18" class="text-primary-500" />
+                <h4 class="font-semibold text-surface-800">Lessons</h4>
+              </div>
+              <div v-if="lessonsLoading" class="text-sm text-surface-400">Loading lessons...</div>
+              <div v-else-if="lessons.length === 0" class="text-sm text-surface-400">No lessons yet.</div>
+              <div v-else class="space-y-3">
+                <div v-for="lesson in lessons" :key="lesson.id" class="p-3 bg-surface-50 rounded-lg">
+                  <p class="text-sm font-semibold text-surface-700">{{ lesson.title }}</p>
+                  <p class="text-xs text-surface-500 mt-1">{{ lesson.explanation }}</p>
+                  <p v-if="lesson.task" class="text-xs text-surface-600 mt-2">Task: {{ lesson.task }}</p>
+                  <div class="mt-2">
+                    <button
+                      @click="generateAssessment(lesson.id)"
+                      class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
+                    >
+                      Generate assessment
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center gap-2 mb-4">
+                <CheckCircle :size="18" class="text-emerald-500" />
+                <h4 class="font-semibold text-surface-800">Assessments</h4>
+              </div>
+              <div v-if="assessmentsLoading" class="text-sm text-surface-400">Loading assessments...</div>
+              <div v-else-if="assessments.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
+              <div v-else class="space-y-4">
+                <div v-for="assessment in assessments" :key="assessment.id" class="p-3 bg-surface-50 rounded-lg">
+                  <p class="text-sm text-surface-700">{{ assessment.prompt }}</p>
+                  <p v-if="assessment.status" class="text-xs mt-2 text-surface-500">
+                    Status: <span class="font-semibold capitalize">{{ assessment.status }}</span>
+                  </p>
+                  <p v-if="assessment.feedback" class="text-xs text-surface-600 mt-2">Feedback: {{ assessment.feedback }}</p>
+                  <div class="mt-3">
+                    <textarea
+                      v-model="assessmentAnswers[assessment.id]"
+                      rows="2"
+                      class="w-full px-3 py-2 text-xs rounded-lg border border-surface-200"
+                      placeholder="Write your answer here..."
+                    ></textarea>
+                    <div class="flex items-center justify-end mt-2">
+                      <button
+                        @click="submitAssessment(assessment.id)"
+                        class="text-xs px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                      >
+                        Submit answer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p v-if="assessmentError" class="mt-2 text-xs text-red-500">{{ assessmentError }}</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
