@@ -98,15 +98,27 @@ export function useChat() {
     status.value = 'connecting';
     disconnect(); // Clean up any existing connection
     
+    // Timeout fallback - if SSE doesn't connect within 5s, use fetch
+    const connectionTimeout = setTimeout(() => {
+      if (status.value === 'connecting') {
+        console.log('[Chat] SSE connection timeout, falling back to fetch');
+        eventSource?.close();
+        eventSource = null;
+        fetchMessages();
+      }
+    }, 5000);
+    
     try {
       eventSource = new EventSource(`${API_URL}/api/chat/${sessionId.value}/stream`);
       
       eventSource.onopen = () => {
         console.log('[Chat] SSE connected');
+        clearTimeout(connectionTimeout);
         reconnectAttempts = 0; // Reset reconnect counter on successful connection
       };
       
       eventSource.onmessage = (event) => {
+        clearTimeout(connectionTimeout); // Clear timeout on first message
         try {
           const data = JSON.parse(event.data);
           
@@ -146,12 +158,11 @@ export function useChat() {
           } else if (data.event === 'error') {
             error.value = data.message || 'An error occurred';
             console.error('[Chat] Server error:', data.message);
-            // Don't reconnect on server error - just show error and let user refresh
             eventSource?.close();
             eventSource = null;
-            reconnectAttempts = 5; // Prevent further reconnect attempts
+            reconnectAttempts = 5;
           } else if (data.event === 'heartbeat') {
-            // Silent heartbeat - just keep connection alive
+            // Silent heartbeat
           }
         } catch (e) {
           console.error('[Chat] SSE parse error:', e);
@@ -159,6 +170,7 @@ export function useChat() {
       };
       
       eventSource.onerror = () => {
+        clearTimeout(connectionTimeout);
         console.log('[Chat] SSE connection error');
         eventSource?.close();
         eventSource = null;
@@ -172,13 +184,13 @@ export function useChat() {
           return;
         }
         
-        // Exponential backoff: 1s, 2s, 4s, 8s
         const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
         console.log(`[Chat] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/5)`);
         status.value = 'connecting';
         reconnectTimeout = setTimeout(connectSSE, delay);
       };
     } catch (e) {
+      clearTimeout(connectionTimeout);
       console.error('[Chat] Failed to create SSE connection:', e);
       status.value = 'ready';
       fetchMessages();

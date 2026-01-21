@@ -505,7 +505,8 @@ Conversation:
                 yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id), 'error': None})}\n\n"
             except Exception as e:
                 print(f"[Chat] Error fetching initial messages: {e}")
-                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False, 'error': 'Database unavailable. Please try again later.'})}\n\n"
+                # Still send initial_messages with error - don't fail the stream
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False, 'error': 'Database unavailable. Chat will continue without history.'})}\n\n"
             
             last_heartbeat = asyncio.get_event_loop().time()
             while True:
@@ -527,7 +528,7 @@ Conversation:
             pass
         except Exception as e:
             print(f"[Chat] Event stream error: {e}")
-            yield f"event: error\ndata: {json.dumps({'message': 'Connection lost. Please refresh.'})}\n\n"
+            # Don't crash - just stop sending events
         finally:
             BackgroundTaskStore.unsubscribe(session_id, queue)
 
