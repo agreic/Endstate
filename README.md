@@ -77,12 +77,50 @@ See [[backend/README.md]] for detailed knowledge graph documentation.
 ## Installation
 
 ```bash
-# Install dependencies
+# Install Python dependencies
 uv sync
 
-# Add optional development dependencies
-uv add --dev pytest pytest-asyncio
+# Install frontend dependencies
+cd frontend && npm install
 ```
+
+## Running the Application
+
+### Development Mode (Recommended)
+
+Run backend and frontend separately for hot reloading:
+
+```bash
+# Terminal 1: Start backend with hot reload
+cd /path/to/endstate
+uv run uvicorn backend.main:app --reload
+
+# Terminal 2: Start frontend dev server
+cd /path/to/endstate/frontend
+npm run dev
+```
+
+Access the application at:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+
+### Docker (Production)
+
+Build and run the full stack with Docker Compose:
+
+```bash
+# Build and start all services
+docker compose up -d --build --force-recreate
+
+# View logs
+docker compose logs -f
+
+# Stop all services
+docker compose down
+```
+
+Access the application at http://localhost:3000
 
 ## Development
 
@@ -91,7 +129,7 @@ uv add --dev pytest pytest-asyncio
 ```bash
 cd frontend
 
-# Development server
+# Development server with hot reload
 npm run dev
 
 # Build for production
@@ -107,8 +145,11 @@ npm test
 # Run tests
 uv run pytest
 
-# Run Python development
+# Run Python REPL
 uv run python
+
+# Lint code
+uv run ruff check .
 ```
 
 ## Testing
