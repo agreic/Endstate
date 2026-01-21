@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { Send, Bot, User, Globe, RotateCcw } from "lucide-vue-next";
+import { Send, Bot, User, Globe, RotateCcw, X } from "lucide-vue-next";
 import { marked } from "marked";
 import { useChat } from "../composables/useChat";
 
@@ -10,6 +10,7 @@ const renderMarkdown = (content: string) => {
 
 const inputMessage = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
+const showError = ref(true);
 
 const { messages, status, isLocked, error, sendMessage, resetChat } = useChat();
 
@@ -37,6 +38,16 @@ watch(messages, () => {
   setTimeout(scrollToBottom, 50);
 }, { deep: true });
 
+watch(error, () => {
+  if (error.value) {
+    showError.value = true;
+    // Auto-dismiss error after 10 seconds
+    setTimeout(() => {
+      showError.value = false;
+    }, 10000);
+  }
+}, { deep: true });
+
 const handleSend = async () => {
   if (isInputDisabled.value) return;
   
@@ -45,12 +56,19 @@ const handleSend = async () => {
   
   await sendMessage(text);
 };
+
+const dismissError = () => {
+  showError.value = false;
+};
 </script>
 
 <template>
   <div class="flex flex-col h-full bg-surface-50">
-    <div v-if="error" class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 mx-4 mt-4 rounded-lg text-sm">
-      {{ error }}
+    <div v-if="showError && error" class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 mx-4 mt-4 rounded-lg text-sm flex items-center gap-2">
+      <span class="flex-1">{{ error }}</span>
+      <button @click="dismissError" class="text-red-400 hover:text-red-600">
+        <X :size="16" />
+      </button>
     </div>
 
     <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">

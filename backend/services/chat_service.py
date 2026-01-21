@@ -11,11 +11,54 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, AsyncGenerator
+from functools import wraps
+from typing import Optional, AsyncGenerator, Callable, Any
 
 from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
 from backend.services.agent_prompts import get_chat_system_prompt
+
+
+LLM_TIMEOUT = 60.0  # 60 seconds for LLM calls
+
+
+def with_timeout(seconds: float):
+    """Decorator to add timeout to async functions."""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await asyncio.wait_for(func(*args, **kwargs), timeout=seconds)
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Operation timed out after {seconds}s")
+        return wrapper
+    return decorator
+
+
+class AsyncTimeoutError(Exception):
+    """Custom exception for timeout errors."""
+    pass
+
+
+def safe_run_with_timeout(func: Callable, timeout: float = LLM_TIMEOUT) -> Any:
+    """
+    Run a blocking function with timeout in a thread pool.
+    
+    Args:
+        func: The blocking function to run
+        timeout: Timeout in seconds
+        
+    Returns:
+        Result of the function
+        
+    Raises:
+        AsyncTimeoutError: If the function times out
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        return loop.run_in_executor(None, func), timeout
+    except Exception:
+        return None, timeout
 
 
 ACCEPTANCE_START_MESSAGE = "Excellent! I'm creating a detailed project plan for you. This will just a moment..."
@@ -230,9 +273,19 @@ class ChatService:
             for msg in history:
                 messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
             
-            # Run LLM invoke in thread pool to avoid blocking
+            # Run LLM invoke in thread pool with timeout
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, self.llm.invoke, messages_list)
+            try:
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.llm.invoke, messages_list),
+                    timeout=LLM_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                await BackgroundTaskStore.notify(session_id, "error", {
+                    "message": "Request timed out. The AI is taking too long to respond. Please try again."
+                })
+                raise
+            
             response_text = str(response.content if hasattr(response, 'content') else response)
             
             self.add_message(session_id, "assistant", response_text)
@@ -243,6 +296,11 @@ class ChatService:
             })
             
             return ChatResponse(success=True, content=response_text)
+        except Exception as e:
+            await BackgroundTaskStore.notify(session_id, "error", {
+                "message": f"An error occurred: {str(e)}"
+            })
+            raise
         finally:
             self.set_locked(session_id, False)
     
@@ -270,7 +328,16 @@ class ChatService:
             from backend.services.summary_cache import summary_cache
             
             loop = asyncio.get_event_loop()
-            has_llm, llm_summary = await loop.run_in_executor(None, self._extract_summary_llm_with_invoke, history)
+            try:
+                has_llm, llm_summary = await asyncio.wait_for(
+                    loop.run_in_executor(None, self._extract_summary_llm_with_invoke, history),
+                    timeout=LLM_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                await BackgroundTaskStore.notify(session_id, "error", {
+                    "message": "Project extraction timed out. Please try again."
+                })
+                return
             
             summary_saved = False
             if has_llm and llm_summary:
@@ -295,6 +362,9 @@ class ChatService:
             raise
         except Exception as e:
             print(f"Error extracting summary for session {session_id}: {e}")
+            await BackgroundTaskStore.notify(session_id, "error", {
+                "message": f"Failed to create project: {str(e)}"
+            })
         finally:
             self.set_locked(session_id, False)
             await BackgroundTaskStore.notify(session_id, "processing_complete", {})
@@ -423,19 +493,32 @@ Conversation:
         return True, summary
     
     async def event_stream(self, session_id: str) -> AsyncGenerator[str, None]:
-        """Create an SSE event stream for a session."""
+        """Create an SSE event stream for a session with heartbeat."""
         queue: asyncio.Queue = asyncio.Queue()
         BackgroundTaskStore.subscribe(session_id, queue)
+        HEARTBEAT_INTERVAL = 30  # seconds
         
         try:
             # Send initial messages
             messages = self.get_messages(session_id)
             yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id)})}\n\n"
             
-            # Listen for events
+            last_heartbeat = asyncio.get_event_loop().time()
             while True:
-                event = await queue.get()
-                yield f"event: {event.get('event', 'message')}\ndata: {json.dumps(event)}\n\n"
+                now = asyncio.get_event_loop().time()
+                
+                # Send heartbeat if needed
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    yield "event: heartbeat\ndata: {}\n\n"
+                    last_heartbeat = now
+                
+                # Wait for events with timeout
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL)
+                    yield f"event: {event.get('event', 'message')}\ndata: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    # Continue loop to send heartbeat
+                    pass
         except asyncio.CancelledError:
             pass
         finally:
