@@ -307,8 +307,9 @@ export async function mergeDuplicates(label: string, matchProperty: string = 'id
   });
 }
 
-export async function listProjects(): Promise<{ projects: ProjectListItem[] }> {
-  return requestJson('/api/projects');
+export async function listProjects(limit: number = 50): Promise<{ projects: ProjectListItem[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return requestJson(`/api/projects?${params}`);
 }
 
 export async function getProject(projectId: string): Promise<ProjectSummary> {

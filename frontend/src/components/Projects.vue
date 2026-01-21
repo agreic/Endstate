@@ -146,7 +146,7 @@ onMounted(() => {
             </p>
           </div>
           
-          <div v-else class="space-y-3">
+          <div v-else class="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
             <button
               v-for="project in projects"
               :key="project.id"
