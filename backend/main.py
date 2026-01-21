@@ -310,6 +310,9 @@ async def send_chat_message(session_id: str, request: ChatRequest, http_request:
         
         response = await chat_service.send_message(session_id, request.message, request_id)
         
+        if response.is_processing:
+            return {"success": False, "is_processing": True}
+
         if response.already_processed:
             return {"success": True, "already_processed": True}
         

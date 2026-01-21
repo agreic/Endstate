@@ -265,6 +265,8 @@ class ChatService:
     
     async def send_message(self, session_id: str, content: str, request_id: str) -> ChatResponse:
         """Send a message - idempotent by request_id."""
+        if self.is_locked(session_id):
+            return ChatResponse(success=False, is_processing=True)
         self.create_session(session_id)
         
         # Check idempotency

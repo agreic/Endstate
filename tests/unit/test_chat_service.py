@@ -65,3 +65,14 @@ async def test_event_stream_emits_message_metadata():
         assert data["request_id"] == "req-2"
     finally:
         await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_locked_session_rejects_message():
+    service = ChatService(db=DummyDb())
+    service.is_locked = lambda _session_id: True  # type: ignore[assignment]
+
+    response = await service.send_message("session-123", "Hello", "req-1")
+
+    assert response.success is False
+    assert response.is_processing is True
