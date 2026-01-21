@@ -164,6 +164,7 @@ const handleStartProject = async () => {
       nodes: response.nodes_added ?? 0,
       relationships: response.relationships_added ?? 0,
     };
+    localStorage.setItem("endstate_active_project_id", selectedProject.value.session_id);
   } catch (e) {
     startError.value = "Failed to start project";
   } finally {

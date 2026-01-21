@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2 } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, type ApiNode, type ApiRelationship } from "../services/api";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
+import { fetchGraphData, extractFromText, deleteNode, generateNodeLesson, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -44,6 +44,9 @@ const isAddingSample = ref(false);
 const showDeleteConfirm = ref(false);
 const deletingNode = ref<GraphNode | null>(null);
 const deleteMessage = ref("");
+const lessonLoading = ref(false);
+const lessonError = ref<string | null>(null);
+const lessonResult = ref<{ explanation: string; task: string } | null>(null);
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
@@ -213,6 +216,25 @@ const cancelDelete = () => {
   deletingNode.value = null;
 };
 
+const loadLesson = async () => {
+  if (!selectedNode.value) return;
+  lessonLoading.value = true;
+  lessonError.value = null;
+  lessonResult.value = null;
+  try {
+    const projectId = localStorage.getItem("endstate_active_project_id") || undefined;
+    const response = await generateNodeLesson(selectedNode.value.id, projectId || undefined);
+    lessonResult.value = {
+      explanation: response.explanation,
+      task: response.task,
+    };
+  } catch (e) {
+    lessonError.value = "Failed to generate lesson";
+  } finally {
+    lessonLoading.value = false;
+  }
+};
+
 const isNodeMatching = (node: GraphNode): boolean => {
   if (!searchQuery.value) return true;
   const query = searchQuery.value.toLowerCase();
@@ -276,6 +298,12 @@ const updateLinkStyles = () => {
 watch(searchQuery, () => {
   updateNodeStyles();
   updateLinkStyles();
+});
+
+watch(selectedNode, () => {
+  lessonResult.value = null;
+  lessonError.value = null;
+  lessonLoading.value = false;
 });
 
 const initGraph = () => {
@@ -681,6 +709,28 @@ const legendItems = computed(() => {
             <p v-for="(value, key) in selectedNode.properties" :key="key" class="text-surface-600">
               <span class="font-medium text-surface-500">{{ key }}:</span> {{ formatPropertyValue(value) }}
             </p>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <button
+            @click="loadLesson"
+            :disabled="lessonLoading"
+            class="w-full flex items-center justify-center gap-2 text-xs font-medium px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-60"
+          >
+            <BookOpen :size="14" />
+            {{ lessonLoading ? 'Generating lesson...' : 'Generate lesson' }}
+          </button>
+          <p v-if="lessonError" class="mt-2 text-xs text-red-500">{{ lessonError }}</p>
+          <div v-if="lessonResult" class="mt-3 text-xs text-surface-600 space-y-2">
+            <div>
+              <p class="font-semibold text-surface-700 mb-1">Explanation</p>
+              <p>{{ lessonResult.explanation }}</p>
+            </div>
+            <div v-if="lessonResult.task">
+              <p class="font-semibold text-surface-700 mb-1">Task</p>
+              <p>{{ lessonResult.task }}</p>
+            </div>
           </div>
         </div>
         

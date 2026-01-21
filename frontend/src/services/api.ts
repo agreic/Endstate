@@ -340,6 +340,16 @@ export async function startProject(projectId: string): Promise<{ message: string
   });
 }
 
+export async function generateNodeLesson(nodeId: string, projectId?: string): Promise<{ node_id: string; explanation: string; task: string }> {
+  return requestJson(`/api/graph/nodes/${encodeURIComponent(nodeId)}/lesson`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+}
+
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
   return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }
