@@ -229,7 +229,7 @@ export async function sendChatMessage(
 }
 
 export async function extractFromText(text: string): Promise<{ message: string; documents_count: number }> {
-  const response = await fetch(`${API_URL}/api/extract`, {
+  const response = await fetch(`${API_URL}/api/extract/sample`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -11,7 +11,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.services.knowledge_graph import KnowledgeGraphService
-from backend.services.chat_service import chat_service, BackgroundTaskStore
+from backend.services.chat_service import chat_service
+from backend.services.extraction_service import extract_text, get_task, cancel_task, BackgroundTaskStore
 
 
 class ChatMessage(BaseModel):
@@ -135,26 +136,85 @@ def get_relationships(limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/extract")
-def extract_from_text(request: ExtractRequest):
+@app.post("/api/extract/sample")
+def add_sample_data():
     """
-    Extract knowledge from text and add to graph.
-    
-    Args:
-        request: Extract request with text to process
-    
-    Returns:
-        Extracted documents info
+    Add sample skill graph data to Neo4j.
+    This creates proper nodes with correct types, bypassing LLM extraction.
     """
-    service = get_service()
+    from backend.db.neo4j_client import Neo4jClient
+    from backend.config import Neo4jConfig
+    
+    config = Neo4jConfig()
+    client = Neo4jClient(config)
+    
     try:
-        documents = service.extract_and_add(request.text)
+        # Clean existing data
+        client.clean_graph()
+        
+        # Create Skills
+        skills = [
+            ("python", "Python", "Programming language"),
+            ("machine-learning", "Machine Learning", "AI subset that enables systems to learn from data"),
+            ("deep-learning", "Deep Learning", "Uses neural networks with multiple layers"),
+            ("tensorflow", "TensorFlow", "Open source ML framework by Google"),
+            ("pytorch", "PyTorch", "Open source ML framework by Meta"),
+            ("computer-vision", "Computer Vision", "Enables computers to see and understand images"),
+            ("nlp", "Natural Language Processing", "Processes human language by computers"),
+            ("neural-networks", "Neural Networks", "Computing systems inspired by biological brains"),
+            ("llm", "Large Language Models", "Transformer-based models like GPT"),
+        ]
+        
+        for skill_id, name, description in skills:
+            client.query("""
+                CREATE (s:Skill {
+                    id: $id,
+                    name: $name,
+                    description: $description,
+                    difficulty: 'intermediate',
+                    importance: 'core'
+                })
+            """, {"id": skill_id, "name": name, "description": description})
+        
+        # Create relationships
+        relationships = [
+            ("machine-learning", "REQUIRES", "python"),
+            ("deep-learning", "REQUIRES", "machine-learning"),
+            ("tensorflow", "REQUIRES", "python"),
+            ("tensorflow", "REQUIRES", "deep-learning"),
+            ("pytorch", "REQUIRES", "python"),
+            ("pytorch", "REQUIRES", "deep-learning"),
+            ("computer-vision", "REQUIRES", "deep-learning"),
+            ("nlp", "REQUIRES", "deep-learning"),
+            ("neural-networks", "REQUIRES", "deep-learning"),
+            ("llm", "REQUIRES", "neural-networks"),
+            ("llm", "REQUIRES", "nlp"),
+        ]
+        
+        for source_id, rel_type, target_id in relationships:
+            client.query("""
+                MATCH (s:Skill {id: $source_id})
+                MATCH (t:Skill {id: $target_id})
+                CREATE (s)-[:{rel_type} {strength: 0.9}]->(t)
+            """, {"source_id": source_id, "target_id": target_id, "rel_type": rel_type})
+        
+        # Get stats
+        stats = client.get_graph_stats()
+        
         return {
-            "message": "Extraction successful",
-            "documents_count": len(documents),
+            "message": "Sample data added successfully",
+            "total_nodes": stats.get("total_nodes", 0),
+            "total_relationships": stats.get("total_relationships", 0),
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        pass  # Don't close - let connection pool manage lifecycle
+
+
+@app.post("/api/extract/cancel/{task_id}")
+def cancel_extraction(task_id: str):
+    """Cancel a running extraction task."""
+    cancelled = cancel_task(task_id)
+    return {"cancelled": cancelled}
 
 
 @app.post("/api/clean")

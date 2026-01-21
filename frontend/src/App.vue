@@ -14,6 +14,27 @@ const activeTab = ref<'dashboard' | 'chat' | 'graph' | 'projects'>('dashboard')
 const showSettings = ref(false)
 const showHelp = ref(false)
 
+// Apply saved theme on mount
+onMounted(() => {
+  const saved = localStorage.getItem('endstate-theme') as 'light' | 'dark' | 'system' | null
+  if (saved) {
+    applyTheme(saved)
+  } else {
+    applyTheme('system')
+  }
+})
+
+const applyTheme = (theme: 'light' | 'dark' | 'system') => {
+  const root = document.documentElement
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  
+  if (theme === 'dark' || (theme === 'system' && prefersDark)) {
+    root.classList.add('dark')
+  } else {
+    root.classList.remove('dark')
+  }
+}
+
 const toggleSidebar = () => {
   sidebarOpen.value = !sidebarOpen.value
 }
@@ -22,15 +43,11 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
   activeTab.value = tab
 }
 
-onMounted(() => {
-  const hasSeenHelp = localStorage.getItem('endstate-has-seen-help')
-  if (!hasSeenHelp) {
-    setTimeout(() => {
-      showHelp.value = true
-      localStorage.setItem('endstate-has-seen-help', 'true')
-    }, 500)
-  }
-})
+const handleHelpClose = () => {
+  showHelp.value = false
+  // Mark as seen so it doesn't show again automatically
+  localStorage.setItem('endstate-has-seen-help', 'true')
+}
 </script>
 
 <template>
