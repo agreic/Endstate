@@ -1,4 +1,89 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
+
+async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJson = contentType.includes('application/json');
+
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      if (hasJson) {
+        const errorBody = await response.json().catch(() => null);
+        detail = errorBody?.detail || errorBody?.message || detail;
+      } else {
+        const text = await response.text().catch(() => '');
+        if (text) detail = text;
+      }
+      throw new Error(detail);
+    }
+
+    if (!hasJson) {
+      return {} as T;
+    }
+
+    return response.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function requestJsonAllowNotFound<T>(path: string, notFoundValue: T, options?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    if (response.status === 404) {
+      return notFoundValue;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJson = contentType.includes('application/json');
+
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      if (hasJson) {
+        const errorBody = await response.json().catch(() => null);
+        detail = errorBody?.detail || errorBody?.message || detail;
+      } else {
+        const text = await response.text().catch(() => '');
+        if (text) detail = text;
+      }
+      throw new Error(detail);
+    }
+
+    if (!hasJson) {
+      return notFoundValue;
+    }
+
+    return response.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export interface ApiNode {
   id: string;
@@ -28,8 +113,9 @@ export interface GraphStats {
 }
 
 export interface ChatMessage {
-  role: string;
+  role: 'user' | 'assistant';
   content: string;
+  timestamp?: string;
 }
 
 export interface ChatResponse {
@@ -47,11 +133,7 @@ export interface DashboardStats {
 }
 
 export interface ChatHistoryResponse {
-  messages: Array<{
-    role: string;
-    content: string;
-    timestamp: string;
-  }>;
+  messages: ChatMessage[];
 }
 
 export interface ProjectSummary {
@@ -83,46 +165,25 @@ export interface ProjectListItem {
 }
 
 export async function fetchGraphData(): Promise<GraphData> {
-  const response = await fetch(`${API_URL}/api/graph`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson<GraphData>('/api/graph');
 }
 
 export async function fetchGraphStats(): Promise<GraphStats> {
-  const response = await fetch(`${API_URL}/api/graph/stats`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson<GraphStats>('/api/graph/stats');
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const response = await fetch(`${API_URL}/api/stats/dashboard`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson<DashboardStats>('/api/stats/dashboard');
 }
 
 export async function fetchHealth(): Promise<{ database: boolean; llm: boolean; database_error?: string; llm_error?: string }> {
-  const response = await fetch(`${API_URL}/api/health`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson('/api/health');
 }
 
 export async function deleteNode(nodeId: string): Promise<{ deleted_node_id: string; relationships_deleted: number }> {
-  const response = await fetch(`${API_URL}/api/graph/nodes/${encodeURIComponent(nodeId)}`, {
+  return requestJson(`/api/graph/nodes/${encodeURIComponent(nodeId)}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to delete node' }));
-    throw new Error(error.detail || 'Failed to delete node');
-  }
-  return response.json();
 }
 
 export async function deleteRelationship(sourceId: string, targetId: string, relType: string): Promise<{ deleted: boolean }> {
@@ -131,58 +192,33 @@ export async function deleteRelationship(sourceId: string, targetId: string, rel
     target_id: targetId,
     rel_type: relType,
   });
-  const response = await fetch(`${API_URL}/api/graph/relationships?${params}`, {
+  return requestJson(`/api/graph/relationships?${params}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to delete relationship' }));
-    throw new Error(error.detail || 'Failed to delete relationship');
-  }
-  return response.json();
 }
 
 export async function getNodeConnections(nodeId: string): Promise<{ node_id: string; connections: Array<{ id: string; labels: string[]; rel_type: string }> }> {
-  const response = await fetch(`${API_URL}/api/graph/node/${encodeURIComponent(nodeId)}/connections`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson(`/api/graph/node/${encodeURIComponent(nodeId)}/connections`);
 }
 
 export async function getChatHistory(sessionId: string): Promise<{ messages: Array<{ role: string; content: string; timestamp: string }>; is_locked?: boolean }> {
-  const response = await fetch(`${API_URL}/api/chat/${sessionId}/messages`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson(`/api/chat/${sessionId}/messages`);
 }
 
 export async function checkSessionLocked(sessionId: string): Promise<{ locked: boolean }> {
-  const response = await fetch(`${API_URL}/api/chat/${sessionId}/locked`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson(`/api/chat/${sessionId}/locked`);
 }
 
 export async function deleteChatSession(sessionId: string): Promise<{ message: string }> {
-  const response = await fetch(`${API_URL}/api/chat/${encodeURIComponent(sessionId)}`, {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function resetChatSession(sessionId: string): Promise<{ message: string }> {
-  const response = await fetch(`${API_URL}/api/chat/${encodeURIComponent(sessionId)}/reset`, {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/reset`, {
     method: 'POST',
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function sendChatMessage(
@@ -217,87 +253,74 @@ export async function sendChatMessage(
     init.signal = signal;
   }
   
-  const response = await fetch(endpoint, init);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
   }
-  return response.json();
+
+  try {
+    const response = await fetch(endpoint, {
+      ...init,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const detail = errorBody?.detail || errorBody?.message || `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    return response.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function extractFromText(text: string): Promise<{ message: string; documents_count: number }> {
-  const response = await fetch(`${API_URL}/api/extract/sample`, {
+  return requestJson('/api/extract/sample', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ text }),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function cleanGraph(label?: string): Promise<{ message: string }> {
   const params = label ? `?label=${encodeURIComponent(label)}` : '';
-  const response = await fetch(`${API_URL}/api/clean${params}`, {
+  return requestJson(`/api/clean${params}`, {
     method: 'POST',
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function mergeDuplicates(label: string, matchProperty: string = 'id'): Promise<{ message: string; merged_count: number }> {
-  const response = await fetch(`${API_URL}/api/merge?label=${encodeURIComponent(label)}&match_property=${encodeURIComponent(matchProperty)}`, {
+  return requestJson(`/api/merge?label=${encodeURIComponent(label)}&match_property=${encodeURIComponent(matchProperty)}`, {
     method: 'POST',
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function listProjects(): Promise<{ projects: ProjectListItem[] }> {
-  const response = await fetch(`${API_URL}/api/projects`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson('/api/projects');
 }
 
 export async function getProject(projectId: string): Promise<ProjectSummary> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}`);
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}`);
 }
 
 export async function deleteProject(projectId: string): Promise<{ message: string }> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}`, {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
 }
 
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/chat`);
-  if (!response.ok) {
-    if (response.status === 404) {
-      return { messages: [] };
-    }
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  return response.json();
+  return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }
