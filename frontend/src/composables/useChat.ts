@@ -113,13 +113,19 @@ export function useChat() {
           if (data.event === 'initial_messages') {
             isLocked.value = data.locked || false;
             
-            if (data.messages.length === 0) {
+            // Handle error in initial_messages
+            if (data.error) {
+              error.value = data.error;
+              reconnectAttempts = 5; // Stop reconnecting on server error
+            }
+            
+            if (data.messages.length === 0 && !data.error) {
               messages.value = [{
                 role: 'assistant',
                 content: GREETING,
                 timestamp: new Date(),
               }];
-            } else {
+            } else if (data.messages.length > 0) {
               messages.value = data.messages.map((m: any) => ({
                 role: m.role as 'user' | 'assistant',
                 content: m.content,

@@ -502,11 +502,10 @@ Conversation:
             # Send initial messages (with error handling)
             try:
                 messages = self.get_messages(session_id)
-                yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id)})}\n\n"
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id), 'error': None})}\n\n"
             except Exception as e:
                 print(f"[Chat] Error fetching initial messages: {e}")
-                yield f"event: error\ndata: {json.dumps({'message': 'Failed to load chat history. Please try again.'})}\n\n"
-                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False})}\n\n"
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False, 'error': 'Database unavailable. Please try again later.'})}\n\n"
             
             last_heartbeat = asyncio.get_event_loop().time()
             while True:
