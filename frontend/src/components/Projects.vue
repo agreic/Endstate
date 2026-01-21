@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X } from "lucide-vue-next";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
+import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play } from "lucide-vue-next";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -14,6 +14,8 @@ const error = ref<string | null>(null);
 const isRenaming = ref(false);
 const renameValue = ref("");
 const renameError = ref<string | null>(null);
+const isStarting = ref(false);
+const startError = ref<string | null>(null);
 
 const loadProjects = async () => {
   isLoading.value = true;
@@ -137,6 +139,22 @@ const confirmDelete = async (projectId: string) => {
   } catch (e) {
     error.value = "Failed to delete project";
     console.error(e);
+  }
+};
+
+const handleStartProject = async () => {
+  if (!selectedProject.value) return;
+  isStarting.value = true;
+  startError.value = null;
+  try {
+    const response = await startProject(selectedProject.value.session_id);
+    if (response.user_profile) {
+      selectedProject.value.user_profile = response.user_profile;
+    }
+  } catch (e) {
+    startError.value = "Failed to start project";
+  } finally {
+    isStarting.value = false;
   }
 };
 
@@ -265,6 +283,15 @@ onMounted(() => {
                   </div>
                   <div class="flex gap-2">
                     <button
+                      @click="handleStartProject"
+                      :disabled="isStarting"
+                      class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-xs"
+                      title="Start project"
+                    >
+                      <Play :size="16" />
+                      <span>{{ isStarting ? 'Starting...' : 'Start' }}</span>
+                    </button>
+                    <button
                       v-if="!isRenaming"
                       @click="startRename"
                       class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
@@ -298,6 +325,7 @@ onMounted(() => {
                   </div>
                 </div>
                 <p class="mt-3 text-primary-100 text-sm">{{ selectedProject.agreed_project?.description }}</p>
+                <p v-if="startError" class="mt-2 text-xs text-red-100">{{ startError }}</p>
                 <div class="mt-4 flex items-center gap-4 text-sm">
                   <div class="flex items-center gap-1.5">
                     <Clock :size="14" />

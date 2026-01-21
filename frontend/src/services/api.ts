@@ -332,6 +332,12 @@ export async function renameProject(projectId: string, name: string): Promise<{ 
   });
 }
 
+export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile'] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/start`, {
+    method: 'POST',
+  });
+}
+
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
   return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }

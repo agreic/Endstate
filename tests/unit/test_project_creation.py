@@ -50,17 +50,20 @@ def test_project_creation_persists_summary_and_chat_history():
         "concepts": [],
     }
 
-    project_name = service._persist_project("session-123", summary, history)
+    project_name, project_id = service._persist_project("session-123", summary, history, project_id="project-123")
 
     assert project_name == "Deep Dive into Python Lambda Functions"
     assert db.summary is not None
-    assert db.summary["id"] == "session-123"
+    assert db.summary["id"] == "project-123"
     assert db.summary["name"] == "Deep Dive into Python Lambda Functions"
 
     stored_summary = json.loads(db.summary["summary_json"])
     assert stored_summary["agreed_project"]["name"] == "Deep Dive into Python Lambda Functions"
+    assert stored_summary["project_id"] == "project-123"
+    assert stored_summary["session_id"] == "session-123"
 
     assert db.chat_messages is not None
+    assert project_id == "project-123"
     assert len(db.chat_messages["messages"]) == 3
     assert db.chat_messages["messages"][0]["idx"] == 0
     assert db.chat_messages["messages"][2]["idx"] == 2
