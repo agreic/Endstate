@@ -11,8 +11,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.services.knowledge_graph import KnowledgeGraphService
-from backend.services.chat_service import chat_service
-from backend.services.extraction_service import extract_text, get_task, cancel_task, BackgroundTaskStore
+from backend.services.chat_service import chat_service, BackgroundTaskStore
+from backend.services.extraction_service import extract_text, get_task, cancel_task
 
 
 class ChatMessage(BaseModel):

@@ -112,13 +112,6 @@ async def extract_text(text: str, request_id: str) -> dict:
 
 def cleanup_old_tasks(max_age_seconds: int = 3600) -> int:
     """Remove old completed/cancelled tasks."""
-    import time
-    now = time.time()
-    removed = 0
-    to_remove = []
-    
-    for task_id, task_data in EXTRACTION_TASKS.items():
-        if task_data["status"] in ("complete", "failed", "cancelled"):
-            # Could add timestamp tracking here if needed
-    
-    return removed
+    # TODO: Add timestamp tracking to tasks for proper cleanup
+    # For now, tasks remain in memory until server restart
+    return 0
