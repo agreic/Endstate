@@ -24,6 +24,10 @@ class ChatRequest(BaseModel):
     enable_web_search: bool = False
 
 
+class ExtractRequest(BaseModel):
+    text: str
+
+
 class ChatResponse(BaseModel):
     success: bool
     content: Optional[str] = None
@@ -132,19 +136,19 @@ def get_relationships(limit: int = 100):
 
 
 @app.post("/api/extract")
-def extract_from_text(text: str):
+def extract_from_text(request: ExtractRequest):
     """
     Extract knowledge from text and add to graph.
     
     Args:
-        text: Text to extract knowledge from
+        request: Extract request with text to process
     
     Returns:
         Extracted documents info
     """
     service = get_service()
     try:
-        documents = service.extract_and_add(text)
+        documents = service.extract_and_add(request.text)
         return {
             "message": "Extraction successful",
             "documents_count": len(documents),
