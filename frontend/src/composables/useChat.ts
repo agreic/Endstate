@@ -118,6 +118,17 @@ export function useChat() {
         timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
       }));
       state.isLocked = response.is_locked || false;
+      
+      // Show greeting if no messages
+      if (state.messages.length === 0) {
+        state.messages = [{
+          id: 0,
+          role: 'assistant',
+          content: "Hello! I'm Endstate AI. What would you like to learn today?",
+          timestamp: new Date(),
+        }];
+      }
+      
       if (state.isLocked) {
         state.status = 'processing';
       } else {
@@ -126,8 +137,15 @@ export function useChat() {
       state.error = null;
     } catch (e) {
       console.error('Failed to load messages:', e);
+      // Show greeting even on error
+      state.messages = [{
+        id: 0,
+        role: 'assistant',
+        content: "Hello! I'm Endstate AI. What would you like to learn today?",
+        timestamp: new Date(),
+      }];
       state.error = 'Failed to connect to server';
-      state.status = 'error';
+      state.status = 'idle';
     }
   };
   
@@ -185,6 +203,7 @@ export function useChat() {
     try {
       await resetChatSession(sessionId.value);
       
+      // Show greeting for reset session
       state.messages = [{
         id: 0,
         role: 'assistant',
