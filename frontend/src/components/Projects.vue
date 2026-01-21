@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Zap, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot } from "lucide-vue-next";
-import { listProjects, getProject, deleteProject, getProjectChat, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
+import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X } from "lucide-vue-next";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -11,6 +11,9 @@ const isLoadingChat = ref(false);
 const isLoading = ref(true);
 const isLoadingProject = ref(false);
 const error = ref<string | null>(null);
+const isRenaming = ref(false);
+const renameValue = ref("");
+const renameError = ref<string | null>(null);
 
 const loadProjects = async () => {
   isLoading.value = true;
@@ -40,11 +43,56 @@ const selectProject = async (projectId: string) => {
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
+    renameValue.value = project.agreed_project?.name || "";
   } catch (e) {
     error.value = "Failed to load project details";
     console.error(e);
   } finally {
     isLoadingProject.value = false;
+  }
+};
+
+const startRename = () => {
+  if (!selectedProject.value) return;
+  renameError.value = null;
+  renameValue.value = selectedProject.value.agreed_project?.name || "";
+  isRenaming.value = true;
+};
+
+const cancelRename = () => {
+  isRenaming.value = false;
+  renameError.value = null;
+};
+
+const saveRename = async () => {
+  if (!selectedProject.value) return;
+  const nextName = renameValue.value.trim();
+  if (!nextName) {
+    renameError.value = "Name cannot be empty";
+    return;
+  }
+  renameError.value = null;
+  try {
+    const response = await renameProject(selectedProject.value.session_id, nextName);
+    if (!selectedProject.value.agreed_project) {
+      selectedProject.value.agreed_project = {
+        name: response.name,
+        description: "",
+        timeline: "",
+        milestones: [],
+      };
+    } else {
+      selectedProject.value.agreed_project.name = response.name;
+    }
+    selectedProject.value.updated_at = response.updated_at || selectedProject.value.updated_at;
+    projects.value = projects.value.map((project) =>
+      project.id === selectedProject.value?.session_id
+        ? { ...project, name: response.name }
+        : project,
+    );
+    isRenaming.value = false;
+  } catch (e) {
+    renameError.value = "Failed to rename project";
   }
 };
 
@@ -198,21 +246,56 @@ onMounted(() => {
           <div v-else class="space-y-4">
             <div class="bg-white rounded-xl shadow-sm border border-surface-200 overflow-hidden">
               <div class="bg-gradient-to-r from-primary-500 to-primary-600 p-6 text-white">
-                <div class="flex items-start justify-between">
-                  <div>
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2 opacity-90">
                       <Target :size="16" />
                       <span class="text-xs uppercase tracking-wider">Learning Project</span>
                     </div>
-                    <h3 class="text-2xl font-bold">{{ selectedProject.agreed_project?.name || 'Untitled Project' }}</h3>
+                    <div v-if="isRenaming" class="space-y-2">
+                      <input
+                        v-model="renameValue"
+                        type="text"
+                        class="px-3 py-2 rounded-md text-surface-800 text-sm w-full"
+                        placeholder="Project name"
+                      />
+                      <p v-if="renameError" class="text-xs text-red-100">{{ renameError }}</p>
+                    </div>
+                    <h3 v-else class="text-2xl font-bold">{{ selectedProject.agreed_project?.name || 'Untitled Project' }}</h3>
                   </div>
-                  <button
-                    @click="confirmDelete(selectedProject.session_id)"
-                    class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
-                    title="Delete project"
-                  >
-                    <Trash2 :size="18" />
-                  </button>
+                  <div class="flex gap-2">
+                    <button
+                      v-if="!isRenaming"
+                      @click="startRename"
+                      class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
+                      title="Rename project"
+                    >
+                      <Pencil :size="18" />
+                    </button>
+                    <button
+                      v-else
+                      @click="saveRename"
+                      class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
+                      title="Save name"
+                    >
+                      <Save :size="18" />
+                    </button>
+                    <button
+                      v-if="isRenaming"
+                      @click="cancelRename"
+                      class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
+                      title="Cancel rename"
+                    >
+                      <X :size="18" />
+                    </button>
+                    <button
+                      @click="confirmDelete(selectedProject.session_id)"
+                      class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
+                      title="Delete project"
+                    >
+                      <Trash2 :size="18" />
+                    </button>
+                  </div>
                 </div>
                 <p class="mt-3 text-primary-100 text-sm">{{ selectedProject.agreed_project?.description }}</p>
                 <div class="mt-4 flex items-center gap-4 text-sm">

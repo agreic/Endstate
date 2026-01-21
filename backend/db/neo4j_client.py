@@ -571,6 +571,22 @@ class Neo4jClient:
             },
         )
 
+    def rename_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
+        """Rename an existing project summary."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            SET p.project_name = $project_name,
+                p.summary_json = $summary_json,
+                p.updated_at = datetime()
+            """,
+            {
+                "project_id": project_id,
+                "project_name": project_name,
+                "summary_json": summary_json,
+            },
+        )
+
     def list_project_summaries(self, limit: int = 10) -> list[dict]:
         """List recent project summaries."""
         result = self.query(

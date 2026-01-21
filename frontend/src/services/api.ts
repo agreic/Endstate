@@ -322,6 +322,16 @@ export async function deleteProject(projectId: string): Promise<{ message: strin
   });
 }
 
+export async function renameProject(projectId: string, name: string): Promise<{ id: string; name: string; updated_at?: string }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/name`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
   return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }

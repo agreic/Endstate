@@ -36,6 +36,10 @@ class ChatResponse(BaseModel):
     is_processing: bool = False
 
 
+class ProjectRenameRequest(BaseModel):
+    name: str
+
+
 class DashboardStatsResponse(BaseModel):
     total_nodes: int
     total_relationships: int
@@ -501,6 +505,44 @@ def get_project(project_id: str):
     data["created_at"] = created_at
     data["updated_at"] = updated_at
     return data
+
+
+@app.patch("/api/projects/{project_id}/name")
+def rename_project(project_id: str, request: ProjectRenameRequest):
+    """Rename a project summary."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    new_name = request.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    row = records[0]
+    summary_json = row.get("summary_json") or "{}"
+    try:
+        data = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    agreed_project = data.get("agreed_project")
+    if isinstance(agreed_project, dict):
+        agreed_project["name"] = new_name
+    else:
+        data["agreed_project"] = {"name": new_name}
+
+    updated_json = json.dumps(data)
+    db.rename_project_summary(project_id, new_name, updated_json)
+
+    updated_at = row.get("updated_at")
+    if isinstance(updated_at, DateTime):
+        updated_at = updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    return {"id": project_id, "name": new_name, "updated_at": updated_at}
 
 
 @app.delete("/api/projects/{project_id}")
