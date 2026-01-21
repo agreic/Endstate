@@ -332,7 +332,7 @@ export async function renameProject(projectId: string, name: string): Promise<{ 
   });
 }
 
-export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile'] }> {
+export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile']; nodes_added?: number; relationships_added?: number }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/start`, {
     method: 'POST',
   });

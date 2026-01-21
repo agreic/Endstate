@@ -182,6 +182,7 @@ class KnowledgeGraphService:
         documents: list,
         include_source: bool = False,
         base_entity_label: bool = True,
+        normalize: bool = True,
     ) -> None:
         """
         Add graph documents to the database.
@@ -191,8 +192,9 @@ class KnowledgeGraphService:
             include_source: Whether to include source document nodes.
             base_entity_label: Whether to add __Entity__ label.
         """
+        normalized = self._normalize_documents(documents) if normalize else documents
         self._db.add_graph_documents(
-            documents,
+            normalized,
             include_source=include_source,
             base_entity_label=base_entity_label,
         )
@@ -238,6 +240,26 @@ class KnowledgeGraphService:
         documents = await self.aextract(text)
         self.add_documents(documents, include_source, base_entity_label)
         return documents
+
+    def _normalize_documents(self, documents: list) -> list:
+        """Ensure extracted nodes have required properties for UI."""
+        allowed = set(self._transformer.schema.allowed_nodes)
+        normalized = []
+        for doc in documents:
+            nodes = []
+            for node in doc.nodes:
+                if self._transformer.schema.strict_mode and node.type not in allowed:
+                    continue
+                if not node.properties.get("name"):
+                    node.properties["name"] = str(node.id) if node.id else node.type
+                nodes.append(node)
+            doc.nodes = nodes
+            normalized.append(doc)
+        return normalized
+
+    def normalize_documents(self, documents: list) -> list:
+        """Public wrapper for document normalization."""
+        return self._normalize_documents(documents)
     
     # ==================== Graph Management ====================
     

@@ -14,6 +14,7 @@ from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
+from backend.schemas.skill_graph import SkillGraphSchema
 
 
 class ChatMessage(BaseModel):
@@ -614,13 +615,20 @@ async def start_project(project_id: str):
     db.upsert_project_summary(project_id, project_name, json.dumps(summary))
 
     text = build_project_extraction_text(summary, history)
-    service = KnowledgeGraphService()
-    await service.aextract_and_add(text)
+    service = KnowledgeGraphService(schema=SkillGraphSchema)
+    documents = await service.aextract(text)
+    normalized = service.normalize_documents(documents)
+    service.add_documents(normalized, normalize=False)
+
+    node_count = sum(len(doc.nodes) for doc in normalized)
+    rel_count = sum(len(doc.relationships) for doc in normalized)
 
     return {
         "message": "Project started",
         "project_id": project_id,
         "user_profile": summary.get("user_profile"),
+        "nodes_added": node_count,
+        "relationships_added": rel_count,
     }
 
 
