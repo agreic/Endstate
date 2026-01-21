@@ -76,3 +76,36 @@ async def test_locked_session_rejects_message():
 
     assert response.success is False
     assert response.is_processing is True
+
+
+@pytest.mark.asyncio
+async def test_project_persists_on_extraction_error():
+    class DummyProjectDb(DummyDb):
+        def __init__(self) -> None:
+            self.summary = None
+            self.chat_messages = None
+
+        def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
+            self.summary = {"id": project_id, "name": project_name, "summary_json": summary_json}
+
+        def save_project_chat_history(self, project_id: str, messages: list[dict]) -> None:
+            self.chat_messages = {"id": project_id, "messages": messages}
+
+    history = [
+        {"role": "assistant", "content": "Project: Deep Dive into Python Lambda Functions", "timestamp": "2024-01-01T00:01:00.000Z"},
+        {"role": "user", "content": "I accept", "timestamp": "2024-01-01T00:02:00.000Z"},
+    ]
+
+    db = DummyProjectDb()
+    service = ChatService(db=db)
+
+    def _raise(_: list[dict]):
+        raise RuntimeError("LLM failed")
+
+    service._extract_summary_llm_with_invoke = _raise  # type: ignore[assignment]
+
+    await service._extract_summary_async("session-err", [m.copy() for m in history])
+
+    assert db.summary is not None
+    assert db.summary["name"] == "Deep Dive into Python Lambda Functions"
+    assert db.chat_messages is not None

@@ -64,3 +64,25 @@ def test_project_creation_persists_summary_and_chat_history():
     assert len(db.chat_messages["messages"]) == 3
     assert db.chat_messages["messages"][0]["idx"] == 0
     assert db.chat_messages["messages"][2]["idx"] == 2
+
+
+def test_project_name_from_option_selection():
+    history = [
+        {
+            "role": "assistant",
+            "content": (
+                "Here are options:\n"
+                "1. **Build a CLI tool**\n"
+                "2. **Deep Dive into Python Lambda Functions**\n"
+                "Do you accept one of these proposals? If yes, type: I accept [option name]"
+            ),
+            "timestamp": "2024-01-01T00:01:00.000Z",
+        },
+        {"role": "user", "content": "I accept option 2", "timestamp": "2024-01-01T00:02:00.000Z"},
+    ]
+
+    db = DummyProjectDb()
+    service = ChatService(db=db)  # type: ignore[arg-type]
+
+    inferred = service._infer_project_name(history)
+    assert inferred == "Deep Dive into Python Lambda Functions"
