@@ -30,6 +30,7 @@ class OllamaConfig:
     base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
     model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2"))
     temperature: float = 0.0
+    timeout_seconds: float = field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")))
 
 
 @dataclass
@@ -48,6 +49,7 @@ class LLMConfig:
     )
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    timeout_seconds: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT_SECONDS", "120")))
 
 
 @dataclass

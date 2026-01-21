@@ -14,12 +14,13 @@ from datetime import datetime
 from functools import wraps
 from typing import Optional, AsyncGenerator, Callable, Any
 
+from backend.config import config
 from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
 from backend.services.agent_prompts import get_chat_system_prompt
 
 
-LLM_TIMEOUT = 60.0  # 60 seconds for LLM calls
+LLM_TIMEOUT = config.llm.timeout_seconds  # seconds for LLM calls
 
 
 def with_timeout(seconds: float):
@@ -285,12 +286,10 @@ class ChatService:
             for msg in history:
                 messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
             
-            # Run LLM invoke in thread pool with timeout
-            loop = asyncio.get_event_loop()
             try:
                 response = await asyncio.wait_for(
-                    loop.run_in_executor(None, self.llm.invoke, messages_list),
-                    timeout=LLM_TIMEOUT
+                    self.llm.ainvoke(messages_list),
+                    timeout=LLM_TIMEOUT,
                 )
             except asyncio.TimeoutError:
                 self._cancelled_requests.add(request_id)
