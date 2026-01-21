@@ -13,6 +13,38 @@ from backend.llm.provider import get_llm
 LESSON_TIMEOUT = config.llm.timeout_seconds
 
 
+def _extract_json_block(content: str) -> dict | None:
+    try:
+        import json
+        import re
+
+        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
+        if fence_match:
+            return json.loads(fence_match.group(1))
+
+        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
+        if obj_match:
+            return json.loads(obj_match.group(1))
+    except Exception:
+        return None
+    return None
+
+
+def parse_lesson_content(content: str) -> dict:
+    data = _extract_json_block(content)
+    if data:
+        return {
+            "explanation": data.get("explanation", ""),
+            "task": data.get("task", ""),
+        }
+
+    cleaned = content.replace("```json", "").replace("```", "").strip()
+    return {
+        "explanation": cleaned,
+        "task": "",
+    }
+
+
 def _style_instruction(style: str) -> str:
     style = (style or "").lower().strip()
     if style == "theoretical":
@@ -55,33 +87,4 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
         return {"error": f"Lesson generation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
-
-    try:
-        import json
-
-        data = json.loads(content)
-        return {
-            "explanation": data.get("explanation", ""),
-            "task": data.get("task", ""),
-        }
-    except Exception:
-        pass
-
-    try:
-        import json
-        import re
-
-        match = re.search(r"```json\\s*(\\{.*?\\})\\s*```", content, flags=re.DOTALL)
-        if match:
-            data = json.loads(match.group(1))
-            return {
-                "explanation": data.get("explanation", ""),
-                "task": data.get("task", ""),
-            }
-    except Exception:
-        pass
-
-    return {
-        "explanation": content.strip(),
-        "task": "",
-    }
+    return parse_lesson_content(content)

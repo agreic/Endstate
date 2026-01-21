@@ -16,7 +16,7 @@ from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 from backend.schemas.skill_graph import SkillGraphSchema
-from backend.services.lesson_service import generate_lesson
+from backend.services.lesson_service import generate_lesson, parse_lesson_content
 from backend.services.assessment_service import generate_assessment, evaluate_assessment
 
 
@@ -724,12 +724,18 @@ def list_project_lessons(project_id: str):
         created_at = row.get("created_at")
         if isinstance(created_at, DateTime):
             created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        explanation = row.get("explanation") or ""
+        task = row.get("task") or ""
+        if "```" in explanation or explanation.strip().startswith("{"):
+            parsed = parse_lesson_content(explanation)
+            explanation = parsed.get("explanation", explanation)
+            task = parsed.get("task", task)
         lessons.append({
             "id": row.get("id"),
             "node_id": row.get("node_id"),
             "title": row.get("title"),
-            "explanation": row.get("explanation"),
-            "task": row.get("task"),
+            "explanation": explanation,
+            "task": task,
             "created_at": created_at,
         })
     return {"lessons": lessons}
