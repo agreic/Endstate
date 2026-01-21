@@ -1,20 +1,15 @@
 """
 Seed script to populate Neo4j with sample skill graph data.
-Run: cd backend && uv run python ../scripts/seed_graph.py
+Run: uv run python scripts/seed_graph.py
 """
-from db.neo4j_client import Neo4jClient
-from config import Neo4jConfig
+from backend.config import Neo4jConfig
+from backend.db.neo4j_client import Neo4jClient
 
 
 def seed_sample_data():
     """Add sample skill graph data to Neo4j."""
     
-    config = Neo4jConfig(
-        uri="bolt://localhost:7687",
-        username="neo4j",
-        password="password123",
-        database="neo4j",
-    )
+    config = Neo4jConfig()
     
     with Neo4jClient(neo4j_config=config) as client:
         # Clean existing data

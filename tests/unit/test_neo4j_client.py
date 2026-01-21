@@ -612,3 +612,81 @@ class TestNeo4jClientContextManager:
             pass
 
         mock_close.assert_not_called()
+
+
+class TestNeo4jClientLessonAssessment:
+    """Tests for lesson and assessment persistence helpers."""
+
+    @patch.object(Neo4jClient, "query")
+    def test_archive_project_lesson(self, mock_query):
+        client = Neo4jClient()
+
+        client.archive_project_lesson("proj-1", "lesson-1")
+
+        mock_query.assert_called_once()
+        query, params = mock_query.call_args[0]
+        assert "ProjectLesson" in query
+        assert params == {"project_id": "proj-1", "lesson_id": "lesson-1"}
+
+    @patch.object(Neo4jClient, "query")
+    def test_delete_project_lesson(self, mock_query):
+        client = Neo4jClient()
+
+        client.delete_project_lesson("proj-1", "lesson-1")
+
+        mock_query.assert_called_once()
+        query, params = mock_query.call_args[0]
+        assert "DETACH DELETE l" in query
+        assert params == {"project_id": "proj-1", "lesson_id": "lesson-1"}
+
+    @patch.object(Neo4jClient, "query")
+    def test_archive_project_assessment(self, mock_query):
+        client = Neo4jClient()
+
+        client.archive_project_assessment("proj-1", "assessment-1")
+
+        mock_query.assert_called_once()
+        query, params = mock_query.call_args[0]
+        assert "ProjectAssessment" in query
+        assert params == {"project_id": "proj-1", "assessment_id": "assessment-1"}
+
+    @patch.object(Neo4jClient, "query")
+    def test_delete_project_assessment(self, mock_query):
+        client = Neo4jClient()
+
+        client.delete_project_assessment("proj-1", "assessment-1")
+
+        mock_query.assert_called_once()
+        query, params = mock_query.call_args[0]
+        assert "DETACH DELETE a" in query
+        assert params == {"project_id": "proj-1", "assessment_id": "assessment-1"}
+
+
+class TestNeo4jClientProjectGraph:
+    """Tests for project graph helpers."""
+
+    @patch.object(Neo4jClient, "query")
+    def test_connect_project_to_nodes_groups_labels(self, mock_query):
+        client = Neo4jClient()
+
+        nodes = [
+            {"label": "Skill", "name": "Python"},
+            {"label": "Skill", "name": "Python"},
+            {"label": "Concept", "name": "Closures"},
+            {"label": "Topic", "name": "Functional Programming"},
+            {"label": "Tool", "name": "Ignored"},
+        ]
+
+        client.connect_project_to_nodes("proj-1", nodes)
+
+        assert mock_query.call_count == 3
+
+    @patch.object(Neo4jClient, "query")
+    def test_get_projects_for_node(self, mock_query):
+        client = Neo4jClient()
+        mock_query.return_value = [{"id": "proj-1", "is_default": False}]
+
+        result = client.get_projects_for_node("node-1", "Node Name")
+
+        assert result == [{"id": "proj-1", "is_default": False}]
+        mock_query.assert_called_once()

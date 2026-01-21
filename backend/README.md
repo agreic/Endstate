@@ -78,6 +78,7 @@ chat_service.create_session("user-123")
 | `/api/chat/{id}/messages` | GET | Get all messages |
 | `/api/chat/{id}/reset` | POST | Reset and cancel processing |
 | `/api/chat/{id}/locked` | GET | Check lock status |
+| `/api/projects/{id}/start` | POST | Reinitialize project asynchronously |
 
 ### SSE Events
 
@@ -128,7 +129,7 @@ print(service.get_stats())
 service.clean()
 
 # Merge duplicate nodes
-service.merge_duplicates("Skill")
+service.merge_duplicates("Skill")  # Only Skill, Concept, Topic
 ```
 
 ## Configuration
@@ -153,6 +154,15 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=password123
 ```
+
+## Project Nodes
+
+Project summaries have matching `Project` KG nodes that connect to:
+- Project-owned KG nodes via `HAS_NODE`
+- Lessons and assessments via `HAS_LESSON` / `HAS_ASSESSMENT`
+- A `UserProfile` node via `HAS_PROFILE`
+
+The default "All" project exists for unassigned lessons and is not rendered in the KG.
 
 ### Custom Schemas
 

@@ -177,12 +177,33 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        _ = service.test_connection()
+        result = service.test_connection()
 
         assert result["database"] is True
         assert result["llm"] is True
         assert result["database_error"] is None
         assert result["llm_error"] is None
+
+
+class TestKnowledgeGraphServiceMergeGuard:
+    """Tests for merge guard to prevent non-KG merges."""
+
+    @patch("backend.services.knowledge_graph.Neo4jClient")
+    @patch("backend.services.knowledge_graph.get_llm")
+    @patch("backend.services.knowledge_graph.GraphTransformer")
+    def test_merge_duplicates_rejects_project(self, mock_transformer, mock_get_llm, mock_neo4j_client):
+        mock_db = MagicMock()
+        mock_neo4j_client.return_value = mock_db
+        mock_llm = MagicMock()
+        mock_get_llm.return_value = mock_llm
+
+        service = KnowledgeGraphService()
+
+        try:
+            service.merge_duplicates("Project", match_property="name")
+            assert False, "Expected ValueError"
+        except ValueError as exc:
+            assert "Merge is only allowed" in str(exc)
 
     @patch("backend.services.knowledge_graph.Neo4jClient")
     @patch("backend.services.knowledge_graph.get_llm")
@@ -201,7 +222,7 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        _ = service.test_connection()
+        result = service.test_connection()
 
         assert result["database"] is False
         assert "Connection refused" in result["database_error"]
@@ -224,7 +245,7 @@ class TestKnowledgeGraphServiceTestConnection:
 
         service = KnowledgeGraphService()
 
-        _ = service.test_connection()
+        result = service.test_connection()
 
         assert result["database"] is True
         assert result["llm"] is False
@@ -249,7 +270,7 @@ class TestKnowledgeGraphServiceExtract:
 
         service = KnowledgeGraphService()
 
-        _ = service.extract("Python is a programming language")
+        result = service.extract("Python is a programming language")
 
         mock_transformer_instance.process_text.assert_called_once_with(
             "Python is a programming language"
@@ -294,8 +315,10 @@ class TestKnowledgeGraphServiceAddDocuments:
 
         service = KnowledgeGraphService()
 
-        documents = [{"nodes": [], "relationships": []}]
-        service.add_documents(documents, include_source=True, base_entity_label=True)
+        mock_doc = MagicMock()
+        mock_doc.nodes = []
+        documents = [mock_doc]
+        service.add_documents(documents, include_source=True, base_entity_label=True, normalize=False)
 
         mock_db.add_graph_documents.assert_called_once_with(
             documents, include_source=True, base_entity_label=True
@@ -315,13 +338,15 @@ class TestKnowledgeGraphServiceExtractAndAdd:
         mock_llm = MagicMock()
         mock_get_llm.return_value = mock_llm
         mock_transformer_instance = MagicMock()
-        mock_documents = [{"nodes": [], "relationships": []}]
+        mock_doc = MagicMock()
+        mock_doc.nodes = []
+        mock_documents = [mock_doc]
         mock_transformer_instance.process_text.return_value = mock_documents
         mock_transformer.return_value = mock_transformer_instance
 
         service = KnowledgeGraphService()
 
-        _ = service.extract_and_add("Python is great")
+        result = service.extract_and_add("Python is great")
 
         mock_transformer_instance.process_text.assert_called_once_with("Python is great")
         mock_db.add_graph_documents.assert_called_once_with(

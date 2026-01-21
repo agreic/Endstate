@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, queueProjectLesson, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -37,6 +37,7 @@ const selectedNode = ref<GraphNode | null>(null);
 const searchQuery = ref("");
 const zoomLevel = ref(1);
 const hoveredNodeId = ref<string | null>(null);
+const activeLabelFilter = ref<string | null>(null);
 const isLoading = ref(false);
 const loadError = ref<string | null>(null);
 const graphStats = ref<{ total_nodes: number; total_relationships: number } | null>(null);
@@ -47,6 +48,16 @@ const deleteMessage = ref("");
 const lessonLoading = ref(false);
 const lessonError = ref<string | null>(null);
 const lessonQueued = ref(false);
+const lessonJobIds = ref<string[]>([]);
+const lessonCanceling = ref(false);
+const lessonJobNodeId = ref<string | null>(null);
+const lessonQueuedCount = ref(0);
+const lessonQueuedText = computed(() => {
+  if (lessonQueuedCount.value > 0) {
+    return `Queued ${lessonQueuedCount.value} lesson(s). Check the Projects tab.`;
+  }
+  return "Lesson queued. Check the Projects tab.";
+});
 
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
@@ -54,7 +65,7 @@ const groupColors: Record<string, string> = {
   'Skill': "#0ea5e9",
   'Concept': "#8b5cf6",
   'Topic': "#10b981",
-  'Project': "#f59e0b",
+  'Project': "#facc15",
   'Resource': "#ef4444",
   'Tool': "#ec4899",
   'Person': "#6366f1",
@@ -221,23 +232,41 @@ const loadLesson = async () => {
   lessonLoading.value = true;
   lessonError.value = null;
   lessonQueued.value = false;
+  lessonJobIds.value = [];
+  lessonJobNodeId.value = null;
+  lessonQueuedCount.value = 0;
   try {
-    const projectId = localStorage.getItem("endstate_active_project_id") || undefined;
-    if (!projectId) {
-      lessonError.value = "Select a project before generating lessons.";
-      return;
-    }
-    const response = await queueProjectLesson(projectId, selectedNode.value.id);
+    const response = await generateNodeLessons(selectedNode.value.id);
     lessonQueued.value = true;
-    if (response.status === "exists" && response.lesson) {
-      window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId } }));
-    } else {
-      window.dispatchEvent(new CustomEvent("endstate:lesson-queued", { detail: { projectId } }));
-    }
+    lessonJobNodeId.value = selectedNode.value.id;
+    lessonJobIds.value = response.jobs.map((job) => job.job_id);
+    lessonQueuedCount.value = response.jobs.length + response.skipped.length;
+    response.jobs.forEach((job) => {
+      window.dispatchEvent(new CustomEvent("endstate:lesson-queued", { detail: { projectId: job.project_id } }));
+    });
+    response.skipped.forEach((entry) => {
+      window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId: entry.project_id } }));
+    });
   } catch (e) {
     lessonError.value = "Failed to generate lesson";
   } finally {
     lessonLoading.value = false;
+  }
+};
+
+const cancelLessonJob = async () => {
+  if (lessonJobIds.value.length === 0) return;
+  lessonCanceling.value = true;
+  try {
+    await Promise.allSettled(lessonJobIds.value.map((jobId) => cancelJob(jobId)));
+    lessonQueued.value = false;
+    lessonJobIds.value = [];
+    lessonJobNodeId.value = null;
+    lessonQueuedCount.value = 0;
+  } catch (e) {
+    lessonError.value = "Failed to cancel lesson generation";
+  } finally {
+    lessonCanceling.value = false;
   }
 };
 
@@ -252,6 +281,11 @@ const isNodeMatching = (node: GraphNode): boolean => {
   );
 };
 
+const isNodeInActiveLabel = (node: GraphNode): boolean => {
+  if (!activeLabelFilter.value) return true;
+  return (node.labels?.[0] || "Skill") === activeLabelFilter.value;
+};
+
 const updateNodeStyles = () => {
   if (!nodesSelection) return;
 
@@ -260,11 +294,12 @@ const updateNodeStyles = () => {
     .attr("fill", (d) => {
       const node = d as GraphNode;
       const isMatch = isNodeMatching(node);
+      const isInLabel = isNodeInActiveLabel(node);
       const isHovered = hoveredNodeId.value === node.id;
       const isSelected = selectedNode.value?.id === node.id;
       const baseColor = getNodeColor(node, isSelected);
 
-      if (!isMatch) {
+      if (!isMatch || !isInLabel) {
         return "#d4d4d8";
       }
       if (isHovered || isSelected) {
@@ -285,7 +320,7 @@ const updateNodeStyles = () => {
     .selectAll("text")
     .attr("opacity", (d) => {
       const node = d as GraphNode;
-      return isNodeMatching(node) ? 1 : 0.3;
+      return isNodeMatching(node) && isNodeInActiveLabel(node) ? 1 : 0.3;
     })
     .attr("font-weight", (d) => {
       const node = d as GraphNode;
@@ -297,7 +332,18 @@ const updateLinkStyles = () => {
   if (!linksSelection) return;
 
   linksSelection
-    .attr("opacity", 0.6)
+    .attr("opacity", (d) => {
+      const source = typeof d.source === "string" ? d.source : d.source.id;
+      const target = typeof d.target === "string" ? d.target : d.target.id;
+      const sourceNode = graphData.value.nodes.find((n) => n.id === source);
+      const targetNode = graphData.value.nodes.find((n) => n.id === target);
+      if (!sourceNode || !targetNode) return 0.2;
+      const labelMatch = !activeLabelFilter.value || (
+        (sourceNode.labels?.[0] || "Skill") === activeLabelFilter.value &&
+        (targetNode.labels?.[0] || "Skill") === activeLabelFilter.value
+      );
+      return labelMatch ? 0.6 : 0.15;
+    })
     .attr("stroke", "#d4d4d8");
 };
 
@@ -310,6 +356,14 @@ watch(selectedNode, () => {
   lessonError.value = null;
   lessonLoading.value = false;
   lessonQueued.value = false;
+  lessonJobIds.value = [];
+  lessonJobNodeId.value = null;
+  lessonQueuedCount.value = 0;
+});
+
+watch(activeLabelFilter, () => {
+  updateNodeStyles();
+  updateLinkStyles();
 });
 
 const initGraph = () => {
@@ -566,6 +620,10 @@ const legendItems = computed(() => {
   const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
   return Array.from(labels).sort();
 });
+
+const toggleLabelFilter = (label: string) => {
+  activeLabelFilter.value = activeLabelFilter.value === label ? null : label;
+};
 </script>
 
 <template>
@@ -629,17 +687,23 @@ const legendItems = computed(() => {
         </div>
         
         <div class="space-y-1">
-          <div
+          <button
             v-for="(label, index) in legendItems"
             :key="label"
-            class="flex items-center gap-2"
+            @click="toggleLabelFilter(label)"
+            class="flex items-center gap-2 w-full text-left"
           >
             <span
               class="w-3 h-3 rounded-full"
               :style="{ backgroundColor: getColorForLegendItem(index, label) }"
             ></span>
-            <span class="text-xs text-surface-600">{{ getLabelDisplayName(label) }}</span>
-          </div>
+            <span
+              class="text-xs"
+              :class="activeLabelFilter === label ? 'text-surface-900 font-semibold' : 'text-surface-600'"
+            >
+              {{ getLabelDisplayName(label) }}
+            </span>
+          </button>
         </div>
         
         <div v-if="graphStats" class="mt-3 pt-3 border-t border-surface-100">
@@ -736,8 +800,16 @@ const legendItems = computed(() => {
           </button>
           <p v-if="lessonError" class="mt-2 text-xs text-red-500">{{ lessonError }}</p>
           <p v-else-if="lessonQueued" class="mt-2 text-xs text-surface-500">
-            Lesson queued. Check the Projects tab.
+            {{ lessonQueuedText }}
           </p>
+          <button
+            v-if="lessonJobIds.length > 0 && lessonJobNodeId === selectedNode.id"
+            @click="cancelLessonJob"
+            :disabled="lessonCanceling"
+            class="mt-2 w-full text-xs font-medium px-3 py-2 rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-50 transition-colors disabled:opacity-60"
+          >
+            {{ lessonCanceling ? 'Canceling...' : 'Cancel lesson generation' }}
+          </button>
         </div>
         
         <div class="mt-3 pt-3 border-t border-surface-100">

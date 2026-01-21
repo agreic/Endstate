@@ -166,6 +166,8 @@ export interface ProjectLesson {
   explanation: string;
   task: string;
   created_at?: string;
+  archived?: boolean;
+  archived_at?: string;
 }
 
 export interface ProjectAssessment {
@@ -176,6 +178,8 @@ export interface ProjectAssessment {
   feedback?: string;
   created_at?: string;
   updated_at?: string;
+  archived?: boolean;
+  archived_at?: string;
 }
 
 export interface ProjectListItem {
@@ -353,7 +357,7 @@ export async function renameProject(projectId: string, name: string): Promise<{ 
   });
 }
 
-export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile']; nodes_added?: number; relationships_added?: number; project_status?: string; started_at?: string }> {
+export async function startProject(projectId: string): Promise<{ status?: string; job_id?: string; message?: string; project_id?: string; user_profile?: ProjectSummary['user_profile']; nodes_added?: number; relationships_added?: number; project_status?: string; started_at?: string }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/start`, {
     method: 'POST',
   });
@@ -373,13 +377,19 @@ export async function listProjectLessons(projectId: string): Promise<{ lessons: 
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons`);
 }
 
-export async function queueProjectLesson(projectId: string, nodeId: string): Promise<{ status: string; lesson?: ProjectLesson }> {
+export async function queueProjectLesson(projectId: string, nodeId: string): Promise<{ status: string; job_id?: string; lesson?: ProjectLesson }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons/generate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ node_id: nodeId }),
+  });
+}
+
+export async function generateNodeLessons(nodeId: string): Promise<{ status: string; jobs: Array<{ project_id: string; job_id: string }>; skipped: Array<{ project_id: string; lesson_id: string; created_at?: string }> }> {
+  return requestJson(`/api/graph/nodes/${encodeURIComponent(nodeId)}/lessons/generate`, {
+    method: 'POST',
   });
 }
 
@@ -400,7 +410,7 @@ export async function updateProjectProfile(
   });
 }
 
-export async function createProjectAssessment(projectId: string, lessonId: string): Promise<{ assessment_id: string; prompt: string }> {
+export async function createProjectAssessment(projectId: string, lessonId: string): Promise<{ status: string; job_id?: string }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments`, {
     method: 'POST',
     headers: {
@@ -421,6 +431,40 @@ export async function submitProjectAssessment(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ answer }),
+  });
+}
+
+export async function archiveProjectLesson(projectId: string, lessonId: string): Promise<{ lesson_id: string; archived: boolean }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons/${encodeURIComponent(lessonId)}/archive`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteProjectLesson(projectId: string, lessonId: string): Promise<{ lesson_id: string; deleted: boolean }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/lessons/${encodeURIComponent(lessonId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function archiveProjectAssessment(projectId: string, assessmentId: string): Promise<{ assessment_id: string; archived: boolean }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/archive`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteProjectAssessment(projectId: string, assessmentId: string): Promise<{ assessment_id: string; deleted: boolean }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getJobStatus(jobId: string): Promise<{ job_id: string; project_id: string; kind: string; status: string; result?: any; error?: string }> {
+  return requestJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
+  return requestJson(`/api/jobs/${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
   });
 }
 

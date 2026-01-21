@@ -57,6 +57,7 @@ The chat system provides persistent conversations with AI that can extract and c
 - `POST /api/chat/{id}/messages` - Send message (idempotent)
 - `GET /api/chat/{id}/messages` - Get all messages
 - `POST /api/chat/{id}/reset` - Reset session (cancels processing)
+- `POST /api/projects/{id}/start` - Reinitialize project asynchronously
 
 ### Knowledge Graph
 
@@ -64,8 +65,9 @@ The knowledge graph stores learned concepts, skills, and their relationships.
 
 **Data Isolation:**
 - Chat sessions and messages are stored separately from knowledge graph data
-- Graph statistics exclude `ChatSession` and `ChatMessage` nodes
-- `/api/graph` endpoints only return knowledge graph entities
+- Graph statistics exclude chat/session nodes and non-KG entities
+- `/api/graph` endpoints return Skill, Concept, Topic, and Project nodes only
+- Projects are first-class KG nodes (yellow), with a default non-visualized "All" project
 
 **Methods:**
 - `get_knowledge_graph_nodes()` - Get nodes excluding chat-related labels
@@ -150,6 +152,16 @@ uv run python
 
 # Lint code
 uv run ruff check .
+```
+
+### Scripts
+
+```bash
+# Clear the Neo4j graph
+uv run python scripts/clear_graph.py
+
+# Seed sample skill data
+uv run python scripts/seed_graph.py
 ```
 
 ## Testing

@@ -290,6 +290,8 @@ class KnowledgeGraphService:
         Returns:
             Number of nodes merged/deleted.
         """
+        if label not in {"Skill", "Concept", "Topic"}:
+            raise ValueError("Merge is only allowed for Skill, Concept, or Topic nodes")
         try:
             return self._db.merge_nodes(label, match_property)
         except Exception:

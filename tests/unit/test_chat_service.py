@@ -85,7 +85,7 @@ async def test_project_persists_on_extraction_error():
             self.summary = None
             self.chat_messages = None
 
-        def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
+        def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str, is_default: bool = False) -> None:
             self.summary = {"id": project_id, "name": project_name, "summary_json": summary_json}
 
         def save_project_chat_history(self, project_id: str, messages: list[dict]) -> None:

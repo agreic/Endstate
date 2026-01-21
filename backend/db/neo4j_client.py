@@ -2,7 +2,11 @@
 Neo4j database client for Endstate.
 Provides connection management and graph operations.
 """
+import json
 from typing import Optional, Any
+
+DEFAULT_PROJECT_ID = "project-all"
+DEFAULT_PROJECT_NAME = "All"
 
 from langchain_neo4j import Neo4jGraph
 from neo4j import GraphDatabase, Result, RoutingControl
@@ -254,6 +258,7 @@ class Neo4jClient:
         Returns:
             Dictionary with node counts by label and relationship counts by type
         """
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
         # Get node labels and counts
         node_stats = self.query("""
             CALL db.labels() YIELD label
@@ -266,15 +271,23 @@ class Neo4jClient:
         """)
         
         # Get relationship types and counts
-        rel_stats = self.query("""
+        rel_stats = self.query(
+            """
             CALL db.relationshipTypes() YIELD relationshipType
             CALL {
                 WITH relationshipType
-                MATCH ()-[r]->() WHERE type(r) = relationshipType
+                MATCH (n)-[r]->(m)
+                WHERE type(r) = relationshipType
+                  AND any(label IN labels(n) WHERE label IN $labels)
+                  AND any(label IN labels(m) WHERE label IN $labels)
+                  AND NOT (n:Project AND COALESCE(n.is_default, false))
+                  AND NOT (m:Project AND COALESCE(m.is_default, false))
                 RETURN count(r) as count
             }
             RETURN relationshipType, count
-        """)
+            """,
+            {"labels": allowed_labels},
+        )
         
         return {
             "nodes": {row["label"]: row["count"] for row in node_stats},
@@ -312,18 +325,15 @@ class Neo4jClient:
         Returns:
             List of node dictionaries
         """
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
         query = """
             MATCH (n)
-            WHERE NOT 'ChatSession' IN labels(n)
-              AND NOT 'ChatMessage' IN labels(n)
-              AND NOT 'ProjectSummary' IN labels(n)
-              AND NOT 'ProjectMessage' IN labels(n)
-              AND NOT 'ProjectLesson' IN labels(n)
-              AND NOT 'ProjectAssessment' IN labels(n)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN n
             LIMIT $limit
         """
-        result = self.query(query, {"limit": limit})
+        result = self.query(query, {"limit": limit, "labels": allowed_labels})
         return [_serialize_node(row["n"]) for row in result]
 
     def get_knowledge_graph_relationships(self, limit: int = 100) -> list[dict]:
@@ -336,24 +346,17 @@ class Neo4jClient:
         Returns:
             List of relationship dictionaries
         """
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
         query = """
             MATCH (n)-[r]->(m)
-            WHERE NOT 'ChatSession' IN labels(n)
-              AND NOT 'ChatMessage' IN labels(n)
-              AND NOT 'ProjectSummary' IN labels(n)
-              AND NOT 'ProjectMessage' IN labels(n)
-              AND NOT 'ProjectLesson' IN labels(n)
-              AND NOT 'ProjectAssessment' IN labels(n)
-              AND NOT 'ChatSession' IN labels(m)
-              AND NOT 'ChatMessage' IN labels(m)
-              AND NOT 'ProjectSummary' IN labels(m)
-              AND NOT 'ProjectMessage' IN labels(m)
-              AND NOT 'ProjectLesson' IN labels(m)
-              AND NOT 'ProjectAssessment' IN labels(m)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND any(label IN labels(m) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
+              AND NOT (m:Project AND COALESCE(m.is_default, false))
             RETURN n.id as source, type(r) as type, m.id as target, properties(r) as properties
             LIMIT $limit
         """
-        result = self.query(query, {"limit": limit})
+        result = self.query(query, {"limit": limit, "labels": allowed_labels})
         return result
 
     def get_knowledge_graph_stats(self) -> dict:
@@ -363,21 +366,21 @@ class Neo4jClient:
         Returns:
             Dictionary with node counts by label and relationship counts by type
         """
-        node_stats = self.query("""
-            CALL db.labels() YIELD label
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        node_stats = self.query(
+            """
+            UNWIND $labels as label
             CALL {
                 WITH label
-                MATCH (n) WHERE label IN labels(n)
-                AND NOT 'ChatSession' IN labels(n)
-                AND NOT 'ChatMessage' IN labels(n)
-                AND NOT 'ProjectSummary' IN labels(n)
-                AND NOT 'ProjectMessage' IN labels(n)
-                AND NOT 'ProjectLesson' IN labels(n)
-                AND NOT 'ProjectAssessment' IN labels(n)
+                MATCH (n)
+                WHERE label IN labels(n)
+                  AND NOT (n:Project AND COALESCE(n.is_default, false))
                 RETURN count(n) as count
             }
             RETURN label, count
-        """)
+            """,
+            {"labels": allowed_labels},
+        )
 
         rel_stats = self.query("""
             CALL db.relationshipTypes() YIELD relationshipType
@@ -398,36 +401,32 @@ class Neo4jClient:
 
     def get_knowledge_graph_node_count(self) -> int:
         """Get count of knowledge graph nodes (excluding chat nodes)."""
-        result = self.query("""
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        result = self.query(
+            """
             MATCH (n)
-            WHERE NOT 'ChatSession' IN labels(n)
-              AND NOT 'ChatMessage' IN labels(n)
-              AND NOT 'ProjectSummary' IN labels(n)
-              AND NOT 'ProjectMessage' IN labels(n)
-              AND NOT 'ProjectLesson' IN labels(n)
-              AND NOT 'ProjectAssessment' IN labels(n)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN count(n) as count
-        """)
+            """,
+            {"labels": allowed_labels},
+        )
         return result[0]["count"] if result else 0
 
     def get_knowledge_graph_relationship_count(self) -> int:
         """Get count of knowledge graph relationships (excluding chat relationships)."""
-        result = self.query("""
+        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        result = self.query(
+            """
             MATCH (n)-[r]->(m)
-            WHERE NOT 'ChatSession' IN labels(n)
-              AND NOT 'ChatMessage' IN labels(n)
-              AND NOT 'ProjectSummary' IN labels(n)
-              AND NOT 'ProjectMessage' IN labels(n)
-              AND NOT 'ProjectLesson' IN labels(n)
-              AND NOT 'ProjectAssessment' IN labels(n)
-              AND NOT 'ChatSession' IN labels(m)
-              AND NOT 'ChatMessage' IN labels(m)
-              AND NOT 'ProjectSummary' IN labels(m)
-              AND NOT 'ProjectMessage' IN labels(m)
-              AND NOT 'ProjectLesson' IN labels(m)
-              AND NOT 'ProjectAssessment' IN labels(m)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND any(label IN labels(m) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
+              AND NOT (m:Project AND COALESCE(m.is_default, false))
             RETURN count(r) as count
-        """)
+            """,
+            {"labels": allowed_labels},
+        )
         return result[0]["count"] if result else 0
 
     def get_all_relationships(self, limit: int = 100) -> list[dict]:
@@ -568,30 +567,48 @@ class Neo4jClient:
         )
         return result[0].get("locked", False) if result else False
 
-    def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
-        """Create or update a project summary."""
+    def upsert_project_summary(
+        self,
+        project_id: str,
+        project_name: str,
+        summary_json: str,
+        is_default: bool = False,
+    ) -> None:
+        """Create or update a project summary and its KG project node."""
         self.query(
             """
-            MERGE (p:ProjectSummary {id: $project_id})
+            MERGE (ps:ProjectSummary {id: $project_id})
+            ON CREATE SET ps.created_at = datetime()
+            SET ps.project_name = $project_name,
+                ps.summary_json = $summary_json,
+                ps.updated_at = datetime(),
+                ps.is_default = $is_default
+            MERGE (p:Project {id: $project_id})
             ON CREATE SET p.created_at = datetime()
-            SET p.project_name = $project_name,
-                p.summary_json = $summary_json,
+            SET p.name = $project_name,
+                p.is_default = $is_default,
                 p.updated_at = datetime()
+            MERGE (ps)-[:SUMMARY_FOR]->(p)
             """,
             {
                 "project_id": project_id,
                 "project_name": project_name,
                 "summary_json": summary_json,
+                "is_default": is_default,
             },
         )
 
     def rename_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
-        """Rename an existing project summary."""
+        """Rename an existing project summary and its KG project node."""
         self.query(
             """
-            MATCH (p:ProjectSummary {id: $project_id})
-            SET p.project_name = $project_name,
-                p.summary_json = $summary_json,
+            MATCH (ps:ProjectSummary {id: $project_id})
+            SET ps.project_name = $project_name,
+                ps.summary_json = $summary_json,
+                ps.updated_at = datetime()
+            WITH ps
+            MATCH (p:Project {id: $project_id})
+            SET p.name = $project_name,
                 p.updated_at = datetime()
             """,
             {
@@ -614,6 +631,119 @@ class Neo4jClient:
                 "summary_json": summary_json,
             },
         )
+
+    def ensure_default_project(self) -> None:
+        """Ensure the default 'All' project exists."""
+        summary_json = json.dumps({
+            "agreed_project": {
+                "name": DEFAULT_PROJECT_NAME,
+                "description": "Default collection for unassigned lessons and assessments.",
+                "timeline": "",
+                "milestones": [],
+            },
+            "user_profile": {
+                "interests": [],
+                "skill_level": "intermediate",
+                "time_available": "2 hours/week",
+                "learning_style": "hybrid",
+            },
+            "is_default": True,
+        })
+        self.upsert_project_summary(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, summary_json, is_default=True)
+
+    def ensure_project_nodes(self) -> None:
+        """Ensure every project summary has a KG project node."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary)
+            MERGE (p:Project {id: ps.id})
+            ON CREATE SET p.created_at = datetime()
+            SET p.name = ps.project_name,
+                p.updated_at = datetime(),
+                p.is_default = COALESCE(ps.is_default, false)
+            MERGE (ps)-[:SUMMARY_FOR]->(p)
+            """
+        )
+
+    def upsert_project_profile_node(self, project_id: str, profile: dict) -> None:
+        """Create or update a project profile node and link to project."""
+        profile_id = f"profile-{project_id}"
+        self.query(
+            """
+            MATCH (p:Project {id: $project_id})
+            MERGE (u:UserProfile {id: $profile_id})
+            ON CREATE SET u.created_at = datetime()
+            SET u.interests = $interests,
+                u.skill_level = $skill_level,
+                u.time_available = $time_available,
+                u.learning_style = $learning_style,
+                u.updated_at = datetime()
+            MERGE (p)-[:HAS_PROFILE]->(u)
+            """,
+            {
+                "project_id": project_id,
+                "profile_id": profile_id,
+                "interests": profile.get("interests", []),
+                "skill_level": profile.get("skill_level"),
+                "time_available": profile.get("time_available"),
+                "learning_style": profile.get("learning_style"),
+            },
+        )
+
+    def connect_project_to_nodes(self, project_id: str, nodes: list[dict]) -> None:
+        """Connect a project to skill/concept/topic nodes by name."""
+        grouped: dict[str, set[str]] = {}
+        for node in nodes:
+            name = node.get("name")
+            label = node.get("label")
+            if not name or label not in {"Skill", "Concept", "Topic"}:
+                continue
+            grouped.setdefault(label, set()).add(name)
+
+        for label, names in grouped.items():
+            self.query(
+                f"""
+                MATCH (p:Project {{id: $project_id}})
+                UNWIND $names as node_name
+                MATCH (n:{label} {{name: node_name}})
+                MERGE (p)-[:HAS_NODE]->(n)
+                """,
+                {"project_id": project_id, "names": list(names)},
+            )
+
+    def clear_project_nodes(self, project_id: str) -> None:
+        """Remove project links and delete nodes unique to this project."""
+        self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[rel:HAS_NODE]->(n)
+            WHERE NOT EXISTS {
+                MATCH (p2:Project)-[:HAS_NODE]->(n)
+                WHERE p2.id <> $project_id
+            }
+            DETACH DELETE n
+            """,
+            {"project_id": project_id},
+        )
+        self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[rel:HAS_NODE]->(n)
+            DELETE rel
+            """,
+            {"project_id": project_id},
+        )
+
+    def get_projects_for_node(self, node_id: str, node_name: str) -> list[dict]:
+        """Get projects connected to a node by id or name."""
+        result = self.query(
+            """
+            MATCH (p:Project)-[:HAS_NODE]->(n)
+            WHERE n.id = $node_id OR n.name = $node_name
+            RETURN p.id as id, p.is_default as is_default
+            ORDER BY p.created_at ASC
+            """,
+            {"node_id": node_id, "node_name": node_name},
+        )
+        return result
 
     def list_project_summaries(self, limit: int = 10) -> list[dict]:
         """List recent project summaries."""
@@ -643,9 +773,26 @@ class Neo4jClient:
         """Delete a project summary and its chat history."""
         self.query(
             """
-            MATCH (p:ProjectSummary {id: $project_id})
-            OPTIONAL MATCH (p)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
-            DETACH DELETE p, m
+            MATCH (ps:ProjectSummary {id: $project_id})
+            OPTIONAL MATCH (ps)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
+            OPTIONAL MATCH (ps)-[:HAS_LESSON]->(l:ProjectLesson)
+            OPTIONAL MATCH (ps)-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
+            OPTIONAL MATCH (ps)-[:SUMMARY_FOR]->(p:Project)
+            OPTIONAL MATCH (p)-[:HAS_PROFILE]->(u:UserProfile)
+            DETACH DELETE ps, m, l, a, u, p
+            """,
+            {"project_id": project_id},
+        )
+
+    def clear_project_content(self, project_id: str) -> None:
+        """Clear lessons, assessments, and messages for a project without deleting it."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            OPTIONAL MATCH (ps)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
+            OPTIONAL MATCH (ps)-[:HAS_LESSON]->(l:ProjectLesson)
+            OPTIONAL MATCH (ps)-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
+            DETACH DELETE m, l, a
             """,
             {"project_id": project_id},
         )
@@ -705,16 +852,24 @@ class Neo4jClient:
         """Persist a generated lesson."""
         self.query(
             """
-            MATCH (p:ProjectSummary {id: $project_id})
+            MATCH (ps:ProjectSummary {id: $project_id})
+            MATCH (p:Project {id: $project_id})
             CREATE (l:ProjectLesson {
                 id: $lesson_id,
                 node_id: $node_id,
                 title: $title,
                 explanation: $explanation,
                 task: $task,
+                archived: false,
                 created_at: datetime()
             })
+            CREATE (ps)-[:HAS_LESSON]->(l)
             CREATE (p)-[:HAS_LESSON]->(l)
+            WITH l
+            OPTIONAL MATCH (n {id: $node_id})
+            FOREACH (_ IN CASE WHEN n IS NULL THEN [] ELSE [1] END |
+                MERGE (l)-[:ABOUT]->(n)
+            )
             """,
             {
                 "project_id": project_id,
@@ -731,7 +886,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             """,
             {"project_id": project_id},
@@ -743,13 +898,34 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             LIMIT 1
             """,
             {"project_id": project_id, "node_id": node_id},
         )
         return result
+
+    def archive_project_lesson(self, project_id: str, lesson_id: str) -> None:
+        """Archive a lesson."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {id: $lesson_id})
+            SET l.archived = true,
+                l.archived_at = datetime()
+            """,
+            {"project_id": project_id, "lesson_id": lesson_id},
+        )
+
+    def delete_project_lesson(self, project_id: str, lesson_id: str) -> None:
+        """Delete a lesson from a project."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {id: $lesson_id})
+            DETACH DELETE l
+            """,
+            {"project_id": project_id, "lesson_id": lesson_id},
+        )
 
     def save_project_assessment(
         self,
@@ -761,16 +937,22 @@ class Neo4jClient:
         """Persist an assessment for a lesson."""
         self.query(
             """
-            MATCH (p:ProjectSummary {id: $project_id})
+            MATCH (ps:ProjectSummary {id: $project_id})
+            MATCH (p:Project {id: $project_id})
             CREATE (a:ProjectAssessment {
                 id: $assessment_id,
                 lesson_id: $lesson_id,
                 prompt: $prompt,
                 status: 'pending',
+                archived: false,
                 created_at: datetime(),
                 updated_at: datetime()
             })
+            CREATE (ps)-[:HAS_ASSESSMENT]->(a)
             CREATE (p)-[:HAS_ASSESSMENT]->(a)
+            WITH a
+            MATCH (l:ProjectLesson {id: $lesson_id})
+            CREATE (a)-[:ASSESSMENT_FOR]->(l)
             """,
             {
                 "project_id": project_id,
@@ -785,7 +967,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
-            RETURN a.id as id, a.lesson_id as lesson_id, a.prompt as prompt, a.status as status, a.feedback as feedback, a.created_at as created_at, a.updated_at as updated_at
+            RETURN a.id as id, a.lesson_id as lesson_id, a.prompt as prompt, a.status as status, a.feedback as feedback, a.created_at as created_at, a.updated_at as updated_at, a.archived as archived, a.archived_at as archived_at
             ORDER BY a.created_at DESC
             """,
             {"project_id": project_id},
@@ -798,6 +980,7 @@ class Neo4jClient:
         status: str,
         feedback: str,
         answer: str,
+        archived: bool | None = None,
     ) -> None:
         """Update assessment evaluation."""
         self.query(
@@ -806,6 +989,12 @@ class Neo4jClient:
             SET a.status = $status,
                 a.feedback = $feedback,
                 a.answer = $answer,
+                a.archived = CASE WHEN $archived IS NULL THEN a.archived ELSE $archived END,
+                a.archived_at = CASE
+                    WHEN $archived IS NULL THEN a.archived_at
+                    WHEN $archived THEN datetime()
+                    ELSE null
+                END,
                 a.updated_at = datetime()
             """,
             {
@@ -813,7 +1002,29 @@ class Neo4jClient:
                 "status": status,
                 "feedback": feedback,
                 "answer": answer,
+                "archived": archived,
             },
+        )
+
+    def archive_project_assessment(self, project_id: str, assessment_id: str) -> None:
+        """Archive an assessment."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment {id: $assessment_id})
+            SET a.archived = true,
+                a.archived_at = datetime()
+            """,
+            {"project_id": project_id, "assessment_id": assessment_id},
+        )
+
+    def delete_project_assessment(self, project_id: str, assessment_id: str) -> None:
+        """Delete an assessment from a project."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment {id: $assessment_id})
+            DETACH DELETE a
+            """,
+            {"project_id": project_id, "assessment_id": assessment_id},
         )
 
     def get_node_by_id(self, node_id: str) -> Optional[dict]:

@@ -18,6 +18,8 @@ from backend.services.project_service import build_project_extraction_text, extr
 from backend.schemas.skill_graph import SkillGraphSchema
 from backend.services.lesson_service import generate_lesson, generate_and_store_lesson, parse_lesson_content
 from backend.services.assessment_service import generate_assessment, evaluate_assessment, parse_assessment_content
+from backend.services.task_registry import TaskRegistry
+from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 
 
 class ChatMessage(BaseModel):
@@ -51,6 +53,12 @@ class LessonRequest(BaseModel):
 
 class LessonGenerateRequest(BaseModel):
     node_id: str
+
+
+class LessonMultiGenerateResponse(BaseModel):
+    status: str
+    jobs: list[dict]
+    skipped: list[dict]
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -102,6 +110,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+task_registry = TaskRegistry()
+
 
 
 def get_service():
@@ -137,6 +147,7 @@ def get_graph():
     """
     service = get_service()
     try:
+        service.db.ensure_project_nodes()
         nodes = service.db.get_knowledge_graph_nodes()
         relationships = service.db.get_knowledge_graph_relationships()
         
@@ -155,6 +166,7 @@ def get_graph_stats():
     """Get graph statistics for the knowledge graph (excluding chat nodes)."""
     service = get_service()
     try:
+        service.db.ensure_project_nodes()
         stats = service.db.get_knowledge_graph_stats()
         return stats
     except Exception as e:
@@ -295,6 +307,8 @@ def merge_duplicates(label: str, match_property: str = "id"):
             "message": f"Merged {merged} duplicate nodes",
             "merged_count": merged,
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -493,6 +507,7 @@ def list_projects(limit: int = 50):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    db.ensure_default_project()
     records = db.list_project_summaries(limit=limit)
 
     projects = []
@@ -524,6 +539,8 @@ def get_project(project_id: str):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     records = db.get_project_summary(project_id)
     if not records:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -557,8 +574,12 @@ def rename_project(project_id: str, request: ProjectRenameRequest):
     new_name = request.name.strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="Name cannot be empty")
+    if project_id == DEFAULT_PROJECT_ID:
+        raise HTTPException(status_code=400, detail="Default project cannot be renamed")
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     records = db.get_project_summary(project_id)
     if not records:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -596,6 +617,9 @@ def delete_project(project_id: str):
     if not records:
         raise HTTPException(status_code=404, detail="Project not found")
     try:
+        if project_id == DEFAULT_PROJECT_ID:
+            db.clear_project_content(project_id)
+            return {"message": "Default project cleared"}
         db.delete_project_summary(project_id)
         return {"message": "Project deleted"}
     except Exception as e:
@@ -667,6 +691,7 @@ def update_project_profile(project_id: str, request: ProfileUpdateRequest):
 
     summary["user_profile"] = profile
     db.update_project_summary_json(project_id, json.dumps(summary))
+    db.upsert_project_profile_node(project_id, profile)
     return {"project_id": project_id, "user_profile": profile}
 
 
@@ -715,6 +740,65 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
     return {"node_id": node_id, "lesson_id": lesson_id, **result}
 
 
+@app.post("/api/graph/nodes/{node_id}/lessons/generate")
+async def generate_node_lessons(node_id: str):
+    """Generate lessons for all projects connected to a KG node."""
+    from backend.db.neo4j_client import Neo4jClient, _serialize_node
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    db.ensure_default_project()
+    node_result = db.get_node_by_id(node_id)
+    if not node_result:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    node = _serialize_node(node_result.get("node"))
+    node_name = node.get("properties", {}).get("name") or node_id
+
+    project_rows = db.get_projects_for_node(node_id, node_name)
+    projects = [row for row in project_rows if not row.get("is_default")]
+    if not projects:
+        projects = [{"id": DEFAULT_PROJECT_ID, "is_default": True}]
+
+    jobs = []
+    skipped = []
+    for project in projects:
+        project_id = project.get("id")
+        summary_records = db.get_project_summary(project_id)
+        if not summary_records:
+            continue
+
+        existing = db.get_project_lesson_by_node(project_id, node_id)
+        if existing:
+            created_at = existing[0].get("created_at")
+            if isinstance(created_at, DateTime):
+                created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            skipped.append({
+                "project_id": project_id,
+                "lesson_id": existing[0].get("id"),
+                "created_at": created_at,
+            })
+            continue
+
+        summary_json = summary_records[0].get("summary_json") or "{}"
+        try:
+            summary = json.loads(summary_json)
+        except Exception:
+            summary = {}
+        profile = summary.get("user_profile")
+
+        async def _task(project_id: str = project_id, profile: dict | None = profile):
+            result = await generate_and_store_lesson(db, project_id, node, profile)
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            return {"project_id": project_id, **result}
+
+        job = task_registry.register(project_id, "lesson", _task())
+        jobs.append({"project_id": project_id, "job_id": job.job_id})
+
+    return {"status": "queued", "jobs": jobs, "skipped": skipped}
+
+
 @app.post("/api/projects/{project_id}/lessons/generate")
 async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     """Queue lesson generation for a project node."""
@@ -722,6 +806,8 @@ async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     summary_records = db.get_project_summary(project_id)
     if not summary_records:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -759,11 +845,12 @@ async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     async def _task():
         result = await generate_and_store_lesson(db, project_id, node, profile)
         if "error" in result:
-            print(f"[Lessons] Generation failed: {result['error']}")
+            raise RuntimeError(result["error"])
+        return result
 
-    asyncio.create_task(_task())
+    job = task_registry.register(project_id, "lesson", _task())
 
-    return {"status": "queued"}
+    return {"status": "queued", "job_id": job.job_id}
 
 
 @app.get("/api/projects/{project_id}/lessons")
@@ -773,12 +860,17 @@ def list_project_lessons(project_id: str):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     records = db.list_project_lessons(project_id)
     lessons = []
     for row in records:
         created_at = row.get("created_at")
+        archived_at = row.get("archived_at")
         if isinstance(created_at, DateTime):
             created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        if isinstance(archived_at, DateTime):
+            archived_at = archived_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         explanation = row.get("explanation") or ""
         task = row.get("task") or ""
         if "```" in explanation or explanation.strip().startswith("{"):
@@ -792,8 +884,30 @@ def list_project_lessons(project_id: str):
             "explanation": explanation,
             "task": task,
             "created_at": created_at,
+            "archived": bool(row.get("archived")) if row.get("archived") is not None else False,
+            "archived_at": archived_at,
         })
     return {"lessons": lessons}
+
+
+@app.post("/api/projects/{project_id}/lessons/{lesson_id}/archive")
+def archive_project_lesson(project_id: str, lesson_id: str):
+    """Archive a lesson."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    db.archive_project_lesson(project_id, lesson_id)
+    return {"lesson_id": lesson_id, "archived": True}
+
+
+@app.delete("/api/projects/{project_id}/lessons/{lesson_id}")
+def delete_project_lesson(project_id: str, lesson_id: str):
+    """Remove a lesson from a project."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    db.delete_project_lesson(project_id, lesson_id)
+    return {"lesson_id": lesson_id, "deleted": True}
 
 
 @app.get("/api/projects/{project_id}/assessments")
@@ -803,15 +917,20 @@ def list_project_assessments(project_id: str):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     records = db.list_project_assessments(project_id)
     assessments = []
     for row in records:
         created_at = row.get("created_at")
         updated_at = row.get("updated_at")
+        archived_at = row.get("archived_at")
         if isinstance(created_at, DateTime):
             created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         if isinstance(updated_at, DateTime):
             updated_at = updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        if isinstance(archived_at, DateTime):
+            archived_at = archived_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         prompt = row.get("prompt") or ""
         feedback = row.get("feedback") or ""
         if "```" in prompt or prompt.strip().startswith("{"):
@@ -828,16 +947,40 @@ def list_project_assessments(project_id: str):
             "feedback": feedback,
             "created_at": created_at,
             "updated_at": updated_at,
+            "archived": bool(row.get("archived")) if row.get("archived") is not None else False,
+            "archived_at": archived_at,
         })
     return {"assessments": assessments}
 
 
-@app.post("/api/projects/{project_id}/assessments")
-async def create_project_assessment(project_id: str, request: AssessmentRequest):
-    """Generate and store an assessment for a lesson."""
+@app.post("/api/projects/{project_id}/assessments/{assessment_id}/archive")
+def archive_project_assessment(project_id: str, assessment_id: str):
+    """Archive an assessment."""
     from backend.db.neo4j_client import Neo4jClient
 
     db = Neo4jClient()
+    db.archive_project_assessment(project_id, assessment_id)
+    return {"assessment_id": assessment_id, "archived": True}
+
+
+@app.delete("/api/projects/{project_id}/assessments/{assessment_id}")
+def delete_project_assessment(project_id: str, assessment_id: str):
+    """Remove an assessment from a project."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    db.delete_project_assessment(project_id, assessment_id)
+    return {"assessment_id": assessment_id, "deleted": True}
+
+
+@app.post("/api/projects/{project_id}/assessments")
+async def create_project_assessment(project_id: str, request: AssessmentRequest):
+    """Queue assessment generation for a lesson."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     summary_records = db.get_project_summary(project_id)
     if not summary_records:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -853,16 +996,19 @@ async def create_project_assessment(project_id: str, request: AssessmentRequest)
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
-    result = await generate_assessment(lesson, summary.get("user_profile"))
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+    async def _task():
+        result = await generate_assessment(lesson, summary.get("user_profile"))
+        if "error" in result:
+            raise RuntimeError(result["error"])
+        from uuid import uuid4
 
-    from uuid import uuid4
+        assessment_id = f"assessment-{uuid4().hex[:8]}"
+        db.save_project_assessment(project_id, assessment_id, request.lesson_id, result.get("prompt", ""))
+        return {"assessment_id": assessment_id, "prompt": result.get("prompt", "")}
 
-    assessment_id = f"assessment-{uuid4().hex[:8]}"
-    db.save_project_assessment(project_id, assessment_id, request.lesson_id, result.get("prompt", ""))
+    job = task_registry.register(project_id, "assessment", _task())
 
-    return {"assessment_id": assessment_id, "prompt": result.get("prompt", "")}
+    return {"status": "queued", "job_id": job.job_id}
 
 
 @app.post("/api/projects/{project_id}/assessments/{assessment_id}/submit")
@@ -871,6 +1017,8 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
     from backend.db.neo4j_client import Neo4jClient
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
     summary_records = db.get_project_summary(project_id)
     if not summary_records:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -895,67 +1043,124 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    db.update_project_assessment(assessment_id, result.get("result", "fail"), result.get("feedback", ""), request.answer)
+    status = result.get("result", "fail")
+    archive_assessment = status == "pass"
+    db.update_project_assessment(
+        assessment_id,
+        status,
+        result.get("feedback", ""),
+        request.answer,
+        archived=archive_assessment,
+    )
+    if archive_assessment:
+        db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 
-    return {"assessment_id": assessment_id, "result": result.get("result"), "feedback": result.get("feedback")}
+    return {"assessment_id": assessment_id, "result": status, "feedback": result.get("feedback")}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job_status(job_id: str):
+    """Check status for an async job."""
+    job = task_registry.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.job_id,
+        "project_id": job.project_id,
+        "kind": job.kind,
+        "status": job.status,
+        "result": job.result,
+        "error": job.error,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+    }
+
+
+@app.delete("/api/jobs/{job_id}")
+def cancel_job(job_id: str):
+    """Cancel a queued or running job."""
+    job = task_registry.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    canceled = task_registry.cancel(job_id)
+    if not canceled:
+        raise HTTPException(status_code=409, detail="Job cannot be canceled")
+    return {
+        "job_id": job_id,
+        "status": job.status,
+    }
 
 
 @app.post("/api/projects/{project_id}/start")
 async def start_project(project_id: str):
-    """Start a project by extracting KG data from chat history."""
+    """Reinitialize a project by extracting KG data from chat history."""
     from backend.db.neo4j_client import Neo4jClient
+
+    if project_id == DEFAULT_PROJECT_ID:
+        raise HTTPException(status_code=400, detail="Default project cannot be started")
 
     db = Neo4jClient()
     records = db.get_project_summary(project_id)
     if not records:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    row = records[0]
-    summary_json = row.get("summary_json") or "{}"
-    try:
-        summary = json.loads(summary_json)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    history = db.get_project_chat_history(project_id)
-    if not history:
-        raise HTTPException(status_code=400, detail="Project has no chat history")
-
-    summary["user_profile"] = extract_profile_from_history(summary, history)
-
-    if summary.get("project_status") == "started":
-        raise HTTPException(status_code=409, detail="Project already started")
-    project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
-    db.upsert_project_summary(project_id, project_name, json.dumps(summary))
-
-    text = build_project_extraction_text(summary, history)
-    service = KnowledgeGraphService(schema=SkillGraphSchema)
-    documents = await service.aextract(text)
-    normalized = service.normalize_documents(documents)
-    service.add_documents(normalized, normalize=False)
-
-    node_count = sum(len(doc.nodes) for doc in normalized)
-    rel_count = sum(len(doc.relationships) for doc in normalized)
-
-    for label in SkillGraphSchema.allowed_nodes:
+    async def _task():
+        row = records[0]
+        summary_json = row.get("summary_json") or "{}"
         try:
-            service.merge_duplicates(label, match_property="name")
+            summary = json.loads(summary_json)
         except Exception as e:
-            print(f"[Projects] Merge duplicates failed for {label}: {e}")
+            raise RuntimeError(str(e))
 
-    summary["project_status"] = "started"
-    summary["started_at"] = datetime.utcnow().isoformat()
-    db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+        history = db.get_project_chat_history(project_id)
+        if not history:
+            history = []
 
-    return {
-        "message": "Project started",
-        "project_id": project_id,
-        "user_profile": summary.get("user_profile"),
-        "nodes_added": node_count,
-        "relationships_added": rel_count,
-        "project_status": summary.get("project_status"),
-        "started_at": summary.get("started_at"),
-    }
+        summary["user_profile"] = extract_profile_from_history(summary, history)
+
+        project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
+        db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+        db.upsert_project_profile_node(project_id, summary.get("user_profile", {}))
+
+        db.clear_project_nodes(project_id)
+
+        text = build_project_extraction_text(summary, history)
+        service = KnowledgeGraphService(schema=SkillGraphSchema)
+        documents = await service.aextract(text)
+        normalized = service.normalize_documents(documents)
+        service.add_documents(normalized, normalize=False)
+
+        node_count = sum(len(doc.nodes) for doc in normalized)
+        rel_count = sum(len(doc.relationships) for doc in normalized)
+
+        for label in ("Skill", "Concept", "Topic"):
+            try:
+                service.merge_duplicates(label, match_property="name")
+            except Exception as e:
+                print(f"[Projects] Merge duplicates failed for {label}: {e}")
+
+        node_refs = []
+        for doc in normalized:
+            for node in doc.nodes:
+                node_refs.append({"label": node.type, "name": node.properties.get("name")})
+        db.connect_project_to_nodes(project_id, node_refs)
+
+        summary["project_status"] = "initialized"
+        summary["started_at"] = datetime.utcnow().isoformat()
+        db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+
+        return {
+            "message": "Project reinitialized",
+            "project_id": project_id,
+            "user_profile": summary.get("user_profile"),
+            "nodes_added": node_count,
+            "relationships_added": rel_count,
+            "project_status": summary.get("project_status"),
+            "started_at": summary.get("started_at"),
+        }
+
+    job = task_registry.register(project_id, "project-reinit", _task())
+    return {"status": "queued", "job_id": job.job_id}
 
 
 def main():
