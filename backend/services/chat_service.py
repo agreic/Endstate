@@ -332,13 +332,14 @@ class ChatService:
     async def _handle_acceptance(self, session_id: str) -> ChatResponse:
         """Handle project acceptance - start async extraction."""
         self.set_locked(session_id, True)
-        
+
+        history = self.get_messages(session_id)
+
         acceptance_message = self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
         await BackgroundTaskStore.notify(session_id, "message_added", acceptance_message)
-        
+
         await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "summary"})
-        
-        history = self.get_messages(session_id)
+
         task = asyncio.create_task(self._extract_summary_async(session_id, [m.copy() for m in history]))
         BackgroundTaskStore.store(session_id, task)
         
@@ -531,6 +532,10 @@ Conversation:
                     option_match = re.match(r"^\s*(\d+)\.\s*\**(.+?)\**\s*$", line.strip())
                     if option_match and int(option_match.group(1)) == option_number:
                         return option_match.group(2).strip()
+
+            project_match = re.search(r"project\s*[:\-]\s*(.+)", content, flags=re.IGNORECASE)
+            if project_match:
+                return project_match.group(1).strip()
 
             bold_match = re.search(r"\*\*(.+?)\*\*", content)
             if bold_match:

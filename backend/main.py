@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
+from backend.services.project_migration import migrate_file_summaries
 
 
 class ChatMessage(BaseModel):
@@ -56,6 +57,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def migrate_legacy_projects():
+    """Migrate file-based project summaries into Neo4j on startup."""
+    try:
+        result = migrate_file_summaries()
+        if result.get("summaries") or result.get("chats"):
+            print(f"[Projects] Migrated {result['summaries']} summaries and {result['chats']} chats; deleted {result['deleted_files']} files.")
+    except Exception as e:
+        print(f"[Projects] Migration skipped: {e}")
 
 
 def get_service():
