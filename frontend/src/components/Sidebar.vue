@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { 
   Home, 
   MessageSquare, 
@@ -11,7 +10,7 @@ import {
   HelpCircle
 } from 'lucide-vue-next'
 
-const props = defineProps<{
+defineProps<{
   isOpen: boolean
   activeTab: 'dashboard' | 'chat' | 'graph' | 'projects'
 }>()

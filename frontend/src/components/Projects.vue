@@ -102,7 +102,7 @@ const formatDate = (dateStr: string): string => {
   });
 };
 
-const formatTime = (dateStr: string): string => {
+const formatTime = (dateStr?: string): string => {
   if (!dateStr) return "";
   const date = new Date(dateStr);
   return date.toLocaleTimeString("en-US", {

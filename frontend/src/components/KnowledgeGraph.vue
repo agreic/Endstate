@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, X } from "lucide-vue-next";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2 } from "lucide-vue-next";
 import { fetchGraphData, extractFromText, deleteNode, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
@@ -67,11 +67,6 @@ const getNodeColor = (node: GraphNode, isSelected: boolean = false): string => {
   return groupColors[node.labels?.[0] || 'Skill'] || groupColors['Skill'];
 };
 
-const getUniqueLabels = (): string[] => {
-  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
-  return Array.from(labels).sort();
-};
-
 const getLabelDisplayName = (label: string): string => {
   return label;
 };
@@ -84,8 +79,8 @@ let simulation: d3.Simulation<GraphNode, GraphLink> | null = null;
 let svgElement: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
 let gElement: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null;
-let nodesSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>, GraphNode, d3.EnterElement, unknown> | null = null;
-let linksSelection: d3.Selection<d3.EnterElement | d3.Selection<SVGSVGElementElement, GraphLink, SVGGElement, unknown>, GraphLink, d3.EnterElement, unknown> | null = null;
+let nodesSelection: d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown> | null = null;
+let linksSelection: d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null = null;
 
 const formatPropertyValue = (value: any): string => {
   if (typeof value === 'object' && value !== null) {
@@ -225,7 +220,7 @@ const isNodeMatching = (node: GraphNode): boolean => {
     node.label.toLowerCase().includes(query) ||
     node.description?.toLowerCase().includes(query) ||
     node.id === query ||
-    (node.labels && node.labels.some(l => l.toLowerCase().includes(query)))
+    (node.labels?.some(l => l.toLowerCase().includes(query)) ?? false)
   );
 };
 
@@ -349,7 +344,7 @@ const initGraph = () => {
 
   linksSelection = gElement
     .append("g")
-    .selectAll("line")
+    .selectAll<SVGLineElement, GraphLink>("line")
     .data(links)
     .join("line")
     .attr("stroke", "#d4d4d8")
@@ -358,7 +353,7 @@ const initGraph = () => {
 
   nodesSelection = gElement
     .append("g")
-    .selectAll("g")
+    .selectAll<SVGGElement, GraphNode>("g")
     .data(nodes)
     .join("g")
     .style("cursor", "pointer")
@@ -369,7 +364,7 @@ const initGraph = () => {
         .on("drag", dragged)
         .on("end", dragended),
     )
-    .on("mouseenter", (event, d) => {
+    .on("mouseenter", (_event, d) => {
       hoveredNodeId.value = d.id;
       updateNodeStyles();
     })
@@ -410,13 +405,15 @@ const initGraph = () => {
   });
 
   simulation.on("tick", () => {
+    if (!linksSelection || !nodesSelection) return;
+
     linksSelection
-      ?.attr("x1", (d) => (d.source as GraphNode).x || 0)
+      .attr("x1", (d) => (d.source as GraphNode).x || 0)
       .attr("y1", (d) => (d.source as GraphNode).y || 0)
       .attr("x2", (d) => (d.target as GraphNode).x || 0)
       .attr("y2", (d) => (d.target as GraphNode).y || 0);
 
-    nodesSelection?.attr(
+    nodesSelection.attr(
       "transform",
       (d) => `translate(${d.x || 0},${d.y || 0})`,
     );

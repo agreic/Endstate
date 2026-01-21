@@ -43,11 +43,6 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
   activeTab.value = tab
 }
 
-const handleHelpClose = () => {
-  showHelp.value = false
-  // Mark as seen so it doesn't show again automatically
-  localStorage.setItem('endstate-has-seen-help', 'true')
-}
 </script>
 
 <template>
