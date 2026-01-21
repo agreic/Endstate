@@ -499,9 +499,14 @@ Conversation:
         HEARTBEAT_INTERVAL = 30  # seconds
         
         try:
-            # Send initial messages
-            messages = self.get_messages(session_id)
-            yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id)})}\n\n"
+            # Send initial messages (with error handling)
+            try:
+                messages = self.get_messages(session_id)
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id)})}\n\n"
+            except Exception as e:
+                print(f"[Chat] Error fetching initial messages: {e}")
+                yield f"event: error\ndata: {json.dumps({'message': 'Failed to load chat history. Please try again.'})}\n\n"
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False})}\n\n"
             
             last_heartbeat = asyncio.get_event_loop().time()
             while True:
@@ -521,6 +526,9 @@ Conversation:
                     pass
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            print(f"[Chat] Event stream error: {e}")
+            yield f"event: error\ndata: {json.dumps({'message': 'Connection lost. Please refresh.'})}\n\n"
         finally:
             BackgroundTaskStore.unsubscribe(session_id, queue)
 

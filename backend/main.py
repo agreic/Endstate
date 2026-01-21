@@ -302,28 +302,36 @@ async def send_chat_message(session_id: str, request: ChatRequest, http_request:
     Send a message in a persistent chat session.
     Uses request_id header for idempotency.
     """
-    request_id = http_request.headers.get("X-Request-ID")
-    if not request_id:
-        request_id = str(uuid.uuid4())
-    
-    response = await chat_service.send_message(session_id, request.message, request_id)
-    
-    if response.already_processed:
-        return {"success": True, "already_processed": True}
-    
-    return {
-        "success": True,
-        "content": response.content,
-        "is_processing": response.is_processing,
-    }
+    try:
+        request_id = http_request.headers.get("X-Request-ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
+        response = await chat_service.send_message(session_id, request.message, request_id)
+        
+        if response.already_processed:
+            return {"success": True, "already_processed": True}
+        
+        return {
+            "success": True,
+            "content": response.content,
+            "is_processing": response.is_processing,
+        }
+    except Exception as e:
+        print(f"[Chat] Error sending message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send message. Please try again.")
 
 
 @app.get("/api/chat/{session_id}/stream")
 async def chat_event_stream(session_id: str):
     """Server-Sent Events stream for real-time chat updates."""
     async def event_generator():
-        async for event in chat_service.event_stream(session_id):
-            yield event
+        try:
+            async for event in chat_service.event_stream(session_id):
+                yield event
+        except Exception as e:
+            error_msg = str(e) if str(e) else "Connection error"
+            yield f"event: error\ndata: {json.dumps({'message': error_msg})}\n\n"
     
     return StreamingResponse(
         event_generator(),
@@ -339,23 +347,31 @@ async def chat_event_stream(session_id: str):
 @app.get("/api/chat/{session_id}/messages")
 def get_chat_messages(session_id: str):
     """Get all messages for a chat session."""
-    messages = chat_service.get_messages(session_id)
-    is_locked = chat_service.is_locked(session_id)
-    return {"messages": messages, "is_locked": is_locked}
+    try:
+        messages = chat_service.get_messages(session_id)
+        is_locked = chat_service.is_locked(session_id)
+        return {"messages": messages, "is_locked": is_locked}
+    except Exception as e:
+        print(f"[Chat] Error getting messages: {e}")
+        return {"messages": [], "is_locked": False}
 
 
 @app.post("/api/chat/{session_id}/reset")
 async def reset_chat_session(session_id: str):
     """Reset a chat session and cancel any ongoing processing."""
-    chat_service.delete_session(session_id)
-    chat_service.create_session(session_id)
-    
-    # Notify all subscribers that session was reset
-    await BackgroundTaskStore.notify(session_id, "session_reset", {
-        "message": "Session reset",
-    })
-    
-    return {"message": "Session reset", "session_id": session_id}
+    try:
+        chat_service.delete_session(session_id)
+        chat_service.create_session(session_id)
+        
+        # Notify all subscribers that session was reset
+        await BackgroundTaskStore.notify(session_id, "session_reset", {
+            "message": "Session reset",
+        })
+        
+        return {"message": "Session reset", "session_id": session_id}
+    except Exception as e:
+        print(f"[Chat] Error resetting session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reset chat. Please try again.")
 
 
 @app.delete("/api/chat/{session_id}")
