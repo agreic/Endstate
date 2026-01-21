@@ -74,11 +74,31 @@ const groupColors: Record<string, string> = {
   'Milestone': "#84cc16",
 };
 
+const PRIMARY_LABELS = [
+  "Project",
+  "Skill",
+  "Concept",
+  "Topic",
+  "Resource",
+  "Assessment",
+  "Milestone",
+  "Tool",
+  "Person",
+  "Domain",
+];
+
+const getPrimaryLabel = (labels?: string[]): string => {
+  if (!labels || labels.length === 0) return "Skill";
+  const match = PRIMARY_LABELS.find((label) => labels.includes(label));
+  return match || labels[0] || "Skill";
+};
+
 const getNodeColor = (node: GraphNode, isSelected: boolean = false): string => {
   if (isSelected) {
     return "#ef4444";
   }
-  return groupColors[node.labels?.[0] || 'Skill'] || groupColors['Skill'];
+  const label = getPrimaryLabel(node.labels);
+  return groupColors[label] || groupColors['Skill'];
 };
 
 const getLabelDisplayName = (label: string): string => {
@@ -101,6 +121,13 @@ const formatPropertyValue = (value: any): string => {
     return JSON.stringify(value);
   }
   return String(value);
+};
+
+const getDisplayProperties = (node: GraphNode): Array<{ key: string; value: any }> => {
+  const hiddenKeys = new Set(["created_at", "updated_at", "is_default"]);
+  return Object.entries(node.properties || {})
+    .filter(([key]) => !hiddenKeys.has(key))
+    .map(([key, value]) => ({ key, value }));
 };
 
 const loadGraphData = async () => {
@@ -283,7 +310,7 @@ const isNodeMatching = (node: GraphNode): boolean => {
 
 const isNodeInActiveLabel = (node: GraphNode): boolean => {
   if (!activeLabelFilter.value) return true;
-  return (node.labels?.[0] || "Skill") === activeLabelFilter.value;
+  return getPrimaryLabel(node.labels) === activeLabelFilter.value;
 };
 
 const updateNodeStyles = () => {
@@ -339,8 +366,8 @@ const updateLinkStyles = () => {
       const targetNode = graphData.value.nodes.find((n) => n.id === target);
       if (!sourceNode || !targetNode) return 0.2;
       const labelMatch = !activeLabelFilter.value || (
-        (sourceNode.labels?.[0] || "Skill") === activeLabelFilter.value &&
-        (targetNode.labels?.[0] || "Skill") === activeLabelFilter.value
+        getPrimaryLabel(sourceNode.labels) === activeLabelFilter.value &&
+        getPrimaryLabel(targetNode.labels) === activeLabelFilter.value
       );
       return labelMatch ? 0.6 : 0.15;
     })
@@ -617,7 +644,7 @@ const totalRelationships = computed(() => {
 });
 
 const legendItems = computed(() => {
-  const labels = new Set(graphData.value.nodes.map(n => n.labels?.[0] || 'Skill'));
+  const labels = new Set(graphData.value.nodes.map(n => getPrimaryLabel(n.labels)));
   return Array.from(labels).sort();
 });
 
@@ -783,8 +810,8 @@ const toggleLabelFilter = (label: string) => {
         <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
           <p class="text-xs text-surface-400 uppercase mb-1">Properties</p>
           <div class="space-y-1 text-sm">
-            <p v-for="(value, key) in selectedNode.properties" :key="key" class="text-surface-600">
-              <span class="font-medium text-surface-500">{{ key }}:</span> {{ formatPropertyValue(value) }}
+            <p v-for="item in getDisplayProperties(selectedNode)" :key="item.key" class="text-surface-600">
+              <span class="font-medium text-surface-500">{{ item.key }}:</span> {{ formatPropertyValue(item.value) }}
             </p>
           </div>
         </div>
