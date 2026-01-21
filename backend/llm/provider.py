@@ -55,14 +55,16 @@ def _get_ollama_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     
     ollama_config = llm_config.ollama
     timeout = kwargs.get("timeout_seconds", ollama_config.timeout_seconds)
+    keep_alive = kwargs.get("keep_alive", ollama_config.keep_alive)
     
     return ChatOllama(
         model=kwargs.get("model", ollama_config.model),
         base_url=kwargs.get("base_url", ollama_config.base_url),
         temperature=kwargs.get("temperature", ollama_config.temperature),
+        keep_alive=keep_alive,
         sync_client_kwargs={"timeout": timeout},
         async_client_kwargs={"timeout": timeout},
-        **{k: v for k, v in kwargs.items() if k not in ["model", "base_url", "temperature", "timeout", "timeout_seconds"]},
+        **{k: v for k, v in kwargs.items() if k not in ["model", "base_url", "temperature", "timeout", "timeout_seconds", "keep_alive"]},
     )
 
 

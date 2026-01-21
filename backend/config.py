@@ -31,6 +31,7 @@ class OllamaConfig:
     model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2"))
     temperature: float = 0.0
     timeout_seconds: float = field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")))
+    keep_alive: str = field(default_factory=lambda: os.getenv("OLLAMA_KEEP_ALIVE", "5m"))
 
 
 @dataclass
@@ -53,10 +54,17 @@ class LLMConfig:
 
 
 @dataclass
+class ChatConfig:
+    """Chat service configuration."""
+    history_max_messages: int = field(default_factory=lambda: int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20")))
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
     
     @classmethod
     def from_env(cls) -> "Config":

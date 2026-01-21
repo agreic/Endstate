@@ -9,6 +9,8 @@ This module provides the core chat functionality with:
 """
 import asyncio
 import json
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
@@ -21,6 +23,8 @@ from backend.services.agent_prompts import get_chat_system_prompt
 
 
 LLM_TIMEOUT = config.llm.timeout_seconds  # seconds for LLM calls
+HISTORY_MAX_MESSAGES = config.chat.history_max_messages
+LOG_CHAT_TIMINGS = os.getenv("LOG_CHAT_TIMINGS", "false").lower() == "true"
 
 
 def with_timeout(seconds: float):
@@ -282,10 +286,13 @@ class ChatService:
         
         try:
             history = self.get_messages(session_id)
+            if HISTORY_MAX_MESSAGES > 0 and len(history) > HISTORY_MAX_MESSAGES:
+                history = history[-HISTORY_MAX_MESSAGES:]
             messages_list = [("system", get_chat_system_prompt())]
             for msg in history:
                 messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
             
+            start_time = time.monotonic()
             try:
                 response = await asyncio.wait_for(
                     self.llm.ainvoke(messages_list),
@@ -299,6 +306,9 @@ class ChatService:
                 raise
             
             response_text = str(response.content if hasattr(response, 'content') else response)
+            if LOG_CHAT_TIMINGS:
+                elapsed = time.monotonic() - start_time
+                print(f"[Chat] LLM response in {elapsed:.2f}s (messages={len(messages_list)})")
             
             if request_id in self._cancelled_requests:
                 self._cancelled_requests.discard(request_id)
