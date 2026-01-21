@@ -26,7 +26,7 @@ export function useChat() {
   let reconnectAttempts = 0;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const FETCH_TIMEOUT = 10000; // 10 seconds
+  const FETCH_TIMEOUT = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS) || 120000; // 120 seconds default
 
   const fetchWithTimeout = async (url: string, options?: RequestInit): Promise<Response> => {
     const controller = new AbortController();
