@@ -141,10 +141,10 @@ const handleSend = async () => {
 
     <div class="p-4 bg-white border-t border-surface-200">
       <div class="max-w-4xl mx-auto">
-        <div class="flex items-stretch gap-2">
+        <div class="flex items-center gap-2">
           <button
             @click="isSearchEnabled = !isSearchEnabled"
-            class="flex-shrink-0 p-2.5 rounded-lg border transition-colors flex items-center justify-center"
+            class="flex-shrink-0 p-2.5 rounded-lg border transition-colors flex items-center justify-center h-[44px] w-[44px]"
             :class="
               isSearchEnabled
                 ? 'bg-primary-50 border-primary-200 text-primary-600'
@@ -154,14 +154,16 @@ const handleSend = async () => {
             <Globe :size="18" />
           </button>
 
-          <div class="relative flex-1">
+          <div class="relative flex-1 h-[44px]">
             <textarea
               v-model="inputMessage"
               @keydown.enter.prevent="handleSend"
               placeholder="Ask anything about your learning goals..."
               rows="1"
-              class="w-full h-full min-h-[44px] px-4 py-2.5 pr-10 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none leading-normal"
-              :disabled="isInputDisabled"
+              class="w-full px-4 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none h-[44px] box-border"
+              :class="{ 'opacity-50 cursor-not-allowed': isInputDisabled }"
+              :disabled="isProcessing"
+              style="padding-top: 12px; padding-bottom: 12px;"
             ></textarea>
 
             <button

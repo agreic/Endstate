@@ -84,14 +84,15 @@ def health_check():
 def get_graph():
     """
     Fetch all nodes and relationships from the graph database.
+    Excludes chat-related nodes and relationships.
     
     Returns:
         JSON with nodes and relationships arrays
     """
     service = get_service()
     try:
-        nodes = service.get_nodes()
-        relationships = service.get_relationships()
+        nodes = service.db.get_knowledge_graph_nodes()
+        relationships = service.db.get_knowledge_graph_relationships()
         
         return {
             "nodes": nodes,
@@ -105,10 +106,10 @@ def get_graph():
 
 @app.get("/api/graph/stats")
 def get_graph_stats():
-    """Get graph statistics."""
+    """Get graph statistics for the knowledge graph (excluding chat nodes)."""
     service = get_service()
     try:
-        stats = service.get_stats()
+        stats = service.db.get_knowledge_graph_stats()
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

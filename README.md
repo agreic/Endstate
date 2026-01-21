@@ -32,36 +32,45 @@ endstate/
 
 ### Chat System
 
-The chat system provides persistent, real-time conversations with the following architecture:
+The chat system provides persistent conversations with AI that can extract and create learning projects.
 
 **Backend (`backend/services/chat_service.py`):**
 - `ChatService` - Main service for chat operations
 - `BackgroundTaskStore` - Manages background tasks (like async summary extraction) with cancellation support
-- `send_message()` - Idempotent message sending via `X-Request-ID` header
-- `event_stream()` - SSE endpoint for real-time updates
+- Idempotent message sending via `X-Request-ID` header prevents duplicate messages
 - Automatic project summary extraction after user accepts a project proposal
 
 **Frontend (`frontend/src/composables/useChat.ts`):**
 - `useChat()` - Composable for chat state management
-- SSE event stream connection with automatic reconnection
-- Single `status` state: `idle` | `loading` | `processing` | `error`
-- Backend is source of truth - no local message duplication
+- Session persistence via `localStorage` (key: `endstate_chat_session_id`)
+- Messages reload when navigating back to chat tab
+- Processing state shows when background extraction is running
 
 **Flow:**
 1. User sends message → Frontend calls `POST /api/chat/{id}/messages`
 2. Message stored in Neo4j with `request_id` for idempotency
 3. Response returned (with `is_processing: true` if project accepted)
-4. Frontend shows loading/processing indicator
-5. SSE stream updates messages in real-time
-6. Reset button cancels ongoing processing and clears session
+4. Frontend shows processing indicator during async extraction
+5. Reset button cancels ongoing processing and clears session
 
 **Endpoints:**
 - `POST /api/chat/{id}/messages` - Send message (idempotent)
-- `GET /api/chat/{id}/stream` - SSE event stream
 - `GET /api/chat/{id}/messages` - Get all messages
 - `POST /api/chat/{id}/reset` - Reset session (cancels processing)
 
 ### Knowledge Graph
+
+The knowledge graph stores learned concepts, skills, and their relationships.
+
+**Data Isolation:**
+- Chat sessions and messages are stored separately from knowledge graph data
+- Graph statistics exclude `ChatSession` and `ChatMessage` nodes
+- `/api/graph` endpoints only return knowledge graph entities
+
+**Methods:**
+- `get_knowledge_graph_nodes()` - Get nodes excluding chat-related labels
+- `get_knowledge_graph_relationships()` - Get relationships excluding chat relationships
+- `get_knowledge_graph_stats()` - Get statistics for knowledge graph only
 
 See [[backend/README.md]] for detailed knowledge graph documentation.
 

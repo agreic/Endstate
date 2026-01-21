@@ -8,6 +8,9 @@ function getSessionId(): string {
   if (!sessionId) {
     sessionId = crypto.randomUUID();
     localStorage.setItem(SESSION_ID_KEY, sessionId);
+    console.log('[Chat] Created new session ID:', sessionId);
+  } else {
+    console.log('[Chat] Using existing session ID:', sessionId);
   }
   return sessionId;
 }
@@ -22,6 +25,7 @@ export function useChat() {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   const loadMessages = async () => {
+    console.log('[Chat] Loading messages for session:', sessionId.value);
     isLoading.value = true;
     error.value = null;
     
@@ -30,6 +34,7 @@ export function useChat() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
+      console.log('[Chat] Got response:', data);
       const msgs = data.messages || [];
       
       if (msgs.length === 0) {

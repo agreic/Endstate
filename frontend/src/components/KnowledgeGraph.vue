@@ -125,14 +125,13 @@ const loadGraphData = async () => {
     };
     
     graphData.value.nodes = data.nodes.map((item: ApiNode) => {
-      const nodeData = item.node;
       return {
-        id: nodeData.id || String(Math.random()),
+        id: item.id || String(Math.random()),
         group: 1,
-        label: nodeData.name || nodeData.labels?.[0] || 'Unknown',
-        description: nodeData.description,
-        labels: nodeData.labels,
-        properties: nodeData,
+        label: item.properties.name || item.labels?.[0] || 'Unknown',
+        description: item.properties.description,
+        labels: item.labels,
+        properties: item.properties,
       };
     });
     
@@ -285,12 +284,21 @@ watch(searchQuery, () => {
 });
 
 const initGraph = () => {
-  if (!graphContainer.value || !svgRef.value) return;
+  if (!graphContainer.value || !svgRef.value) {
+    console.warn("[Graph] Container not available");
+    return;
+  }
 
   const width = graphContainer.value.clientWidth;
   const height = graphContainer.value.clientHeight;
 
-  if (width === 0 || height === 0) return;
+  if (width === 0 || height === 0) {
+    console.warn("[Graph] Invalid dimensions", { width, height });
+    return;
+  }
+
+  console.log("[Graph] Initializing with", graphData.value.nodes.length, "nodes");
+  const startTime = performance.now();
 
   svgElement = d3.select(svgRef.value);
   svgElement.selectAll("*").remove();
@@ -326,16 +334,18 @@ const initGraph = () => {
 
   simulation = d3
     .forceSimulation<GraphNode>(nodes)
+    .alphaDecay(0.05)
+    .velocityDecay(0.4)
     .force(
       "link",
       d3
         .forceLink<GraphNode, GraphLink>(links)
         .id((d) => d.id)
-        .distance(120),
+        .distance(100),
     )
-    .force("charge", d3.forceManyBody().strength(-400))
+    .force("charge", d3.forceManyBody().strength(-300))
     .force("center", d3.forceCenter(width / 2, height / 2))
-    .force("collision", d3.forceCollide().radius(50));
+    .force("collision", d3.forceCollide().radius(40));
 
   linksSelection = gElement
     .append("g")
@@ -411,6 +421,18 @@ const initGraph = () => {
       (d) => `translate(${d.x || 0},${d.y || 0})`,
     );
   });
+
+  simulation.on("end", () => {
+    const duration = performance.now() - startTime;
+    console.log(`[Graph] Simulation stabilized in ${duration.toFixed(0)}ms`);
+  });
+
+  setTimeout(() => {
+    if (simulation && simulation.alpha() > 0.01) {
+      console.log("[Graph] Forcing simulation stop after timeout");
+      simulation.stop();
+    }
+  }, 5000);
 
   function dragstarted(
     event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>,

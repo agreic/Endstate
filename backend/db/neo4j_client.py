@@ -2,12 +2,39 @@
 Neo4j database client for Endstate.
 Provides connection management and graph operations.
 """
-from typing import Optional
+from typing import Optional, Any
 
 from langchain_neo4j import Neo4jGraph
 from neo4j import GraphDatabase, Result, RoutingControl
+from neo4j.time import DateTime
 
 from ..config import Neo4jConfig, config
+
+
+def _serialize_neo4j_value(value: Any) -> Any:
+    """Serialize Neo4j types to JSON-compatible Python types."""
+    if isinstance(value, DateTime):
+        return value.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    elif isinstance(value, list):
+        return [_serialize_neo4j_value(item) for item in value]
+    elif isinstance(value, dict):
+        return {k: _serialize_neo4j_value(v) for k, v in value.items()}
+    return value
+
+
+def _serialize_node(node) -> dict:
+    """Serialize a Neo4j Node object to a dictionary."""
+    if isinstance(node, dict):
+        return {
+            "id": node.get("id") or node.get("element_id"),
+            "labels": node.get("labels", []),
+            "properties": _serialize_neo4j_value({k: v for k, v in node.items() if k not in ("id", "labels")}),
+        }
+    return {
+        "id": node.element_id if hasattr(node, 'element_id') else node.get("id"),
+        "labels": list(node.labels),
+        "properties": _serialize_neo4j_value(dict(node)),
+    }
 
 
 class Neo4jClient:
@@ -259,11 +286,11 @@ class Neo4jClient:
     def get_all_nodes(self, label: Optional[str] = None, limit: int = 100) -> list[dict]:
         """
         Get all nodes, optionally filtered by label.
-        
+
         Args:
             label: Optional label to filter by
             limit: Maximum number of nodes to return
-            
+
         Returns:
             List of node dictionaries with id, labels, and properties
         """
@@ -271,10 +298,103 @@ class Neo4jClient:
             query = f"MATCH (n:{label}) RETURN n LIMIT {limit}"
         else:
             query = f"MATCH (n) RETURN n LIMIT {limit}"
-        
+
         result = self.query(query)
-        return [{"node": row["n"]} for row in result]
-    
+        return [_serialize_node(row["n"]) for row in result]
+
+    def get_knowledge_graph_nodes(self, limit: int = 100) -> list[dict]:
+        """
+        Get nodes for the knowledge graph (excluding chat nodes).
+
+        Args:
+            limit: Maximum number of nodes to return
+
+        Returns:
+            List of node dictionaries
+        """
+        query = """
+            MATCH (n)
+            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+            RETURN n
+            LIMIT $limit
+        """
+        result = self.query(query, {"limit": limit})
+        return [_serialize_node(row["n"]) for row in result]
+
+    def get_knowledge_graph_relationships(self, limit: int = 100) -> list[dict]:
+        """
+        Get relationships for the knowledge graph (excluding chat relationships).
+
+        Args:
+            limit: Maximum number of relationships to return
+
+        Returns:
+            List of relationship dictionaries
+        """
+        query = """
+            MATCH (n)-[r]->(m)
+            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+               AND NOT 'ChatSession' IN labels(m) AND NOT 'ChatMessage' IN labels(m)
+            RETURN n.id as source, type(r) as type, m.id as target, properties(r) as properties
+            LIMIT $limit
+        """
+        result = self.query(query, {"limit": limit})
+        return result
+
+    def get_knowledge_graph_stats(self) -> dict:
+        """
+        Get statistics for the knowledge graph (excluding chat nodes).
+
+        Returns:
+            Dictionary with node counts by label and relationship counts by type
+        """
+        node_stats = self.query("""
+            CALL db.labels() YIELD label
+            CALL {
+                WITH label
+                MATCH (n) WHERE label IN labels(n)
+                AND NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+                RETURN count(n) as count
+            }
+            RETURN label, count
+        """)
+
+        rel_stats = self.query("""
+            CALL db.relationshipTypes() YIELD relationshipType
+            CALL {
+                WITH relationshipType
+                MATCH ()-[r]->() WHERE type(r) = relationshipType
+                RETURN count(r) as count
+            }
+            RETURN relationshipType, count
+        """)
+
+        return {
+            "nodes": {row["label"]: row["count"] for row in node_stats if row["count"] > 0},
+            "relationships": {row["relationshipType"]: row["count"] for row in rel_stats if row["count"] > 0},
+            "total_nodes": self.get_knowledge_graph_node_count(),
+            "total_relationships": self.get_knowledge_graph_relationship_count(),
+        }
+
+    def get_knowledge_graph_node_count(self) -> int:
+        """Get count of knowledge graph nodes (excluding chat nodes)."""
+        result = self.query("""
+            MATCH (n)
+            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+            RETURN count(n) as count
+        """)
+        return result[0]["count"] if result else 0
+
+    def get_knowledge_graph_relationship_count(self) -> int:
+        """Get count of knowledge graph relationships (excluding chat relationships)."""
+        result = self.query("""
+            MATCH (n)-[r]->(m)
+            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+               AND NOT 'ChatSession' IN labels(m) AND NOT 'ChatMessage' IN labels(m)
+            RETURN count(r) as count
+        """)
+        return result[0]["count"] if result else 0
+
     def get_all_relationships(self, limit: int = 100) -> list[dict]:
         """
         Get all relationships.
@@ -356,7 +476,17 @@ class Neo4jClient:
             """,
             {"session_id": session_id}
         )
-        return result
+        messages = []
+        for row in result:
+            timestamp = row.get("timestamp")
+            if isinstance(timestamp, DateTime):
+                timestamp = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            messages.append({
+                "role": row.get("role"),
+                "content": row.get("content"),
+                "timestamp": timestamp,
+            })
+        return messages
 
     def get_all_sessions(self) -> list[dict]:
         """Get all chat sessions."""
@@ -369,7 +499,17 @@ class Neo4jClient:
             ORDER BY s.created_at DESC
             """
         )
-        return result
+        sessions = []
+        for row in result:
+            created_at = row.get("created_at")
+            if isinstance(created_at, DateTime):
+                created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            sessions.append({
+                "id": row.get("id"),
+                "created_at": created_at,
+                "message_count": row.get("message_count", 0),
+            })
+        return sessions
 
     def delete_chat_session(self, session_id: str) -> None:
         """Delete a chat session and all its messages."""

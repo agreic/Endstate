@@ -1,13 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface ApiNode {
-  node: {
-    id: string;
-    name?: string;
-    description?: string;
-    labels?: string[];
-    [key: string]: any;
-  };
+  id: string;
+  labels: string[];
+  properties: Record<string, any>;
 }
 
 export interface ApiRelationship {
