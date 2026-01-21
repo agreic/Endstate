@@ -12,6 +12,7 @@ import json
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
@@ -379,7 +380,7 @@ class ChatService:
                 inferred_name = self._infer_project_name(history)
                 summary = self._build_fallback_summary(history, inferred_name)
 
-            project_name = self._persist_project(session_id, summary, history)
+            project_name, _project_id = self._persist_project(session_id, summary, history)
             msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
             ready_message = self.add_message(session_id, "assistant", msg)
             await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
@@ -575,7 +576,7 @@ Conversation:
             "concepts": [],
         }
 
-    def _persist_project(self, session_id: str, summary: dict, history: list[dict]) -> str:
+    def _persist_project(self, session_id: str, summary: dict, history: list[dict], project_id: str | None = None) -> tuple[str, str]:
         if "agreed_project" not in summary or not isinstance(summary.get("agreed_project"), dict):
             summary["agreed_project"] = {
                 "name": "",
@@ -586,7 +587,11 @@ Conversation:
         project_name = summary.get("agreed_project", {}).get("name") or self._infer_project_name(history)
         summary["agreed_project"]["name"] = project_name
 
-        self.db.upsert_project_summary(session_id, project_name, json.dumps(summary))
+        project_id = project_id or f"{session_id}-{uuid.uuid4().hex[:8]}"
+        summary["project_id"] = project_id
+        summary["session_id"] = session_id
+
+        self.db.upsert_project_summary(project_id, project_name, json.dumps(summary))
 
         history_payload = []
         for idx, message in enumerate(history):
@@ -597,8 +602,8 @@ Conversation:
                 "request_id": message.get("request_id"),
                 "idx": idx,
             })
-        self.db.save_project_chat_history(session_id, history_payload)
-        return project_name
+        self.db.save_project_chat_history(project_id, history_payload)
+        return project_name, project_id
     
     async def event_stream(self, session_id: str) -> AsyncGenerator[str, None]:
         """Create an SSE event stream for a session with heartbeat."""

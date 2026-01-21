@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
+from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 
 
 class ChatMessage(BaseModel):
@@ -585,6 +586,42 @@ def get_project_chat(project_id: str):
         })
 
     return {"messages": messages}
+
+
+@app.post("/api/projects/{project_id}/start")
+async def start_project(project_id: str):
+    """Start a project by extracting KG data from chat history."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    row = records[0]
+    summary_json = row.get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    history = db.get_project_chat_history(project_id)
+    if not history:
+        raise HTTPException(status_code=400, detail="Project has no chat history")
+
+    summary["user_profile"] = extract_profile_from_history(summary, history)
+    project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
+    db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+
+    text = build_project_extraction_text(summary, history)
+    service = KnowledgeGraphService()
+    await service.aextract_and_add(text)
+
+    return {
+        "message": "Project started",
+        "project_id": project_id,
+        "user_profile": summary.get("user_profile"),
+    }
 
 
 def main():
