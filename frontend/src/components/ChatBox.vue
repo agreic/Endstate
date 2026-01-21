@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch } from "vue";
 import { Send, Bot, User, Globe, RotateCcw } from "lucide-vue-next";
 import { marked } from "marked";
 import { useChat } from "../composables/useChat";
@@ -9,13 +9,12 @@ const renderMarkdown = (content: string) => {
 };
 
 const inputMessage = ref("");
-const isSearchEnabled = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 
-const { messages, isLoading, isProcessing, error, sendMessage, resetChat } = useChat();
+const { messages, status, isLocked, error, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
-  return isLoading.value || isProcessing.value || !inputMessage.value.trim();
+  return status.value === 'sending' || isLocked.value || !inputMessage.value.trim();
 });
 
 const formatTime = (date: Date) => {
@@ -29,15 +28,13 @@ const formatTime = (date: Date) => {
 };
 
 const scrollToBottom = () => {
-  nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-    }
-  });
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+  }
 };
 
 watch(messages, () => {
-  scrollToBottom();
+  setTimeout(scrollToBottom, 50);
 }, { deep: true });
 
 const handleSend = async () => {
@@ -58,8 +55,8 @@ const handleSend = async () => {
 
     <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
       <div
-        v-for="message in messages"
-        :key="message.id"
+        v-for="(message, index) in messages"
+        :key="index"
         class="flex gap-3"
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
@@ -98,7 +95,7 @@ const handleSend = async () => {
         </div>
       </div>
 
-      <div v-if="isLoading" class="flex gap-3">
+      <div v-if="status === 'connecting'" class="flex gap-3">
         <div
           class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0"
         >
@@ -108,17 +105,12 @@ const handleSend = async () => {
           class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-surface-100"
         >
           <div class="flex items-center gap-1.5">
-            <span class="text-xs text-surface-400 mr-2">Thinking...</span>
-            <div class="flex gap-1">
-              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-              <span class="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
-            </div>
+            <span class="text-xs text-surface-400 mr-2">Connecting...</span>
           </div>
         </div>
       </div>
 
-      <div v-else-if="isProcessing" class="flex gap-3">
+      <div v-if="isLocked" class="flex gap-3">
         <div
           class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0"
         >
@@ -143,13 +135,7 @@ const handleSend = async () => {
       <div class="max-w-4xl mx-auto">
         <div class="flex items-center gap-2">
           <button
-            @click="isSearchEnabled = !isSearchEnabled"
-            class="flex-shrink-0 p-2.5 rounded-lg border transition-colors flex items-center justify-center h-[44px] w-[44px]"
-            :class="
-              isSearchEnabled
-                ? 'bg-primary-50 border-primary-200 text-primary-600'
-                : 'bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300'
-            "
+            class="flex-shrink-0 p-2.5 rounded-lg border transition-colors flex items-center justify-center h-[44px] w-[44px] bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300"
           >
             <Globe :size="18" />
           </button>
@@ -161,8 +147,7 @@ const handleSend = async () => {
               placeholder="Ask anything about your learning goals..."
               rows="1"
               class="w-full h-full px-4 bg-surface-50 text-sm resize-none outline-none"
-              :class="{ 'opacity-50 cursor-not-allowed': isInputDisabled }"
-              :disabled="isProcessing"
+              :disabled="isInputDisabled"
               style="padding-top: 12px; padding-bottom: 12px;"
             ></textarea>
 
@@ -170,7 +155,7 @@ const handleSend = async () => {
               @click="handleSend"
               :disabled="isInputDisabled"
               class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors"
-              :class="inputMessage.trim() && !isLoading && !isProcessing ? 'text-primary-600' : 'text-surface-300'"
+              :class="inputMessage.trim() && status !== 'sending' && !isLocked ? 'text-primary-600' : 'text-surface-300'"
             >
               <Send :size="18" />
             </button>
@@ -178,11 +163,11 @@ const handleSend = async () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            {{ isProcessing ? 'Creating project plan... Please wait.' : 'Chat history stored on backend.' }}
+            {{ isLocked ? 'Creating project plan... Please wait.' : 'Chat history stored on backend.' }}
           </p>
           <button
             @click="resetChat"
-            :disabled="isLoading || isProcessing"
+            :disabled="status === 'sending' || isLocked"
             class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
           >
             <RotateCcw :size="12" />

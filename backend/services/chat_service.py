@@ -221,25 +221,30 @@ class ChatService:
         if self._is_acceptance(content):
             return await self._handle_acceptance(session_id)
         
-        # Normal chat response
-        history = self.get_messages(session_id)
-        messages_list = [("system", get_chat_system_prompt())]
-        for msg in history:
-            messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
+        # Normal chat response - set locked state during processing
+        self.set_locked(session_id, True)
         
-        # Run LLM invoke in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, self.llm.invoke, messages_list)
-        response_text = str(response.content if hasattr(response, 'content') else response)
-        
-        self.add_message(session_id, "assistant", response_text)
-        
-        await BackgroundTaskStore.notify(session_id, "message_added", {
-            "role": "assistant",
-            "content": response_text,
-        })
-        
-        return ChatResponse(success=True, content=response_text)
+        try:
+            history = self.get_messages(session_id)
+            messages_list = [("system", get_chat_system_prompt())]
+            for msg in history:
+                messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
+            
+            # Run LLM invoke in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, self.llm.invoke, messages_list)
+            response_text = str(response.content if hasattr(response, 'content') else response)
+            
+            self.add_message(session_id, "assistant", response_text)
+            
+            await BackgroundTaskStore.notify(session_id, "message_added", {
+                "role": "assistant",
+                "content": response_text,
+            })
+            
+            return ChatResponse(success=True, content=response_text)
+        finally:
+            self.set_locked(session_id, False)
     
     async def _handle_acceptance(self, session_id: str) -> ChatResponse:
         """Handle project acceptance - start async extraction."""

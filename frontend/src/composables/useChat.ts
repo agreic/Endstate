@@ -1,88 +1,125 @@
-import { ref, reactive, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import type { Message } from '../components/ChatBox.vue';
 
 const SESSION_ID_KEY = 'endstate_chat_session_id';
+const GREETING = "Hello! I'm Endstate AI. What would you like to learn today?";
 
 function getSessionId(): string {
   let sessionId = localStorage.getItem(SESSION_ID_KEY);
   if (!sessionId) {
     sessionId = crypto.randomUUID();
     localStorage.setItem(SESSION_ID_KEY, sessionId);
-    console.log('[Chat] Created new session ID:', sessionId);
-  } else {
-    console.log('[Chat] Using existing session ID:', sessionId);
   }
   return sessionId;
 }
 
 export function useChat() {
   const sessionId = ref(getSessionId());
-  const isLoading = ref(false);
-  const isProcessing = ref(false);
+  const status = ref<'idle' | 'connecting' | 'ready' | 'sending'>('idle');
   const error = ref<string | null>(null);
   const messages = ref<Message[]>([]);
+  const isLocked = ref(false);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  let eventSource: EventSource | null = null;
 
-  const loadMessages = async () => {
-    console.log('[Chat] Loading messages for session:', sessionId.value);
-    isLoading.value = true;
-    error.value = null;
-    
+  const fetchMessages = async () => {
     try {
       const response = await fetch(`${API_URL}/api/chat/${sessionId.value}/messages`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
-      console.log('[Chat] Got response:', data);
-      const msgs = data.messages || [];
+      isLocked.value = data.is_locked || false;
       
-      if (msgs.length === 0) {
-        // Show greeting
+      if (data.messages.length === 0) {
         messages.value = [{
-          id: 0,
           role: 'assistant',
-          content: "Hello! I'm Endstate AI. What would you like to learn today?",
+          content: GREETING,
           timestamp: new Date(),
         }];
       } else {
-        messages.value = msgs.map((m: any, i: number) => ({
-          id: i,
+        messages.value = data.messages.map((m: any) => ({
           role: m.role as 'user' | 'assistant',
           content: m.content,
           timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
         }));
       }
-      
-      isProcessing.value = data.is_locked || false;
     } catch (e: any) {
-      console.error('Load error:', e);
+      console.error('Fetch messages error:', e);
       error.value = e.message;
-      // Still show greeting on error
-      messages.value = [{
-        id: 0,
-        role: 'assistant',
-        content: "Hello! I'm Endstate AI. What would you like to learn today?",
-        timestamp: new Date(),
-      }];
-    } finally {
-      isLoading.value = false;
+    }
+  };
+
+  const connectSSE = () => {
+    status.value = 'connecting';
+    eventSource = new EventSource(`${API_URL}/api/chat/${sessionId.value}/stream`);
+    
+    eventSource.onopen = () => {
+      console.log('[Chat] SSE connected');
+    };
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.event === 'initial_messages') {
+          isLocked.value = data.locked || false;
+          
+          if (data.messages.length === 0) {
+            messages.value = [{
+              role: 'assistant',
+              content: GREETING,
+              timestamp: new Date(),
+            }];
+          } else {
+            messages.value = data.messages.map((m: any) => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+            }));
+          }
+          status.value = 'ready';
+        } else if (data.event === 'message_added') {
+          messages.value.push({
+            role: data.role as 'user' | 'assistant',
+            content: data.content,
+            timestamp: new Date(),
+          });
+        } else if (data.event === 'processing_complete') {
+          isLocked.value = false;
+        } else if (data.event === 'processing_started') {
+          isLocked.value = true;
+        }
+      } catch (e) {
+        console.error('[Chat] SSE parse error:', e);
+      }
+    };
+    
+    eventSource.onerror = () => {
+      console.log('[Chat] SSE error, falling back to fetch');
+      eventSource?.close();
+      eventSource = null;
+      status.value = 'idle';
+      fetchMessages();
+    };
+  };
+
+  const disconnect = () => {
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
     }
   };
 
   const sendMessage = async (content: string) => {
-    if (isLoading.value || isProcessing.value) return;
+    if (status.value === 'sending') return;
+    if (isLocked.value) {
+      error.value = 'Chat is processing. Please wait.';
+      return;
+    }
     
-    isLoading.value = true;
+    status.value = 'sending';
     error.value = null;
-    
-    // Optimistically add user message
-    messages.value.push({
-      id: messages.value.length,
-      role: 'user',
-      content,
-      timestamp: new Date(),
-    });
     
     try {
       const requestId = crypto.randomUUID();
@@ -100,34 +137,30 @@ export function useChat() {
         throw new Error(err.detail || `HTTP ${response.status}`);
       }
       
-      const data = await response.json();
-      
-      if (data.is_processing) {
-        isProcessing.value = true;
-      } else {
-        // Reload messages from backend
-        await loadMessages();
+      // SSE will deliver the new message automatically
+      // If SSE is not connected, fallback to fetch
+      if (!eventSource || eventSource.readyState !== EventSource.OPEN) {
+        await fetchMessages();
       }
     } catch (e: any) {
       console.error('Send error:', e);
       error.value = e.message;
     } finally {
-      isLoading.value = false;
+      status.value = 'ready';
     }
   };
 
   const resetChat = async () => {
-    if (isLoading.value) return;
+    if (status.value === 'sending') return;
     
     try {
       await fetch(`${API_URL}/api/chat/${sessionId.value}/reset`, { method: 'POST' });
       messages.value = [{
-        id: 0,
         role: 'assistant',
-        content: "Hello! I'm Endstate AI. What would you like to learn today?",
+        content: GREETING,
         timestamp: new Date(),
       }];
-      isProcessing.value = false;
+      isLocked.value = false;
       error.value = null;
     } catch (e: any) {
       error.value = e.message;
@@ -135,17 +168,21 @@ export function useChat() {
   };
 
   onMounted(() => {
-    loadMessages();
+    connectSSE();
+  });
+
+  onUnmounted(() => {
+    disconnect();
   });
 
   return {
     sessionId,
     messages,
-    isLoading,
-    isProcessing,
+    status,
+    isLocked,
     error,
     sendMessage,
     resetChat,
-    loadMessages,
+    loadMessages: fetchMessages,
   };
 }
