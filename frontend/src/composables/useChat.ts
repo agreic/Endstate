@@ -140,6 +140,10 @@ export function useChat() {
           } else if (data.event === 'error') {
             error.value = data.message || 'An error occurred';
             console.error('[Chat] Server error:', data.message);
+            // Don't reconnect on server error - just show error and let user refresh
+            eventSource?.close();
+            eventSource = null;
+            reconnectAttempts = 5; // Prevent further reconnect attempts
           } else if (data.event === 'heartbeat') {
             // Silent heartbeat - just keep connection alive
           }
@@ -149,16 +153,16 @@ export function useChat() {
       };
       
       eventSource.onerror = () => {
-        console.log('[Chat] SSE error, attempting reconnect...');
+        console.log('[Chat] SSE connection error');
         eventSource?.close();
         eventSource = null;
         
         reconnectAttempts++;
         
         if (reconnectAttempts >= 5) {
-          console.log('[Chat] Max reconnect attempts reached, falling back to fetch');
+          console.log('[Chat] Max reconnect attempts reached');
           status.value = 'ready';
-          fetchMessages();
+          error.value = 'Connection lost. Please refresh the page.';
           return;
         }
         
