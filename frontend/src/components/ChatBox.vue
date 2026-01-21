@@ -12,7 +12,7 @@ const inputMessage = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
 const showError = ref(true);
 
-const { messages, connectionStatus, isSending, isLocked, error, sendMessage, resetChat } = useChat();
+const { messages, connectionStatus, isSending, isLocked, processingMode, error, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
   return isSending.value || isLocked.value;
@@ -146,7 +146,9 @@ const dismissError = () => {
           class="bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200"
         >
           <div class="flex items-center gap-1.5">
-            <span class="text-xs text-amber-600 mr-2">Creating project plan...</span>
+            <span class="text-xs text-amber-600 mr-2">
+              {{ processingMode === 'summary' ? 'Creating project plan...' : 'Thinking...' }}
+            </span>
             <div class="flex gap-1">
               <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
               <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
@@ -189,7 +191,7 @@ const dismissError = () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            {{ isLocked ? 'Creating project plan... Please wait.' : 'Chat history stored on backend.' }}
+            {{ isLocked ? (processingMode === 'summary' ? 'Creating project plan... Please wait.' : 'Thinking... Please wait.') : 'Chat history stored on backend.' }}
           </p>
           <button
             @click="resetChat"

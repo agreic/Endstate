@@ -19,6 +19,7 @@ export function useChat() {
   const error = ref<string | null>(null);
   const messages = ref<ChatMessage[]>([]);
   const isLocked = ref(false);
+  const processingMode = ref<'chat' | 'summary' | null>(null);
   const messageKeys = new Set<string>();
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -114,6 +115,9 @@ export function useChat() {
 
   const applyInitialMessages = (payload: any) => {
     isLocked.value = payload.locked || false;
+    if (isLocked.value && !processingMode.value) {
+      processingMode.value = 'chat';
+    }
     if (payload.error) {
       error.value = payload.error;
     }
@@ -145,13 +149,17 @@ export function useChat() {
       applyMessageAdded(payload);
     } else if (payload.event === 'processing_complete') {
       isLocked.value = false;
+      processingMode.value = null;
     } else if (payload.event === 'processing_started') {
       isLocked.value = true;
+      processingMode.value = payload.reason === 'summary' ? 'summary' : 'chat';
     } else if (payload.event === 'processing_cancelled') {
       isLocked.value = false;
+      processingMode.value = null;
     } else if (payload.event === 'session_reset') {
       setMessages([]);
       isLocked.value = false;
+      processingMode.value = null;
     } else if (payload.event === 'error') {
       error.value = payload.message || 'An error occurred';
       console.error('[Chat] Server error:', payload.message);
@@ -210,19 +218,29 @@ export function useChat() {
 
       eventSource.addEventListener('processing_complete', () => {
         isLocked.value = false;
+        processingMode.value = null;
       });
 
-      eventSource.addEventListener('processing_started', () => {
+      eventSource.addEventListener('processing_started', (event) => {
         isLocked.value = true;
+        try {
+          const data = JSON.parse((event as MessageEvent).data);
+          processingMode.value = data.reason === 'summary' ? 'summary' : 'chat';
+        } catch (e) {
+          processingMode.value = 'chat';
+          console.error('[Chat] SSE parse error:', e);
+        }
       });
 
       eventSource.addEventListener('processing_cancelled', () => {
         isLocked.value = false;
+        processingMode.value = null;
       });
 
       eventSource.addEventListener('session_reset', () => {
         setMessages([]);
         isLocked.value = false;
+        processingMode.value = null;
       });
 
       eventSource.addEventListener('error', (event) => {
@@ -340,6 +358,7 @@ export function useChat() {
     connectionStatus,
     isSending,
     isLocked,
+    processingMode,
     error,
     sendMessage,
     resetChat,
