@@ -529,9 +529,13 @@ Conversation:
         option_number = int(match.group(1)) if match else None
 
         if "accept" in lower:
-            after = acceptance_text.split("accept", 1)[-1].strip(" :.-")
+            after = acceptance_text.split("accept", 1)[-1].strip(" :.-").strip()
             if after and not option_number:
-                return after
+                tokens = re.sub(r"[^a-z0-9\\s]", "", after.lower()).split()
+                if tokens and all(tok in {"the", "a", "an", "one", "this", "that", "first", "second", "third"} for tok in tokens):
+                    after = ""
+                if after:
+                    return after
 
         last_assistant = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
         if last_assistant:
