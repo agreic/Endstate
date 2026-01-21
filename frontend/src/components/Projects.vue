@@ -69,6 +69,7 @@ const selectProject = async (projectId: string) => {
     startStats.value = null;
     lessons.value = [];
     assessments.value = [];
+    localStorage.removeItem("endstate_active_project_id");
     return;
   }
   
@@ -82,6 +83,7 @@ const selectProject = async (projectId: string) => {
     const project = await getProject(projectId);
     selectedProject.value = project;
     renameValue.value = project.agreed_project?.name || "";
+    localStorage.setItem("endstate_active_project_id", project.session_id);
     const interests = project.user_profile?.interests || [];
     profileDraft.value = {
       interests,

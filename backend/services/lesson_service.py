@@ -65,7 +65,23 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
             "task": data.get("task", ""),
         }
     except Exception:
-        return {
-            "explanation": content.strip(),
-            "task": "",
-        }
+        pass
+
+    try:
+        import json
+        import re
+
+        match = re.search(r"```json\\s*(\\{.*?\\})\\s*```", content, flags=re.DOTALL)
+        if match:
+            data = json.loads(match.group(1))
+            return {
+                "explanation": data.get("explanation", ""),
+                "task": data.get("task", ""),
+            }
+    except Exception:
+        pass
+
+    return {
+        "explanation": content.strip(),
+        "task": "",
+    }
