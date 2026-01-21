@@ -192,11 +192,11 @@ def add_sample_data():
         ]
         
         for source_id, rel_type, target_id in relationships:
-            client.query("""
-                MATCH (s:Skill {id: $source_id})
-                MATCH (t:Skill {id: $target_id})
-                CREATE (s)-[:{rel_type} {strength: 0.9}]->(t)
-            """, {"source_id": source_id, "target_id": target_id, "rel_type": rel_type})
+            client.query(f"""
+                MATCH (s:Skill {{id: $source_id}})
+                MATCH (t:Skill {{id: $target_id}})
+                CREATE (s)-[:{rel_type} {{strength: 0.9}}]->(t)
+            """, {"source_id": source_id, "target_id": target_id})
         
         # Get stats
         stats = client.get_graph_stats()

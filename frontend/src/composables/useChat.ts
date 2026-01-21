@@ -97,6 +97,10 @@ export function useChat() {
     };
     
     eventSource.onerror = () => {
+      // Set status to idle so user can still type even if SSE fails
+      if (state.status === 'loading') {
+        state.status = 'idle';
+      }
       if (eventSource) {
         eventSource.close();
         eventSource = null;
