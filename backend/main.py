@@ -438,67 +438,78 @@ def get_node_connections(node_id: str):
 
 
 @app.get("/api/projects")
-def list_projects():
-    """List all project summaries."""
-    from pathlib import Path
-    
-    cache_dir = Path.home() / ".endstate" / "summaries"
-    if not cache_dir.exists():
-        return {"projects": []}
-    
+def list_projects(limit: int = 50):
+    """List project summaries."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.list_project_summaries(limit=limit)
+
     projects = []
-    for file_path in cache_dir.glob("*.json"):
+    for row in records:
+        created_at = row.get("created_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+        summary_json = row.get("summary_json") or "{}"
         try:
-            import json
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-                projects.append({
-                    "id": data.get("session_id"),
-                    "name": data.get("agreed_project", {}).get("name", "Untitled"),
-                    "created_at": data.get("created_at"),
-                    "interests": data.get("user_profile", {}).get("interests", []),
-                })
+            data = json.loads(summary_json)
         except Exception:
-            continue
-    
-    return {"projects": sorted(projects, key=lambda x: x.get("created_at", ""), reverse=True)}
+            data = {}
+
+        projects.append({
+            "id": row.get("id"),
+            "name": row.get("name") or data.get("agreed_project", {}).get("name", "Untitled"),
+            "created_at": created_at,
+            "interests": data.get("user_profile", {}).get("interests", []),
+        })
+
+    return {"projects": projects}
 
 
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str):
     """Get a specific project summary."""
-    from pathlib import Path
-    
-    cache_dir = Path.home() / ".endstate" / "summaries"
-    file_path = cache_dir / f"{project_id}.json"
-    
-    if not file_path.exists():
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
+    row = records[0]
+    summary_json = row.get("summary_json") or "{}"
     try:
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        return data
+        data = json.loads(summary_json)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    created_at = row.get("created_at")
+    if isinstance(created_at, DateTime):
+        created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    updated_at = row.get("updated_at")
+    if isinstance(updated_at, DateTime):
+        updated_at = updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    data["session_id"] = row.get("id")
+    data["created_at"] = created_at
+    data["updated_at"] = updated_at
+    return data
 
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str):
     """Delete a project summary."""
-    from pathlib import Path
-    
-    cache_dir = Path.home() / ".endstate" / "summaries"
-    file_path = cache_dir / f"{project_id}.json"
-    
-    if not file_path.exists():
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
         raise HTTPException(status_code=404, detail="Project not found")
-    
     try:
-        file_path.unlink()
-        chat_file = cache_dir / f"{project_id}_chat.json"
-        if chat_file.exists():
-            chat_file.unlink()
+        db.delete_project_summary(project_id)
         return {"message": "Project deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -507,14 +518,27 @@ def delete_project(project_id: str):
 @app.get("/api/projects/{project_id}/chat")
 def get_project_chat(project_id: str):
     """Get chat history for a project."""
-    from backend.services.summary_cache import summary_cache
-    
-    chat_history = summary_cache.load_chat_history(project_id)
-    
-    if chat_history is None:
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.get_project_chat_history(project_id)
+    if not records:
         raise HTTPException(status_code=404, detail="Chat history not found")
-    
-    return {"messages": chat_history}
+
+    messages = []
+    for row in records:
+        timestamp = row.get("timestamp")
+        if isinstance(timestamp, DateTime):
+            timestamp = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        messages.append({
+            "role": row.get("role"),
+            "content": row.get("content"),
+            "timestamp": timestamp,
+            "request_id": row.get("request_id"),
+        })
+
+    return {"messages": messages}
 
 
 def main():

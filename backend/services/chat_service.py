@@ -10,6 +10,7 @@ This module provides the core chat functionality with:
 import asyncio
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -66,7 +67,7 @@ def safe_run_with_timeout(func: Callable, timeout: float = LLM_TIMEOUT) -> Any:
         return None, timeout
 
 
-ACCEPTANCE_START_MESSAGE = "Excellent! I'm creating a detailed project plan for you. This will just a moment..."
+ACCEPTANCE_START_MESSAGE = "Excellent! I'm creating a detailed project plan for you. This will take just a moment..."
 
 
 @dataclass
@@ -346,8 +347,6 @@ class ChatService:
     async def _extract_summary_async(self, session_id: str, history: list[dict]):
         """Extract project summary asynchronously."""
         try:
-            from backend.services.summary_cache import summary_cache
-            
             loop = asyncio.get_event_loop()
             try:
                 has_llm, llm_summary = await asyncio.wait_for(
@@ -360,21 +359,22 @@ class ChatService:
                 })
                 return
             
-            summary_saved = False
+            summary = None
             if has_llm and llm_summary:
-                summary_saved = summary_cache.save(session_id, llm_summary)
-                if summary_saved:
-                    project_name = llm_summary.get('agreed_project', {}).get('name', 'Untitled')
-                    msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
-                    ready_message = self.add_message(session_id, "assistant", msg)
-                    await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
+                summary = llm_summary
             else:
                 has_fast, fast_summary = self._extract_summary_fast(history)
                 if has_fast and fast_summary:
-                    summary_saved = summary_cache.save(session_id, fast_summary)
-            
-            if summary_saved:
-                summary_cache.save_chat_history(session_id, history)
+                    summary = fast_summary
+
+            if summary is None:
+                inferred_name = self._infer_project_name(history)
+                summary = self._build_fallback_summary(history, inferred_name)
+
+            project_name = self._persist_project(session_id, summary, history)
+            msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
+            ready_message = self.add_message(session_id, "assistant", msg)
+            await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
         except asyncio.CancelledError:
             await BackgroundTaskStore.notify(session_id, "processing_cancelled", {})
             raise
@@ -509,6 +509,78 @@ Conversation:
             "concepts": []
         }
         return True, summary
+
+    def _infer_project_name(self, history: list[dict]) -> str:
+        acceptance_message = next((m for m in reversed(history) if m.get("role") == "user"), {})
+        acceptance_text = str(acceptance_message.get("content", "")).strip()
+        lower = acceptance_text.lower()
+
+        match = re.search(r"accept\s+(?:option\s+)?(\d+)", lower)
+        option_number = int(match.group(1)) if match else None
+
+        if "accept" in lower:
+            after = acceptance_text.split("accept", 1)[-1].strip(" :.-")
+            if after and not option_number:
+                return after
+
+        last_assistant = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
+        if last_assistant:
+            content = str(last_assistant.get("content", ""))
+            if option_number:
+                for line in content.splitlines():
+                    option_match = re.match(r"^\s*(\d+)\.\s*\**(.+?)\**\s*$", line.strip())
+                    if option_match and int(option_match.group(1)) == option_number:
+                        return option_match.group(2).strip()
+
+            bold_match = re.search(r"\*\*(.+?)\*\*", content)
+            if bold_match:
+                return bold_match.group(1).strip()
+
+        return "Untitled Project"
+
+    def _build_fallback_summary(self, history: list[dict], project_name: str) -> dict:
+        return {
+            "user_profile": {
+                "interests": [],
+                "skill_level": "not specified",
+                "time_available": "not specified",
+                "learning_style": "not specified",
+            },
+            "agreed_project": {
+                "name": project_name,
+                "description": "",
+                "timeline": "",
+                "milestones": [],
+            },
+            "topics": [],
+            "skills": [],
+            "concepts": [],
+        }
+
+    def _persist_project(self, session_id: str, summary: dict, history: list[dict]) -> str:
+        if "agreed_project" not in summary or not isinstance(summary.get("agreed_project"), dict):
+            summary["agreed_project"] = {
+                "name": "",
+                "description": "",
+                "timeline": "",
+                "milestones": [],
+            }
+        project_name = summary.get("agreed_project", {}).get("name") or self._infer_project_name(history)
+        summary["agreed_project"]["name"] = project_name
+
+        self.db.upsert_project_summary(session_id, project_name, json.dumps(summary))
+
+        history_payload = []
+        for idx, message in enumerate(history):
+            history_payload.append({
+                "role": message.get("role"),
+                "content": message.get("content"),
+                "timestamp": message.get("timestamp"),
+                "request_id": message.get("request_id"),
+                "idx": idx,
+            })
+        self.db.save_project_chat_history(session_id, history_payload)
+        return project_name
     
     async def event_stream(self, session_id: str) -> AsyncGenerator[str, None]:
         """Create an SSE event stream for a session with heartbeat."""

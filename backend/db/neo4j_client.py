@@ -314,7 +314,10 @@ class Neo4jClient:
         """
         query = """
             MATCH (n)
-            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+            WHERE NOT 'ChatSession' IN labels(n)
+              AND NOT 'ChatMessage' IN labels(n)
+              AND NOT 'ProjectSummary' IN labels(n)
+              AND NOT 'ProjectMessage' IN labels(n)
             RETURN n
             LIMIT $limit
         """
@@ -333,8 +336,14 @@ class Neo4jClient:
         """
         query = """
             MATCH (n)-[r]->(m)
-            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
-               AND NOT 'ChatSession' IN labels(m) AND NOT 'ChatMessage' IN labels(m)
+            WHERE NOT 'ChatSession' IN labels(n)
+              AND NOT 'ChatMessage' IN labels(n)
+              AND NOT 'ProjectSummary' IN labels(n)
+              AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ChatSession' IN labels(m)
+              AND NOT 'ChatMessage' IN labels(m)
+              AND NOT 'ProjectSummary' IN labels(m)
+              AND NOT 'ProjectMessage' IN labels(m)
             RETURN n.id as source, type(r) as type, m.id as target, properties(r) as properties
             LIMIT $limit
         """
@@ -353,7 +362,10 @@ class Neo4jClient:
             CALL {
                 WITH label
                 MATCH (n) WHERE label IN labels(n)
-                AND NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+                AND NOT 'ChatSession' IN labels(n)
+                AND NOT 'ChatMessage' IN labels(n)
+                AND NOT 'ProjectSummary' IN labels(n)
+                AND NOT 'ProjectMessage' IN labels(n)
                 RETURN count(n) as count
             }
             RETURN label, count
@@ -380,7 +392,10 @@ class Neo4jClient:
         """Get count of knowledge graph nodes (excluding chat nodes)."""
         result = self.query("""
             MATCH (n)
-            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
+            WHERE NOT 'ChatSession' IN labels(n)
+              AND NOT 'ChatMessage' IN labels(n)
+              AND NOT 'ProjectSummary' IN labels(n)
+              AND NOT 'ProjectMessage' IN labels(n)
             RETURN count(n) as count
         """)
         return result[0]["count"] if result else 0
@@ -389,8 +404,14 @@ class Neo4jClient:
         """Get count of knowledge graph relationships (excluding chat relationships)."""
         result = self.query("""
             MATCH (n)-[r]->(m)
-            WHERE NOT 'ChatSession' IN labels(n) AND NOT 'ChatMessage' IN labels(n)
-               AND NOT 'ChatSession' IN labels(m) AND NOT 'ChatMessage' IN labels(m)
+            WHERE NOT 'ChatSession' IN labels(n)
+              AND NOT 'ChatMessage' IN labels(n)
+              AND NOT 'ProjectSummary' IN labels(n)
+              AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ChatSession' IN labels(m)
+              AND NOT 'ChatMessage' IN labels(m)
+              AND NOT 'ProjectSummary' IN labels(m)
+              AND NOT 'ProjectMessage' IN labels(m)
             RETURN count(r) as count
         """)
         return result[0]["count"] if result else 0
@@ -532,6 +553,101 @@ class Neo4jClient:
             {"session_id": session_id}
         )
         return result[0].get("locked", False) if result else False
+
+    def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
+        """Create or update a project summary."""
+        self.query(
+            """
+            MERGE (p:ProjectSummary {id: $project_id})
+            ON CREATE SET p.created_at = datetime()
+            SET p.project_name = $project_name,
+                p.summary_json = $summary_json,
+                p.updated_at = datetime()
+            """,
+            {
+                "project_id": project_id,
+                "project_name": project_name,
+                "summary_json": summary_json,
+            },
+        )
+
+    def list_project_summaries(self, limit: int = 10) -> list[dict]:
+        """List recent project summaries."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary)
+            RETURN p.id as id, p.project_name as name, p.created_at as created_at, p.updated_at as updated_at, p.summary_json as summary_json
+            ORDER BY p.created_at DESC
+            LIMIT $limit
+            """,
+            {"limit": limit},
+        )
+        return result
+
+    def get_project_summary(self, project_id: str) -> list[dict]:
+        """Get a project summary by id."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            RETURN p.id as id, p.project_name as name, p.created_at as created_at, p.updated_at as updated_at, p.summary_json as summary_json
+            """,
+            {"project_id": project_id},
+        )
+        return result
+
+    def delete_project_summary(self, project_id: str) -> None:
+        """Delete a project summary and its chat history."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            OPTIONAL MATCH (p)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
+            DETACH DELETE p, m
+            """,
+            {"project_id": project_id},
+        )
+
+    def save_project_chat_history(self, project_id: str, messages: list[dict]) -> None:
+        """Save project chat history as a snapshot."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            OPTIONAL MATCH (p)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
+            DETACH DELETE m
+            """,
+            {"project_id": project_id},
+        )
+        if not messages:
+            return
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            UNWIND $messages as msg
+            CREATE (m:ProjectMessage {
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                request_id: msg.request_id,
+                idx: msg.idx
+            })
+            CREATE (p)-[:HAS_PROJECT_MESSAGE]->(m)
+            """,
+            {
+                "project_id": project_id,
+                "messages": messages,
+            },
+        )
+
+    def get_project_chat_history(self, project_id: str) -> list[dict]:
+        """Get project chat history."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
+            RETURN m.role as role, m.content as content, m.timestamp as timestamp, m.request_id as request_id, m.idx as idx
+            ORDER BY m.idx ASC
+            """,
+            {"project_id": project_id},
+        )
+        return result
 
     def get_node_by_id(self, node_id: str) -> Optional[dict]:
         """Get a node by its ID."""
