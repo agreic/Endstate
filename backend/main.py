@@ -3,6 +3,7 @@ Endstate API Server
 FastAPI backend for the knowledge graph visualization, management, and chat interface.
 """
 import json
+from datetime import datetime
 import uuid
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
@@ -611,6 +612,9 @@ async def start_project(project_id: str):
         raise HTTPException(status_code=400, detail="Project has no chat history")
 
     summary["user_profile"] = extract_profile_from_history(summary, history)
+
+    if summary.get("project_status") == "started":
+        raise HTTPException(status_code=409, detail="Project already started")
     project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
     db.upsert_project_summary(project_id, project_name, json.dumps(summary))
 
@@ -623,12 +627,18 @@ async def start_project(project_id: str):
     node_count = sum(len(doc.nodes) for doc in normalized)
     rel_count = sum(len(doc.relationships) for doc in normalized)
 
+    summary["project_status"] = "started"
+    summary["started_at"] = datetime.utcnow().isoformat()
+    db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+
     return {
         "message": "Project started",
         "project_id": project_id,
         "user_profile": summary.get("user_profile"),
         "nodes_added": node_count,
         "relationships_added": rel_count,
+        "project_status": summary.get("project_status"),
+        "started_at": summary.get("started_at"),
     }
 
 

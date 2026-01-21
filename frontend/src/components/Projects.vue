@@ -16,6 +16,7 @@ const renameValue = ref("");
 const renameError = ref<string | null>(null);
 const isStarting = ref(false);
 const startError = ref<string | null>(null);
+const startStats = ref<{ nodes: number; relationships: number } | null>(null);
 
 const loadProjects = async () => {
   isLoading.value = true;
@@ -36,12 +37,14 @@ const selectProject = async (projectId: string) => {
     selectedProject.value = null;
     chatMessages.value = [];
     showChatHistory.value = false;
+    startStats.value = null;
     return;
   }
   
   isLoadingProject.value = true;
   showChatHistory.value = false;
   chatMessages.value = [];
+  startStats.value = null;
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
@@ -151,6 +154,16 @@ const handleStartProject = async () => {
     if (response.user_profile) {
       selectedProject.value.user_profile = response.user_profile;
     }
+    if (response.project_status) {
+      selectedProject.value.project_status = response.project_status;
+    }
+    if (response.started_at) {
+      selectedProject.value.started_at = response.started_at;
+    }
+    startStats.value = {
+      nodes: response.nodes_added ?? 0,
+      relationships: response.relationships_added ?? 0,
+    };
   } catch (e) {
     startError.value = "Failed to start project";
   } finally {
@@ -284,12 +297,14 @@ onMounted(() => {
                   <div class="flex gap-2">
                     <button
                       @click="handleStartProject"
-                      :disabled="isStarting"
-                      class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-xs"
+                      :disabled="isStarting || selectedProject.project_status === 'started'"
+                      class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-xs disabled:opacity-60"
                       title="Start project"
                     >
                       <Play :size="16" />
-                      <span>{{ isStarting ? 'Starting...' : 'Start' }}</span>
+                      <span>
+                        {{ selectedProject.project_status === 'started' ? 'Started' : (isStarting ? 'Starting...' : 'Start') }}
+                      </span>
                     </button>
                     <button
                       v-if="!isRenaming"
@@ -325,6 +340,9 @@ onMounted(() => {
                   </div>
                 </div>
                 <p class="mt-3 text-primary-100 text-sm">{{ selectedProject.agreed_project?.description }}</p>
+                <p v-if="startStats" class="mt-2 text-xs text-primary-100">
+                  Added {{ startStats.nodes }} nodes · {{ startStats.relationships }} relationships
+                </p>
                 <p v-if="startError" class="mt-2 text-xs text-red-100">{{ startError }}</p>
                 <div class="mt-4 flex items-center gap-4 text-sm">
                   <div class="flex items-center gap-1.5">

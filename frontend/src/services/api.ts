@@ -140,6 +140,8 @@ export interface ProjectSummary {
   session_id: string;
   created_at: string;
   updated_at: string;
+  project_status?: string;
+  started_at?: string;
   user_profile: {
     interests: string[];
     skill_level: string;
@@ -332,7 +334,7 @@ export async function renameProject(projectId: string, name: string): Promise<{ 
   });
 }
 
-export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile']; nodes_added?: number; relationships_added?: number }> {
+export async function startProject(projectId: string): Promise<{ message: string; project_id: string; user_profile?: ProjectSummary['user_profile']; nodes_added?: number; relationships_added?: number; project_status?: string; started_at?: string }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/start`, {
     method: 'POST',
   });
