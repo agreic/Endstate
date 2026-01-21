@@ -347,6 +347,8 @@ class ChatService:
     
     async def _extract_summary_async(self, session_id: str, history: list[dict]):
         """Extract project summary asynchronously."""
+        summary = None
+        timeout_notice = None
         try:
             loop = asyncio.get_event_loop()
             try:
@@ -355,19 +357,22 @@ class ChatService:
                     timeout=LLM_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                await BackgroundTaskStore.notify(session_id, "error", {
-                    "message": "Project extraction timed out. Please try again."
-                })
-                return
-            
-            summary = None
+                has_llm = False
+                llm_summary = None
+                timeout_notice = "Project extraction timed out. The plan was saved with available details."
+
             if has_llm and llm_summary:
                 summary = llm_summary
             else:
                 has_fast, fast_summary = self._extract_summary_fast(history)
                 if has_fast and fast_summary:
                     summary = fast_summary
-
+        except asyncio.CancelledError:
+            await BackgroundTaskStore.notify(session_id, "processing_cancelled", {})
+            raise
+        except Exception as e:
+            print(f"Error extracting summary for session {session_id}: {e}")
+        try:
             if summary is None:
                 inferred_name = self._infer_project_name(history)
                 summary = self._build_fallback_summary(history, inferred_name)
@@ -376,13 +381,15 @@ class ChatService:
             msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
             ready_message = self.add_message(session_id, "assistant", msg)
             await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
-        except asyncio.CancelledError:
-            await BackgroundTaskStore.notify(session_id, "processing_cancelled", {})
-            raise
+
+            if timeout_notice:
+                await BackgroundTaskStore.notify(session_id, "error", {
+                    "message": timeout_notice
+                })
         except Exception as e:
-            print(f"Error extracting summary for session {session_id}: {e}")
+            print(f"Error saving project for session {session_id}: {e}")
             await BackgroundTaskStore.notify(session_id, "error", {
-                "message": f"Failed to create project: {str(e)}"
+                "message": "Failed to save the project. Please try again."
             })
         finally:
             self.set_locked(session_id, False)
