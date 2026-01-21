@@ -15,7 +15,9 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const { state, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
-  return state.status !== 'idle' || !inputMessage.value.trim();
+  // Allow typing when idle or error (can retry after error)
+  const canType = state.status === 'idle' || state.status === 'error';
+  return !canType || !inputMessage.value.trim();
 });
 
 const formatTime = (date: Date) => {
