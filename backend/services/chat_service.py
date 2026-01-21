@@ -129,6 +129,7 @@ class ChatService:
     def __init__(self, db: Optional[Neo4jClient] = None):
         self._db = db
         self._llm = None
+        self._cancelled_requests: set[str] = set()
     
     @property
     def db(self) -> Neo4jClient:
@@ -276,6 +277,7 @@ class ChatService:
         
         # Normal chat response - set locked state during processing
         self.set_locked(session_id, True)
+        await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "chat"})
         
         try:
             history = self.get_messages(session_id)
@@ -291,12 +293,17 @@ class ChatService:
                     timeout=LLM_TIMEOUT
                 )
             except asyncio.TimeoutError:
+                self._cancelled_requests.add(request_id)
                 await BackgroundTaskStore.notify(session_id, "error", {
                     "message": "Request timed out. The AI is taking too long to respond. Please try again."
                 })
                 raise
             
             response_text = str(response.content if hasattr(response, 'content') else response)
+            
+            if request_id in self._cancelled_requests:
+                self._cancelled_requests.discard(request_id)
+                return ChatResponse(success=False)
             
             assistant_message = self.add_message(session_id, "assistant", response_text)
             
@@ -310,6 +317,7 @@ class ChatService:
             raise
         finally:
             self.set_locked(session_id, False)
+            await BackgroundTaskStore.notify(session_id, "processing_complete", {"reason": "chat"})
     
     async def _handle_acceptance(self, session_id: str) -> ChatResponse:
         """Handle project acceptance - start async extraction."""
@@ -318,7 +326,7 @@ class ChatService:
         acceptance_message = self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
         await BackgroundTaskStore.notify(session_id, "message_added", acceptance_message)
         
-        await BackgroundTaskStore.notify(session_id, "processing_started", {})
+        await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "summary"})
         
         history = self.get_messages(session_id)
         task = asyncio.create_task(self._extract_summary_async(session_id, [m.copy() for m in history]))
