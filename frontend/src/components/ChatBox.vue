@@ -12,10 +12,10 @@ const inputMessage = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
 const showError = ref(true);
 
-const { messages, status, isLocked, error, sendMessage, resetChat } = useChat();
+const { messages, connectionStatus, isSending, isLocked, error, sendMessage, resetChat } = useChat();
 
 const isInputDisabled = computed(() => {
-  return status.value === 'sending' || isLocked.value || !inputMessage.value.trim();
+  return isSending.value || isLocked.value || !inputMessage.value.trim();
 });
 
 const formatTime = (date: Date) => {
@@ -113,7 +113,7 @@ const dismissError = () => {
         </div>
       </div>
 
-      <div v-if="status === 'connecting'" class="flex gap-3">
+      <div v-if="connectionStatus === 'connecting'" class="flex gap-3">
         <div
           class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0"
         >
@@ -126,6 +126,10 @@ const dismissError = () => {
             <span class="text-xs text-surface-400 mr-2">Connecting...</span>
           </div>
         </div>
+      </div>
+
+      <div v-if="connectionStatus === 'ready' && messages.length === 0" class="text-center text-surface-400 text-sm py-6">
+        Start a conversation to see your chat history here.
       </div>
 
       <div v-if="isLocked" class="flex gap-3">
@@ -173,7 +177,7 @@ const dismissError = () => {
               @click="handleSend"
               :disabled="isInputDisabled"
               class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-colors"
-              :class="inputMessage.trim() && status !== 'sending' && !isLocked ? 'text-primary-600' : 'text-surface-300'"
+              :class="inputMessage.trim() && !isSending && !isLocked ? 'text-primary-600' : 'text-surface-300'"
             >
               <Send :size="18" />
             </button>
@@ -185,7 +189,7 @@ const dismissError = () => {
           </p>
           <button
             @click="resetChat"
-            :disabled="status === 'sending' || isLocked"
+            :disabled="isSending || isLocked"
             class="flex items-center gap-1 text-xs text-surface-400 hover:text-red-500 transition-colors disabled:opacity-50"
           >
             <RotateCcw :size="12" />

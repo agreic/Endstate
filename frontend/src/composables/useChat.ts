@@ -1,8 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
-import type { Message } from '../components/ChatBox.vue';
+import type { ChatMessage } from '../types/chat';
 
 const SESSION_ID_KEY = 'endstate_chat_session_id';
-const GREETING = "Hello! I'm Endstate AI. What would you like to learn today?";
 
 function getSessionId(): string {
   let sessionId = localStorage.getItem(SESSION_ID_KEY);
@@ -15,10 +14,12 @@ function getSessionId(): string {
 
 export function useChat() {
   const sessionId = ref(getSessionId());
-  const status = ref<'idle' | 'connecting' | 'ready' | 'sending'>('idle');
+  const connectionStatus = ref<'idle' | 'connecting' | 'ready'>('idle');
+  const isSending = ref(false);
   const error = ref<string | null>(null);
-  const messages = ref<Message[]>([]);
+  const messages = ref<ChatMessage[]>([]);
   const isLocked = ref(false);
+  const messageKeys = new Set<string>();
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   let eventSource: EventSource | null = null;
@@ -47,6 +48,38 @@ export function useChat() {
     }
   };
 
+  const parseTimestamp = (timestamp?: string | null): Date => {
+    if (!timestamp) return new Date();
+    const parsed = new Date(timestamp);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
+  const messageKey = (message: ChatMessage): string => {
+    if (message.requestId) {
+      return `req:${message.requestId}`;
+    }
+    return `msg:${message.role}:${message.content}:${message.timestamp.toISOString()}`;
+  };
+
+  const setMessages = (nextMessages: ChatMessage[]) => {
+    messageKeys.clear();
+    const deduped: ChatMessage[] = [];
+    for (const message of nextMessages) {
+      const key = messageKey(message);
+      if (messageKeys.has(key)) continue;
+      messageKeys.add(key);
+      deduped.push(message);
+    }
+    messages.value = deduped;
+  };
+
+  const appendMessage = (message: ChatMessage) => {
+    const key = messageKey(message);
+    if (messageKeys.has(key)) return;
+    messageKeys.add(key);
+    messages.value.push(message);
+  };
+
   const fetchMessages = async () => {
     try {
       const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/messages`);
@@ -54,31 +87,16 @@ export function useChat() {
       
       const data = await response.json();
       isLocked.value = data.is_locked || false;
-      
-      if (data.messages.length === 0) {
-        messages.value = [{
-          role: 'assistant',
-          content: GREETING,
-          timestamp: new Date(),
-        }];
-      } else {
-        messages.value = data.messages.map((m: any) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-        }));
-      }
+      const mapped = (data.messages || []).map((m: any) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: parseTimestamp(m.timestamp),
+        requestId: m.request_id ?? null,
+      }));
+      setMessages(mapped);
     } catch (e: any) {
       console.error('Fetch messages error:', e);
       error.value = e.message || 'Failed to load messages';
-      // If already showing messages, don't replace them with greeting on error
-      if (messages.value.length === 0) {
-        messages.value = [{
-          role: 'assistant',
-          content: GREETING,
-          timestamp: new Date(),
-        }];
-      }
     }
   };
 
@@ -94,17 +112,67 @@ export function useChat() {
     reconnectAttempts = 0;
   };
 
+  const applyInitialMessages = (payload: any) => {
+    isLocked.value = payload.locked || false;
+    if (payload.error) {
+      error.value = payload.error;
+    }
+    const mapped = (payload.messages || []).map((m: any) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      timestamp: parseTimestamp(m.timestamp),
+      requestId: m.request_id ?? null,
+    }));
+    setMessages(mapped);
+    connectionStatus.value = 'ready';
+  };
+
+  const applyMessageAdded = (payload: any) => {
+    if (!payload?.content || !payload?.role) return;
+    appendMessage({
+      role: payload.role as 'user' | 'assistant',
+      content: payload.content,
+      timestamp: parseTimestamp(payload.timestamp),
+      requestId: payload.request_id ?? null,
+    });
+  };
+
+  const applyLegacyEvent = (payload: any) => {
+    if (!payload?.event) return;
+    if (payload.event === 'initial_messages') {
+      applyInitialMessages(payload);
+    } else if (payload.event === 'message_added') {
+      applyMessageAdded(payload);
+    } else if (payload.event === 'processing_complete') {
+      isLocked.value = false;
+    } else if (payload.event === 'processing_started') {
+      isLocked.value = true;
+    } else if (payload.event === 'processing_cancelled') {
+      isLocked.value = false;
+    } else if (payload.event === 'session_reset') {
+      setMessages([]);
+      isLocked.value = false;
+    } else if (payload.event === 'error') {
+      error.value = payload.message || 'An error occurred';
+      console.error('[Chat] Server error:', payload.message);
+    }
+  };
+
   const connectSSE = () => {
-    status.value = 'connecting';
+    connectionStatus.value = 'connecting';
     disconnect(); // Clean up any existing connection
     
     // Timeout fallback - if SSE doesn't connect within 5s, use fetch
     const connectionTimeout = setTimeout(() => {
-      if (status.value === 'connecting') {
+      if (connectionStatus.value === 'connecting') {
         console.log('[Chat] SSE connection timeout, falling back to fetch');
         eventSource?.close();
         eventSource = null;
-        fetchMessages();
+        fetchMessages().finally(() => {
+          if (connectionStatus.value === 'connecting') {
+            connectionStatus.value = 'ready';
+          }
+        });
       }
     }, 5000);
     
@@ -117,53 +185,62 @@ export function useChat() {
         reconnectAttempts = 0; // Reset reconnect counter on successful connection
       };
       
+      eventSource.addEventListener('initial_messages', (event) => {
+        clearTimeout(connectionTimeout);
+        try {
+          const data = JSON.parse((event as MessageEvent).data);
+          applyInitialMessages(data);
+          if (data.error) {
+            reconnectAttempts = 5; // Stop reconnecting on server error
+          }
+        } catch (e) {
+          console.error('[Chat] SSE parse error:', e);
+        }
+      });
+
+      eventSource.addEventListener('message_added', (event) => {
+        clearTimeout(connectionTimeout);
+        try {
+          const data = JSON.parse((event as MessageEvent).data);
+          applyMessageAdded(data);
+        } catch (e) {
+          console.error('[Chat] SSE parse error:', e);
+        }
+      });
+
+      eventSource.addEventListener('processing_complete', () => {
+        isLocked.value = false;
+      });
+
+      eventSource.addEventListener('processing_started', () => {
+        isLocked.value = true;
+      });
+
+      eventSource.addEventListener('processing_cancelled', () => {
+        isLocked.value = false;
+      });
+
+      eventSource.addEventListener('session_reset', () => {
+        setMessages([]);
+        isLocked.value = false;
+      });
+
+      eventSource.addEventListener('error', (event) => {
+        clearTimeout(connectionTimeout);
+        try {
+          const data = JSON.parse((event as MessageEvent).data);
+          error.value = data.message || 'An error occurred';
+        } catch (e) {
+          error.value = 'An error occurred';
+          console.error('[Chat] SSE parse error:', e);
+        }
+      });
+
       eventSource.onmessage = (event) => {
-        clearTimeout(connectionTimeout); // Clear timeout on first message
+        clearTimeout(connectionTimeout);
         try {
           const data = JSON.parse(event.data);
-          
-          if (data.event === 'initial_messages') {
-            isLocked.value = data.locked || false;
-            
-            // Handle error in initial_messages
-            if (data.error) {
-              error.value = data.error;
-              reconnectAttempts = 5; // Stop reconnecting on server error
-            }
-            
-            if (data.messages.length === 0 && !data.error) {
-              messages.value = [{
-                role: 'assistant',
-                content: GREETING,
-                timestamp: new Date(),
-              }];
-            } else if (data.messages.length > 0) {
-              messages.value = data.messages.map((m: any) => ({
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-              }));
-            }
-            status.value = 'ready';
-          } else if (data.event === 'message_added') {
-            messages.value.push({
-              role: data.role as 'user' | 'assistant',
-              content: data.content,
-              timestamp: new Date(),
-            });
-          } else if (data.event === 'processing_complete') {
-            isLocked.value = false;
-          } else if (data.event === 'processing_started') {
-            isLocked.value = true;
-          } else if (data.event === 'error') {
-            error.value = data.message || 'An error occurred';
-            console.error('[Chat] Server error:', data.message);
-            eventSource?.close();
-            eventSource = null;
-            reconnectAttempts = 5;
-          } else if (data.event === 'heartbeat') {
-            // Silent heartbeat
-          }
+          applyLegacyEvent(data);
         } catch (e) {
           console.error('[Chat] SSE parse error:', e);
         }
@@ -179,32 +256,32 @@ export function useChat() {
         
         if (reconnectAttempts >= 5) {
           console.log('[Chat] Max reconnect attempts reached');
-          status.value = 'ready';
+          connectionStatus.value = 'ready';
           error.value = 'Connection lost. Please refresh the page.';
           return;
         }
         
         const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
         console.log(`[Chat] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/5)`);
-        status.value = 'connecting';
+        connectionStatus.value = 'connecting';
         reconnectTimeout = setTimeout(connectSSE, delay);
       };
     } catch (e) {
       clearTimeout(connectionTimeout);
       console.error('[Chat] Failed to create SSE connection:', e);
-      status.value = 'ready';
+      connectionStatus.value = 'ready';
       fetchMessages();
     }
   };
 
   const sendMessage = async (content: string) => {
-    if (status.value === 'sending') return;
+    if (isSending.value) return;
     if (isLocked.value) {
       error.value = 'Chat is processing. Please wait.';
       return;
     }
     
-    status.value = 'sending';
+    isSending.value = true;
     error.value = null;
     
     try {
@@ -232,20 +309,16 @@ export function useChat() {
       console.error('Send error:', e);
       error.value = e.message || 'Failed to send message';
     } finally {
-      status.value = 'ready';
+      isSending.value = false;
     }
   };
 
   const resetChat = async () => {
-    if (status.value === 'sending') return;
+    if (isSending.value) return;
     
     try {
       await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/reset`, { method: 'POST' });
-      messages.value = [{
-        role: 'assistant',
-        content: GREETING,
-        timestamp: new Date(),
-      }];
+      setMessages([]);
       isLocked.value = false;
       error.value = null;
     } catch (e: any) {
@@ -264,7 +337,8 @@ export function useChat() {
   return {
     sessionId,
     messages,
-    status,
+    connectionStatus,
+    isSending,
     isLocked,
     error,
     sendMessage,
