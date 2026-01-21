@@ -17,7 +17,7 @@ from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 from backend.schemas.skill_graph import SkillGraphSchema
 from backend.services.lesson_service import generate_lesson, parse_lesson_content
-from backend.services.assessment_service import generate_assessment, evaluate_assessment
+from backend.services.assessment_service import generate_assessment, evaluate_assessment, parse_assessment_content
 
 
 class ChatMessage(BaseModel):
@@ -757,12 +757,20 @@ def list_project_assessments(project_id: str):
             created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         if isinstance(updated_at, DateTime):
             updated_at = updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        prompt = row.get("prompt") or ""
+        feedback = row.get("feedback") or ""
+        if "```" in prompt or prompt.strip().startswith("{"):
+            parsed_prompt = parse_assessment_content(prompt)
+            prompt = parsed_prompt.get("prompt") or parsed_prompt.get("raw", prompt)
+        if "```" in feedback or feedback.strip().startswith("{"):
+            parsed_feedback = parse_assessment_content(feedback)
+            feedback = parsed_feedback.get("feedback") or parsed_feedback.get("raw", feedback)
         assessments.append({
             "id": row.get("id"),
             "lesson_id": row.get("lesson_id"),
-            "prompt": row.get("prompt"),
+            "prompt": prompt,
             "status": row.get("status"),
-            "feedback": row.get("feedback"),
+            "feedback": feedback,
             "created_at": created_at,
             "updated_at": updated_at,
         })

@@ -25,6 +25,31 @@ def _style_hint(style: str) -> str:
     return "Use a short conceptual question."
 
 
+def _extract_json_block(content: str) -> dict | None:
+    try:
+        import json
+        import re
+
+        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
+        if fence_match:
+            return json.loads(fence_match.group(1))
+
+        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
+        if obj_match:
+            return json.loads(obj_match.group(1))
+    except Exception:
+        return None
+    return None
+
+
+def parse_assessment_content(content: str) -> dict:
+    data = _extract_json_block(content)
+    if data:
+        return data
+    cleaned = content.replace("```json", "").replace("```", "").strip()
+    return {"raw": cleaned}
+
+
 async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
     llm = get_llm()
 
@@ -44,11 +69,10 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
         return {"error": f"Assessment generation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
-    try:
-        data = json.loads(content)
-        return {"prompt": data.get("prompt", "").strip()}
-    except Exception:
-        return {"prompt": content.strip()}
+    parsed = parse_assessment_content(content)
+    if "prompt" in parsed:
+        return {"prompt": str(parsed.get("prompt", "")).strip()}
+    return {"prompt": str(parsed.get("raw", "")).strip()}
 
 
 async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> dict:
@@ -68,11 +92,10 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
         return {"error": f"Assessment evaluation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
-    try:
-        data = json.loads(content)
-        result = data.get("result", "").strip().lower()
+    parsed = parse_assessment_content(content)
+    if "result" in parsed:
+        result = str(parsed.get("result", "")).strip().lower()
         if result not in {"pass", "fail"}:
             result = "fail"
-        return {"result": result, "feedback": data.get("feedback", "").strip()}
-    except Exception:
-        return {"result": "fail", "feedback": content.strip()}
+        return {"result": result, "feedback": str(parsed.get("feedback", "")).strip()}
+    return {"result": "fail", "feedback": str(parsed.get("raw", "")).strip()}

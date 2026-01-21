@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play } from "lucide-vue-next";
+import { marked } from "marked";
 import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
@@ -46,6 +47,10 @@ const TIME_OPTIONS = [
   "10+ hours/week",
 ];
 const STYLE_OPTIONS = ["Theoretical", "Hands-on", "Hybrid"];
+
+const renderMarkdown = (content: string) => {
+  return marked.parse(content || "");
+};
 
 const loadProjects = async () => {
   isLoading.value = true;
@@ -641,7 +646,7 @@ onUnmounted(() => {
                   class="w-full text-left p-3 bg-surface-50 rounded-lg hover:bg-surface-100 transition-colors"
                 >
                   <p class="text-sm font-semibold text-surface-700">{{ lesson.title }}</p>
-                  <p class="text-xs text-surface-500 mt-1 line-clamp-2">{{ lesson.explanation }}</p>
+                  <div class="text-xs text-surface-500 mt-1 line-clamp-2 markdown-container" v-html="renderMarkdown(lesson.explanation)"></div>
                 </button>
               </div>
             </div>
@@ -655,11 +660,11 @@ onUnmounted(() => {
               <div v-else-if="assessments.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
               <div v-else class="space-y-4">
                 <div v-for="assessment in assessments" :key="assessment.id" class="p-3 bg-surface-50 rounded-lg">
-                  <p class="text-sm text-surface-700">{{ assessment.prompt }}</p>
+                  <div class="text-sm text-surface-700 markdown-container" v-html="renderMarkdown(assessment.prompt)"></div>
                   <p v-if="assessment.status" class="text-xs mt-2 text-surface-500">
                     Status: <span class="font-semibold capitalize">{{ assessment.status }}</span>
                   </p>
-                  <p v-if="assessment.feedback" class="text-xs text-surface-600 mt-2">Feedback: {{ assessment.feedback }}</p>
+                  <div v-if="assessment.feedback" class="text-xs text-surface-600 mt-2 markdown-container" v-html="renderMarkdown(assessment.feedback)"></div>
                   <div class="mt-3">
                     <textarea
                       v-model="assessmentAnswers[assessment.id]"
@@ -691,8 +696,8 @@ onUnmounted(() => {
                   Close
                 </button>
               </div>
-              <p class="text-sm text-surface-700 mb-3">{{ selectedLesson.explanation }}</p>
-              <p v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4">Task: {{ selectedLesson.task }}</p>
+              <div class="text-sm text-surface-700 mb-3 markdown-container" v-html="renderMarkdown(selectedLesson.explanation)"></div>
+              <div v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4 markdown-container" v-html="renderMarkdown(selectedLesson.task)"></div>
               <button
                 @click="openAssessmentPanel"
                 class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
