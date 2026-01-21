@@ -80,9 +80,9 @@ def extract_profile_from_history(
     topics = summary.get("topics") if isinstance(summary.get("topics"), list) else []
     interests = [i for i in interests + topics if i]
     profile["interests"] = list(dict.fromkeys(interests))
-    profile["skill_level"] = skill_level or "not specified"
-    profile["time_available"] = time_available or "not specified"
-    profile["learning_style"] = learning_style or "not specified"
+    profile["skill_level"] = skill_level or "intermediate"
+    profile["time_available"] = time_available or "2 hours/week"
+    profile["learning_style"] = learning_style or "hybrid"
     return profile
 
 

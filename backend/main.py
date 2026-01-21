@@ -17,6 +17,7 @@ from backend.services.extraction_service import cancel_task
 from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
 from backend.schemas.skill_graph import SkillGraphSchema
 from backend.services.lesson_service import generate_lesson
+from backend.services.assessment_service import generate_assessment, evaluate_assessment
 
 
 class ChatMessage(BaseModel):
@@ -46,6 +47,34 @@ class ProjectRenameRequest(BaseModel):
 
 class LessonRequest(BaseModel):
     project_id: Optional[str] = None
+
+
+class ProfileUpdateRequest(BaseModel):
+    interests: Optional[list[str]] = None
+    skill_level: Optional[str] = None
+    time_available: Optional[str] = None
+    learning_style: Optional[str] = None
+
+
+class AssessmentRequest(BaseModel):
+    lesson_id: str
+
+
+class AssessmentSubmission(BaseModel):
+    answer: str
+
+
+ALLOWED_SKILL_LEVELS = {"beginner", "intermediate", "experienced", "advanced"}
+ALLOWED_TIME = {
+    "10 minutes/week",
+    "30 minutes/week",
+    "1 hour/week",
+    "2 hours/week",
+    "5 hours/week",
+    "10 hours/week",
+    "10+ hours/week",
+}
+ALLOWED_STYLE = {"theoretical", "hands-on", "hybrid"}
 
 
 class DashboardStatsResponse(BaseModel):
@@ -595,6 +624,48 @@ def get_project_chat(project_id: str):
     return {"messages": messages}
 
 
+@app.patch("/api/projects/{project_id}/profile")
+def update_project_profile(project_id: str, request: ProfileUpdateRequest):
+    """Update project profile fields."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    summary_json = records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    profile = summary.get("user_profile")
+    if not isinstance(profile, dict):
+        profile = {}
+
+    if request.interests is not None:
+        profile["interests"] = request.interests
+    if request.skill_level is not None:
+        value = request.skill_level.lower()
+        if value not in ALLOWED_SKILL_LEVELS:
+            raise HTTPException(status_code=400, detail="Invalid skill level")
+        profile["skill_level"] = value
+    if request.time_available is not None:
+        if request.time_available not in ALLOWED_TIME:
+            raise HTTPException(status_code=400, detail="Invalid time commitment")
+        profile["time_available"] = request.time_available
+    if request.learning_style is not None:
+        value = request.learning_style.lower()
+        if value not in ALLOWED_STYLE:
+            raise HTTPException(status_code=400, detail="Invalid learning style")
+        profile["learning_style"] = value
+
+    summary["user_profile"] = profile
+    db.update_project_summary_json(project_id, json.dumps(summary))
+    return {"project_id": project_id, "user_profile": profile}
+
+
 @app.post("/api/graph/nodes/{node_id}/lesson")
 async def generate_node_lesson(node_id: str, request: LessonRequest):
     """Generate a lesson for a KG node."""
@@ -622,7 +693,142 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    return {"node_id": node_id, **result}
+    lesson_id = None
+    if request.project_id:
+        from uuid import uuid4
+
+        lesson_id = f"lesson-{uuid4().hex[:8]}"
+        title = node.get("properties", {}).get("name") or node_id
+        db.save_project_lesson(
+            request.project_id,
+            lesson_id,
+            node_id,
+            title,
+            result.get("explanation", ""),
+            result.get("task", ""),
+        )
+
+    return {"node_id": node_id, "lesson_id": lesson_id, **result}
+
+
+@app.get("/api/projects/{project_id}/lessons")
+def list_project_lessons(project_id: str):
+    """List stored lessons."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.list_project_lessons(project_id)
+    lessons = []
+    for row in records:
+        created_at = row.get("created_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        lessons.append({
+            "id": row.get("id"),
+            "node_id": row.get("node_id"),
+            "title": row.get("title"),
+            "explanation": row.get("explanation"),
+            "task": row.get("task"),
+            "created_at": created_at,
+        })
+    return {"lessons": lessons}
+
+
+@app.get("/api/projects/{project_id}/assessments")
+def list_project_assessments(project_id: str):
+    """List stored assessments."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.list_project_assessments(project_id)
+    assessments = []
+    for row in records:
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        if isinstance(updated_at, DateTime):
+            updated_at = updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        assessments.append({
+            "id": row.get("id"),
+            "lesson_id": row.get("lesson_id"),
+            "prompt": row.get("prompt"),
+            "status": row.get("status"),
+            "feedback": row.get("feedback"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        })
+    return {"assessments": assessments}
+
+
+@app.post("/api/projects/{project_id}/assessments")
+async def create_project_assessment(project_id: str, request: AssessmentRequest):
+    """Generate and store an assessment for a lesson."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    summary_records = db.get_project_summary(project_id)
+    if not summary_records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    summary_json = summary_records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    lessons = db.list_project_lessons(project_id)
+    lesson = next((l for l in lessons if l.get("id") == request.lesson_id), None)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+    result = await generate_assessment(lesson, summary.get("user_profile"))
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    from uuid import uuid4
+
+    assessment_id = f"assessment-{uuid4().hex[:8]}"
+    db.save_project_assessment(project_id, assessment_id, request.lesson_id, result.get("prompt", ""))
+
+    return {"assessment_id": assessment_id, "prompt": result.get("prompt", "")}
+
+
+@app.post("/api/projects/{project_id}/assessments/{assessment_id}/submit")
+async def submit_project_assessment(project_id: str, assessment_id: str, request: AssessmentSubmission):
+    """Submit an assessment answer for evaluation."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    summary_records = db.get_project_summary(project_id)
+    if not summary_records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    summary_json = summary_records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    assessments = db.list_project_assessments(project_id)
+    assessment = next((a for a in assessments if a.get("id") == assessment_id), None)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+
+    lessons = db.list_project_lessons(project_id)
+    lesson = next((l for l in lessons if l.get("id") == assessment.get("lesson_id")), None)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+    result = await evaluate_assessment(lesson, assessment, request.answer)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    db.update_project_assessment(assessment_id, result.get("result", "fail"), result.get("feedback", ""), request.answer)
+
+    return {"assessment_id": assessment_id, "result": result.get("result"), "feedback": result.get("feedback")}
 
 
 @app.post("/api/projects/{project_id}/start")

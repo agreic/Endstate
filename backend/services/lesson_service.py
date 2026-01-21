@@ -34,6 +34,9 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
     learning_style = (profile or {}).get("learning_style", "")
     instruction = _style_instruction(learning_style)
 
+    skill_level = (profile or {}).get("skill_level", "intermediate")
+    time_available = (profile or {}).get("time_available", "2 hours/week")
+
     prompt = (
         "You are a learning coach. Create a short lesson for the node below.\n"
         "Return JSON with keys: explanation, task.\n\n"
@@ -41,11 +44,13 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
         f"Labels: {labels}\n"
         f"Description: {description}\n"
         f"Learning style: {learning_style or 'not specified'}\n"
+        f"Skill level: {skill_level}\n"
+        f"Time available: {time_available}\n"
         f"Instruction: {instruction}\n"
     )
 
     try:
-        response = await asyncio.wait_for(llm.ainvoke([(\"human\", prompt)]), timeout=LESSON_TIMEOUT)
+        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=LESSON_TIMEOUT)
     except Exception as e:
         return {"error": f"Lesson generation failed: {e}"}
 

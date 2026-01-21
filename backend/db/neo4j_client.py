@@ -318,6 +318,8 @@ class Neo4jClient:
               AND NOT 'ChatMessage' IN labels(n)
               AND NOT 'ProjectSummary' IN labels(n)
               AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ProjectLesson' IN labels(n)
+              AND NOT 'ProjectAssessment' IN labels(n)
             RETURN n
             LIMIT $limit
         """
@@ -340,10 +342,14 @@ class Neo4jClient:
               AND NOT 'ChatMessage' IN labels(n)
               AND NOT 'ProjectSummary' IN labels(n)
               AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ProjectLesson' IN labels(n)
+              AND NOT 'ProjectAssessment' IN labels(n)
               AND NOT 'ChatSession' IN labels(m)
               AND NOT 'ChatMessage' IN labels(m)
               AND NOT 'ProjectSummary' IN labels(m)
               AND NOT 'ProjectMessage' IN labels(m)
+              AND NOT 'ProjectLesson' IN labels(m)
+              AND NOT 'ProjectAssessment' IN labels(m)
             RETURN n.id as source, type(r) as type, m.id as target, properties(r) as properties
             LIMIT $limit
         """
@@ -366,6 +372,8 @@ class Neo4jClient:
                 AND NOT 'ChatMessage' IN labels(n)
                 AND NOT 'ProjectSummary' IN labels(n)
                 AND NOT 'ProjectMessage' IN labels(n)
+                AND NOT 'ProjectLesson' IN labels(n)
+                AND NOT 'ProjectAssessment' IN labels(n)
                 RETURN count(n) as count
             }
             RETURN label, count
@@ -396,6 +404,8 @@ class Neo4jClient:
               AND NOT 'ChatMessage' IN labels(n)
               AND NOT 'ProjectSummary' IN labels(n)
               AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ProjectLesson' IN labels(n)
+              AND NOT 'ProjectAssessment' IN labels(n)
             RETURN count(n) as count
         """)
         return result[0]["count"] if result else 0
@@ -408,10 +418,14 @@ class Neo4jClient:
               AND NOT 'ChatMessage' IN labels(n)
               AND NOT 'ProjectSummary' IN labels(n)
               AND NOT 'ProjectMessage' IN labels(n)
+              AND NOT 'ProjectLesson' IN labels(n)
+              AND NOT 'ProjectAssessment' IN labels(n)
               AND NOT 'ChatSession' IN labels(m)
               AND NOT 'ChatMessage' IN labels(m)
               AND NOT 'ProjectSummary' IN labels(m)
               AND NOT 'ProjectMessage' IN labels(m)
+              AND NOT 'ProjectLesson' IN labels(m)
+              AND NOT 'ProjectAssessment' IN labels(m)
             RETURN count(r) as count
         """)
         return result[0]["count"] if result else 0
@@ -587,6 +601,20 @@ class Neo4jClient:
             },
         )
 
+    def update_project_summary_json(self, project_id: str, summary_json: str) -> None:
+        """Update project summary JSON payload."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            SET p.summary_json = $summary_json,
+                p.updated_at = datetime()
+            """,
+            {
+                "project_id": project_id,
+                "summary_json": summary_json,
+            },
+        )
+
     def list_project_summaries(self, limit: int = 10) -> list[dict]:
         """List recent project summaries."""
         result = self.query(
@@ -664,6 +692,116 @@ class Neo4jClient:
             {"project_id": project_id},
         )
         return result
+
+    def save_project_lesson(
+        self,
+        project_id: str,
+        lesson_id: str,
+        node_id: str,
+        title: str,
+        explanation: str,
+        task: str,
+    ) -> None:
+        """Persist a generated lesson."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            CREATE (l:ProjectLesson {
+                id: $lesson_id,
+                node_id: $node_id,
+                title: $title,
+                explanation: $explanation,
+                task: $task,
+                created_at: datetime()
+            })
+            CREATE (p)-[:HAS_LESSON]->(l)
+            """,
+            {
+                "project_id": project_id,
+                "lesson_id": lesson_id,
+                "node_id": node_id,
+                "title": title,
+                "explanation": explanation,
+                "task": task,
+            },
+        )
+
+    def list_project_lessons(self, project_id: str) -> list[dict]:
+        """List lessons for a project."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at
+            ORDER BY l.created_at DESC
+            """,
+            {"project_id": project_id},
+        )
+        return result
+
+    def save_project_assessment(
+        self,
+        project_id: str,
+        assessment_id: str,
+        lesson_id: str,
+        prompt: str,
+    ) -> None:
+        """Persist an assessment for a lesson."""
+        self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})
+            CREATE (a:ProjectAssessment {
+                id: $assessment_id,
+                lesson_id: $lesson_id,
+                prompt: $prompt,
+                status: 'pending',
+                created_at: datetime(),
+                updated_at: datetime()
+            })
+            CREATE (p)-[:HAS_ASSESSMENT]->(a)
+            """,
+            {
+                "project_id": project_id,
+                "assessment_id": assessment_id,
+                "lesson_id": lesson_id,
+                "prompt": prompt,
+            },
+        )
+
+    def list_project_assessments(self, project_id: str) -> list[dict]:
+        """List assessments for a project."""
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
+            RETURN a.id as id, a.lesson_id as lesson_id, a.prompt as prompt, a.status as status, a.feedback as feedback, a.created_at as created_at, a.updated_at as updated_at
+            ORDER BY a.created_at DESC
+            """,
+            {"project_id": project_id},
+        )
+        return result
+
+    def update_project_assessment(
+        self,
+        assessment_id: str,
+        status: str,
+        feedback: str,
+        answer: str,
+    ) -> None:
+        """Update assessment evaluation."""
+        self.query(
+            """
+            MATCH (a:ProjectAssessment {id: $assessment_id})
+            SET a.status = $status,
+                a.feedback = $feedback,
+                a.answer = $answer,
+                a.updated_at = datetime()
+            """,
+            {
+                "assessment_id": assessment_id,
+                "status": status,
+                "feedback": feedback,
+                "answer": answer,
+            },
+        )
 
     def get_node_by_id(self, node_id: str) -> Optional[dict]:
         """Get a node by its ID."""
