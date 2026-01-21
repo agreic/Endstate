@@ -161,21 +161,34 @@ class ChatService:
         )
         return result[0].get("count", 0) > 0 if result else False
     
-    def add_message(self, session_id: str, role: str, content: str, request_id: Optional[str] = None) -> None:
-        """Add a message to a chat session."""
+    def add_message(self, session_id: str, role: str, content: str, request_id: Optional[str] = None) -> dict:
+        """Add a message to a chat session and return its payload."""
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         self.db.query(
             """
             MATCH (s:ChatSession {id: $session_id})
             CREATE (m:ChatMessage {
                 role: $role,
                 content: $content,
-                timestamp: datetime(),
+                timestamp: datetime($timestamp),
                 request_id: $request_id
             })
             CREATE (s)-[:HAS_MESSAGE]->(m)
             """,
-            {"session_id": session_id, "role": role, "content": content, "request_id": request_id}
+            {
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "timestamp": timestamp,
+                "request_id": request_id,
+            }
         )
+        return {
+            "role": role,
+            "content": content,
+            "timestamp": timestamp,
+            "request_id": request_id,
+        }
     
     def get_messages(self, session_id: str) -> list[dict]:
         """Get all messages for a session."""
@@ -252,13 +265,10 @@ class ChatService:
             return ChatResponse(success=True, already_processed=True)
         
         # Add user message
-        self.add_message(session_id, "user", content, request_id)
+        user_message = self.add_message(session_id, "user", content, request_id)
         
         # Notify subscribers of new user message
-        await BackgroundTaskStore.notify(session_id, "message_added", {
-            "role": "user",
-            "content": content,
-        })
+        await BackgroundTaskStore.notify(session_id, "message_added", user_message)
         
         # Check for acceptance
         if self._is_acceptance(content):
@@ -288,12 +298,9 @@ class ChatService:
             
             response_text = str(response.content if hasattr(response, 'content') else response)
             
-            self.add_message(session_id, "assistant", response_text)
+            assistant_message = self.add_message(session_id, "assistant", response_text)
             
-            await BackgroundTaskStore.notify(session_id, "message_added", {
-                "role": "assistant",
-                "content": response_text,
-            })
+            await BackgroundTaskStore.notify(session_id, "message_added", assistant_message)
             
             return ChatResponse(success=True, content=response_text)
         except Exception as e:
@@ -308,11 +315,8 @@ class ChatService:
         """Handle project acceptance - start async extraction."""
         self.set_locked(session_id, True)
         
-        self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
-        await BackgroundTaskStore.notify(session_id, "message_added", {
-            "role": "assistant",
-            "content": ACCEPTANCE_START_MESSAGE,
-        })
+        acceptance_message = self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
+        await BackgroundTaskStore.notify(session_id, "message_added", acceptance_message)
         
         await BackgroundTaskStore.notify(session_id, "processing_started", {})
         
@@ -345,11 +349,8 @@ class ChatService:
                 if summary_saved:
                     project_name = llm_summary.get('agreed_project', {}).get('name', 'Untitled')
                     msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
-                    self.add_message(session_id, "assistant", msg)
-                    await BackgroundTaskStore.notify(session_id, "message_added", {
-                        "role": "assistant",
-                        "content": msg,
-                    })
+                    ready_message = self.add_message(session_id, "assistant", msg)
+                    await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
             else:
                 has_fast, fast_summary = self._extract_summary_fast(history)
                 if has_fast and fast_summary:
