@@ -223,11 +223,13 @@ class ChatService:
         
         # Normal chat response
         history = self.get_messages(session_id)
-        messages = [("system", get_chat_system_prompt())]
+        messages_list = [("system", get_chat_system_prompt())]
         for msg in history:
-            messages.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
+            messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
         
-        response = self.llm.invoke(messages)
+        # Run LLM invoke in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, self.llm.invoke, messages_list)
         response_text = str(response.content if hasattr(response, 'content') else response)
         
         self.add_message(session_id, "assistant", response_text)
@@ -262,9 +264,13 @@ class ChatService:
         try:
             from backend.services.summary_cache import summary_cache
             
-            has_llm, llm_summary = self._extract_summary_llm(history)
+            loop = asyncio.get_event_loop()
+            has_llm, llm_summary = await loop.run_in_executor(None, self._extract_summary_llm_with_invoke, history)
+            
+            summary_saved = False
             if has_llm and llm_summary:
-                if summary_cache.save(session_id, llm_summary):
+                summary_saved = summary_cache.save(session_id, llm_summary)
+                if summary_saved:
                     project_name = llm_summary.get('agreed_project', {}).get('name', 'Untitled')
                     msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
                     self.add_message(session_id, "assistant", msg)
@@ -275,7 +281,10 @@ class ChatService:
             else:
                 has_fast, fast_summary = self._extract_summary_fast(history)
                 if has_fast and fast_summary:
-                    summary_cache.save(session_id, fast_summary)
+                    summary_saved = summary_cache.save(session_id, fast_summary)
+            
+            if summary_saved:
+                summary_cache.save_chat_history(session_id, history)
         except asyncio.CancelledError:
             await BackgroundTaskStore.notify(session_id, "processing_cancelled", {})
             raise
@@ -286,6 +295,10 @@ class ChatService:
             await BackgroundTaskStore.notify(session_id, "processing_complete", {})
             if session_id in BackgroundTaskStore._tasks:
                 del BackgroundTaskStore._tasks[session_id]
+    
+    def _extract_summary_llm_with_invoke(self, history: list[dict]) -> tuple[bool, dict | None]:
+        """Wrapper to call _extract_summary_llm in thread pool."""
+        return self._extract_summary_llm(history)
     
     def _extract_summary_llm(self, history: list[dict]) -> tuple[bool, dict | None]:
         """Extract summary using LLM."""

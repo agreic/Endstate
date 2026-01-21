@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
-from backend.services.extraction_service import extract_text, get_task, cancel_task
+from backend.services.extraction_service import cancel_task
 
 
 class ChatMessage(BaseModel):
@@ -480,9 +480,25 @@ def delete_project(project_id: str):
     
     try:
         file_path.unlink()
+        chat_file = cache_dir / f"{project_id}_chat.json"
+        if chat_file.exists():
+            chat_file.unlink()
         return {"message": "Project deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/chat")
+def get_project_chat(project_id: str):
+    """Get chat history for a project."""
+    from backend.services.summary_cache import summary_cache
+    
+    chat_history = summary_cache.load_chat_history(project_id)
+    
+    if chat_history is None:
+        raise HTTPException(status_code=404, detail="Chat history not found")
+    
+    return {"messages": chat_history}
 
 
 def main():

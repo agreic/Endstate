@@ -7,10 +7,9 @@ Provides:
 - Progress/status tracking
 """
 import asyncio
-import json
 import uuid
 from dataclasses import dataclass
-from typing import Optional, AsyncGenerator
+from typing import Optional
 
 from backend.services.knowledge_graph import KnowledgeGraphService
 

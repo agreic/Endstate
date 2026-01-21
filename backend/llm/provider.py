@@ -54,11 +54,12 @@ def _get_ollama_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     from langchain_ollama import ChatOllama
     
     ollama_config = llm_config.ollama
+    
     return ChatOllama(
         model=kwargs.get("model", ollama_config.model),
         base_url=kwargs.get("base_url", ollama_config.base_url),
         temperature=kwargs.get("temperature", ollama_config.temperature),
-        **{k: v for k, v in kwargs.items() if k not in ["model", "base_url", "temperature"]},
+        **{k: v for k, v in kwargs.items() if k not in ["model", "base_url", "temperature", "timeout"]},
     )
 
 
@@ -84,7 +85,7 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     return ChatGoogleGenerativeAI(
         model=kwargs.get("model", gemini_config.model),
         temperature=kwargs.get("temperature", gemini_config.temperature),
-        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key"]},
+        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout"]},
     )
 
 

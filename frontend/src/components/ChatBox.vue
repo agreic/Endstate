@@ -154,13 +154,13 @@ const handleSend = async () => {
             <Globe :size="18" />
           </button>
 
-          <div class="relative flex-1 h-[44px]">
+          <div class="relative flex-1 h-[44px] overflow-hidden rounded-lg border border-surface-200 focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500">
             <textarea
               v-model="inputMessage"
               @keydown.enter.prevent="handleSend"
               placeholder="Ask anything about your learning goals..."
               rows="1"
-              class="w-full px-4 bg-surface-50 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all text-sm resize-none h-[44px] box-border"
+              class="w-full h-full px-4 bg-surface-50 text-sm resize-none outline-none"
               :class="{ 'opacity-50 cursor-not-allowed': isInputDisabled }"
               :disabled="isProcessing"
               style="padding-top: 12px; padding-bottom: 12px;"

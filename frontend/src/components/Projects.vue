@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Zap, Brain, CheckCircle } from "lucide-vue-next";
-import { listProjects, getProject, deleteProject, type ProjectSummary, type ProjectListItem } from "../services/api";
+import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Zap, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot } from "lucide-vue-next";
+import { listProjects, getProject, deleteProject, getProjectChat, type ProjectSummary, type ProjectListItem, type ChatMessage } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
+const chatMessages = ref<ChatMessage[]>([]);
+const showChatHistory = ref(false);
+const isLoadingChat = ref(false);
 const isLoading = ref(true);
 const isLoadingProject = ref(false);
 const error = ref<string | null>(null);
@@ -26,10 +29,14 @@ const loadProjects = async () => {
 const selectProject = async (projectId: string) => {
   if (selectedProject.value?.session_id === projectId) {
     selectedProject.value = null;
+    chatMessages.value = [];
+    showChatHistory.value = false;
     return;
   }
   
   isLoadingProject.value = true;
+  showChatHistory.value = false;
+  chatMessages.value = [];
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
@@ -41,13 +48,42 @@ const selectProject = async (projectId: string) => {
   }
 };
 
+const toggleChatHistory = async () => {
+  if (showChatHistory.value) {
+    showChatHistory.value = false;
+    return;
+  }
+  
+  if (chatMessages.value.length > 0) {
+    showChatHistory.value = true;
+    return;
+  }
+  
+  if (!selectedProject.value) return;
+  
+  isLoadingChat.value = true;
+  try {
+    const response = await getProjectChat(selectedProject.value.session_id);
+    chatMessages.value = response.messages;
+    showChatHistory.value = true;
+  } catch (e) {
+    console.error("Failed to load chat history:", e);
+    chatMessages.value = [];
+    showChatHistory.value = true;
+  } finally {
+    isLoadingChat.value = false;
+  }
+};
+
 const confirmDelete = async (projectId: string) => {
-  if (!confirm("Delete this project summary? This cannot be undone.")) return;
+  if (!confirm("Delete this project and its chat history? This cannot be undone.")) return;
   
   try {
     await deleteProject(projectId);
     if (selectedProject.value?.session_id === projectId) {
       selectedProject.value = null;
+      chatMessages.value = [];
+      showChatHistory.value = false;
     }
     await loadProjects();
   } catch (e) {
@@ -63,6 +99,15 @@ const formatDate = (dateStr: string): string => {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+};
+
+const formatTime = (dateStr: string): string => {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
   });
 };
 
@@ -279,6 +324,56 @@ onMounted(() => {
                   >
                     {{ concept }}
                   </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedProject" class="mt-6">
+              <button
+                @click="toggleChatHistory"
+                class="w-full flex items-center justify-between p-4 bg-white rounded-xl border border-surface-200 hover:border-primary-300 transition-colors"
+              >
+                <div class="flex items-center gap-2">
+                  <MessageSquare :size="18" class="text-primary-500" />
+                  <span class="font-semibold text-surface-800">Chat History</span>
+                  <span class="text-xs text-surface-400">({{ chatMessages.length || ' archived' }})</span>
+                </div>
+                <ChevronDown v-if="!showChatHistory" :size="18" class="text-surface-400" />
+                <ChevronUp v-else :size="18" class="text-surface-400" />
+              </button>
+
+              <div v-if="showChatHistory" class="mt-4 bg-white rounded-xl border border-surface-200 overflow-hidden">
+                <div v-if="isLoadingChat" class="p-8 text-center">
+                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                </div>
+                <div v-else-if="chatMessages.length === 0" class="p-8 text-center text-surface-400">
+                  <MessageSquare :size="32" class="mx-auto mb-2 opacity-50" />
+                  <p>No chat history available for this project</p>
+                </div>
+                <div v-else class="divide-y divide-surface-100 max-h-96 overflow-y-auto">
+                  <div
+                    v-for="(msg, index) in chatMessages"
+                    :key="index"
+                    class="flex gap-3 p-4"
+                    :class="msg.role === 'user' ? 'bg-surface-50' : ''"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                      :class="msg.role === 'user' ? 'bg-primary-600' : 'bg-gradient-to-br from-primary-400 to-primary-600'"
+                    >
+                      <User v-if="msg.role === 'user'" :size="14" class="text-white" />
+                      <Bot v-else :size="14" class="text-white" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-primary-600' : 'text-primary-500'">
+                          {{ msg.role === 'user' ? 'You' : 'Assistant' }}
+                        </span>
+                        <span class="text-[10px] text-surface-400">{{ formatTime(msg.timestamp) }}</span>
+                      </div>
+                      <p class="text-sm text-surface-700 whitespace-pre-wrap">{{ msg.content }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

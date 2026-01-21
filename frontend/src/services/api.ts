@@ -284,3 +284,20 @@ export async function deleteProject(projectId: string): Promise<{ message: strin
   }
   return response.json();
 }
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/chat`);
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { messages: [] };
+    }
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
