@@ -1,80 +1,88 @@
-![Logo](Logo.png)
-
 # Endstate
 
-Knowledge-graph powered learning platform with interactive AI agents.
+Knowledge-graph powered learning platform with AI-guided project creation and iterative skill assessment.
 
-## Overview
+## The Endstate Loop
 
-Endstate is an intelligent learning architect that transforms vague personal goals into executable, visual skill maps and concrete capstone projects. Instead of generic advice, it dynamically generates personalized micro-lessons and adapts your roadmap in real-time based on your actual performance.
+```
+Goal → AI Project Proposal → Skills → Lessons → Capstone → Evaluation → Complete
+```
 
-For more info, see the [[IDEA.md]] file.
+## Key Features
+
+### 1. Conversational Project Creation
+- Chat with AI to define learning goals
+- AI generates structured project proposals
+- Accept proposal to create learning project
+
+### 2. Skill-Graph Learning Path
+- Visual knowledge graph of skills and concepts
+- Dependencies between skills shown
+- Progress tracking through lessons
+
+### 3. Iterative Capstone Evaluation
+- Text-based submissions (flexible, LLM-evaluatable)
+- Rubric-based LLM evaluation
+- Skill-to-evidence mapping
+- Constructive feedback for improvement
+- Unlimited resubmissions until complete
+
+### 4. Persistent Chat Archive
+- All conversations saved alongside projects
+- Projects tab shows chat history per project
+- Review learning journey anytime
 
 ## Architecture
 
 ```
 endstate/
 ├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
-│   ├── src/           # Source code
-│   │   ├── components/# Vue components (ChatBox.vue, etc.)
-│   │   ├── composables/# Vue composables (useChat.ts)
-│   │   └── services/  # API client (api.ts)
-│   ├── public/        # Static assets
-│   └── dist/          # Build output
-├── backend/            # Python FastAPI backend
-│   ├── services/      # Service layer (chat_service.py, knowledge_graph.py)
-│   ├── db/            # Database layer (neo4j_client.py)
-│   └── main.py        # FastAPI application
-└── tests/             # Test files
+│   ├── src/
+│   │   ├── components/ # Vue components
+│   │   │   ├── ChatBox.vue        # Chat UI
+│   │   │   ├── KnowledgeGraph.vue # Graph visualization
+│   │   │   ├── Projects.vue       # Project management
+│   │   │   ├── CapstoneSubmission.vue  # Submission UI
+│   │   │   └── EvaluationResult.vue    # Feedback display
+│   │   ├── composables/  # Vue composables
+│   │   │   └── useChat.ts # Chat state + SSE
+│   │   └── services/     # API client
+│   │       └── api.ts
+│   └── dist/
+├── backend/            # Python FastAPI
+│   ├── services/
+│   │   ├── chat_service.py      # Chat + SSE + background tasks
+│   │   ├── evaluation_service.py # Rubric-based evaluator
+│   │   └── summary_cache.py      # Project + chat storage
+│   ├── db/
+│   │   └── neo4j_client.py       # Neo4j operations
+│   ├── llm/
+│   │   └── provider.py           # Ollama/Gemini
+│   └── main.py                   # FastAPI app
+└── tests/
 ```
 
-## Key Features
+## Chat System
 
-### Chat System
+- Real-time updates via Server-Sent Events (SSE)
+- Idempotent message sending prevents duplicates
+- Processing state prevents concurrent requests
+- Chat history persisted as JSON alongside project
 
-The chat system provides persistent conversations with AI that can extract and create learning projects.
+## Knowledge Graph
 
-**Backend (`backend/services/chat_service.py`):**
-- `ChatService` - Main service for chat operations
-- `BackgroundTaskStore` - Manages background tasks (like async summary extraction) with cancellation support
-- Idempotent message sending via `X-Request-ID` header prevents duplicate messages
-- Automatic project summary extraction after user accepts a project proposal
+- Skills, concepts, topics as nodes
+- Dependencies shown as relationships
+- Projects connected to relevant skills
+- Chat sessions stored separately from graph data
 
-**Frontend (`frontend/src/composables/useChat.ts`):**
-- `useChat()` - Composable for chat state management
-- Session persistence via `localStorage` (key: `endstate_chat_session_id`)
-- Messages reload when navigating back to chat tab
-- Processing state shows when background extraction is running
+## Capstone Evaluation
 
-**Flow:**
-1. User sends message → Frontend calls `POST /api/chat/{id}/messages`
-2. Message stored in Neo4j with `request_id` for idempotency
-3. Response returned (with `is_processing: true` if project accepted)
-4. Frontend shows processing indicator during async extraction
-5. Reset button cancels ongoing processing and clears session
-
-**Endpoints:**
-- `POST /api/chat/{id}/messages` - Send message (idempotent)
-- `GET /api/chat/{id}/messages` - Get all messages
-- `POST /api/chat/{id}/reset` - Reset session (cancels processing)
-- `POST /api/projects/{id}/start` - Reinitialize project asynchronously
-
-### Knowledge Graph
-
-The knowledge graph stores learned concepts, skills, and their relationships.
-
-**Data Isolation:**
-- Chat sessions and messages are stored separately from knowledge graph data
-- Graph statistics exclude chat/session nodes and non-KG entities
-- `/api/graph` endpoints return Skill, Concept, Topic, and Project nodes only
-- Projects are first-class KG nodes (yellow), with a default non-visualized "All" project
-
-**Methods:**
-- `get_knowledge_graph_nodes()` - Get nodes excluding chat-related labels
-- `get_knowledge_graph_relationships()` - Get relationships excluding chat relationships
-- `get_knowledge_graph_stats()` - Get statistics for knowledge graph only
-
-See [[backend/README.md]] for detailed knowledge graph documentation.
+- User clicks "I'm Ready" when prepared
+- Submits text solution explaining skill application
+- LLM evaluates against rubric (skill application, understanding, completeness)
+- Feedback delivered with suggestions for improvement
+- Resubmit and iterate until complete (score ≥ 0.7 + all skills evidenced)
 
 ## Installation
 
@@ -90,112 +98,55 @@ cd frontend && npm install
 
 ### Development Mode (Recommended)
 
-Run backend and frontend separately for hot reloading:
-
 ```bash
 # Terminal 1: Start backend with hot reload
-cd /path/to/endstate
 uv run uvicorn backend.main:app --reload
 
 # Terminal 2: Start frontend dev server
-cd /path/to/endstate/frontend
-npm run dev
+cd frontend && npm run dev
 ```
 
-Access the application at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+Access at http://localhost:3000
 
 ### Docker (Production)
 
-Build and run the full stack with Docker Compose:
-
 ```bash
-# Build and start all services
 docker compose up -d --build --force-recreate
-
-# View logs
-docker compose logs -f
-
-# Stop all services
-docker compose down
 ```
 
-Access the application at http://localhost:3000
+## API Endpoints
 
-## Development
+### Chat
 
-### Frontend (Vue 3 + TypeScript + Tailwind)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat/{id}/stream` | GET | SSE event stream |
+| `/api/chat/{id}/messages` | POST | Send message |
+| `/api/chat/{id}/messages` | GET | Get message history |
+| `/api/chat/{id}/reset` | POST | Reset session |
 
-```bash
-cd frontend
+### Knowledge Graph
 
-# Development server with hot reload
-npm run dev
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/graph` | GET | Graph nodes + relationships |
+| `/api/graph/stats` | GET | Graph statistics |
 
-# Build for production
-npm run build
+### Projects
 
-# Run tests
-npm test
-```
-
-### Backend
-
-```bash
-# Run tests
-uv run pytest
-
-# Run Python REPL
-uv run python
-
-# Lint code
-uv run ruff check .
-```
-
-### Scripts
-
-```bash
-# Clear the Neo4j graph
-uv run python scripts/clear_graph.py
-
-# Seed sample skill data
-uv run python scripts/seed_graph.py
-```
-
-## Testing
-
-```bash
-# Run all tests
-uv run pytest
-
-# Frontend tests
-cd frontend && npm test
-```
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects` | GET | List projects |
+| `/api/projects/{id}` | GET | Project details |
+| `/api/projects/{id}/submit` | POST | Submit capstone |
+| `/api/projects/{id}/submissions` | GET | Submission history |
 
 ## Dependencies
 
-### Core Dependencies
+### Core
 - Python 3.11+
-
-### Development Dependencies
-- `pytest>=7.4.0` - Testing framework
-- `pytest-asyncio>=0.21.0` - Async testing support
-
-### Frontend Dependencies
 - Vue 3 + TypeScript
-- Tailwind CSS
-- Vite build tool
+- Neo4j database
+- LLM (Ollama or Gemini)
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## License
-
-[Add your license information here]
+### See `pyproject.toml` and `frontend/package.json` for full dependency lists.
