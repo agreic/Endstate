@@ -777,6 +777,42 @@ class Neo4jClient:
             },
         )
 
+    def update_project_capstone_state(
+        self,
+        project_id: str,
+        status: str,
+        score: float,
+        completed_at: str | None,
+    ) -> None:
+        """Update capstone status fields on project nodes."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            SET ps.capstone_status = $status,
+                ps.capstone_score = $score,
+                ps.capstone_completed_at = CASE
+                    WHEN $completed_at IS NULL THEN ps.capstone_completed_at
+                    ELSE datetime($completed_at)
+                END,
+                ps.updated_at = datetime()
+            WITH ps
+            MATCH (p:Project {id: $project_id})
+            SET p.capstone_status = $status,
+                p.capstone_score = $score,
+                p.capstone_completed_at = CASE
+                    WHEN $completed_at IS NULL THEN p.capstone_completed_at
+                    ELSE datetime($completed_at)
+                END,
+                p.updated_at = datetime()
+            """,
+            {
+                "project_id": project_id,
+                "status": status,
+                "score": score,
+                "completed_at": completed_at,
+            },
+        )
+
     def ensure_default_project(self) -> None:
         """Ensure the default 'All' project exists."""
         summary_json = json.dumps({
@@ -1271,6 +1307,187 @@ class Neo4jClient:
             ORDER BY a.created_at DESC
             """,
             {"project_id": project_id},
+        )
+        return result
+
+    def create_project_submission(
+        self,
+        project_id: str,
+        submission_id: str,
+        content: str,
+        attempt_number: int,
+    ) -> None:
+        """Create a submission for a project."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            MATCH (p:Project {id: $project_id})
+            CREATE (s:ProjectSubmission {
+                id: $submission_id,
+                project_id: $project_id,
+                content: $content,
+                attempt_number: $attempt_number,
+                status: 'pending',
+                submitted_at: datetime()
+            })
+            CREATE (ps)-[:HAS_SUBMISSION]->(s)
+            CREATE (p)-[:HAS_SUBMISSION]->(s)
+            """,
+            {
+                "project_id": project_id,
+                "submission_id": submission_id,
+                "content": content,
+                "attempt_number": attempt_number,
+            },
+        )
+
+    def list_project_submissions(self, project_id: str) -> list[dict]:
+        """List submissions for a project."""
+        result = self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_SUBMISSION]->(s:ProjectSubmission)
+            RETURN s.id as id,
+                   s.project_id as project_id,
+                   s.content as content,
+                   s.attempt_number as attempt_number,
+                   s.status as status,
+                   s.score as score,
+                   s.passed as passed,
+                   s.feedback as feedback,
+                   s.submitted_at as submitted_at,
+                   s.evaluated_at as evaluated_at
+            ORDER BY s.submitted_at DESC
+            """,
+            {"project_id": project_id},
+        )
+        return result
+
+    def get_project_submission_count(self, project_id: str) -> int:
+        """Get submission count for a project."""
+        result = self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_SUBMISSION]->(s:ProjectSubmission)
+            RETURN count(s) as submission_count
+            """,
+            {"project_id": project_id},
+        )
+        return result[0].get("submission_count", 0) if result else 0
+
+    def get_submission(self, submission_id: str) -> list[dict]:
+        """Fetch a submission by id."""
+        result = self.query(
+            """
+            MATCH (s:ProjectSubmission {id: $submission_id})
+            RETURN s.id as id,
+                   s.project_id as project_id,
+                   s.content as content,
+                   s.attempt_number as attempt_number,
+                   s.status as status,
+                   s.score as score,
+                   s.passed as passed,
+                   s.feedback as feedback,
+                   s.submitted_at as submitted_at,
+                   s.evaluated_at as evaluated_at
+            """,
+            {"submission_id": submission_id},
+        )
+        return result
+
+    def save_submission_evaluation(
+        self,
+        submission_id: str,
+        evaluation_id: str,
+        score: float,
+        rubric: dict,
+        skill_evidence: dict,
+        overall_feedback: str,
+        suggestions: list[str],
+        passed: bool,
+        model_used: str,
+        prompt_version: str,
+    ) -> None:
+        """Persist evaluation results and update submission."""
+        self.query(
+            """
+            MATCH (s:ProjectSubmission {id: $submission_id})
+            SET s.status = 'evaluated',
+                s.score = $score,
+                s.passed = $passed,
+                s.feedback = $overall_feedback,
+                s.evaluated_at = datetime()
+            WITH s
+            CREATE (e:ProjectEvaluation {
+                id: $evaluation_id,
+                submission_id: $submission_id,
+                score: $score,
+                rubric: $rubric,
+                skill_evidence: $skill_evidence,
+                overall_feedback: $overall_feedback,
+                suggestions: $suggestions,
+                passed: $passed,
+                model_used: $model_used,
+                prompt_version: $prompt_version,
+                evaluated_at: datetime()
+            })
+            CREATE (s)-[:HAS_EVALUATION]->(e)
+            WITH s, e
+            MATCH (p:Project {id: s.project_id})
+            MATCH (ps:ProjectSummary {id: s.project_id})
+            CREATE (p)-[:HAS_EVALUATION]->(e)
+            CREATE (ps)-[:HAS_EVALUATION]->(e)
+            """,
+            {
+                "submission_id": submission_id,
+                "evaluation_id": evaluation_id,
+                "score": score,
+                "rubric": rubric,
+                "skill_evidence": skill_evidence,
+                "overall_feedback": overall_feedback,
+                "suggestions": suggestions,
+                "passed": passed,
+                "model_used": model_used,
+                "prompt_version": prompt_version,
+            },
+        )
+
+    def update_submission_status(
+        self,
+        submission_id: str,
+        status: str,
+        feedback: str | None = None,
+    ) -> None:
+        """Update submission status and optional feedback."""
+        self.query(
+            """
+            MATCH (s:ProjectSubmission {id: $submission_id})
+            SET s.status = $status,
+                s.feedback = CASE
+                    WHEN $feedback IS NULL THEN s.feedback
+                    ELSE $feedback
+                END,
+                s.evaluated_at = datetime()
+            """,
+            {"submission_id": submission_id, "status": status, "feedback": feedback},
+        )
+
+    def list_submission_evaluations(self, submission_id: str) -> list[dict]:
+        """List evaluations for a submission."""
+        result = self.query(
+            """
+            MATCH (s:ProjectSubmission {id: $submission_id})-[:HAS_EVALUATION]->(e:ProjectEvaluation)
+            RETURN e.id as id,
+                   e.score as score,
+                   e.rubric as rubric,
+                   e.skill_evidence as skill_evidence,
+                   e.overall_feedback as overall_feedback,
+                   e.suggestions as suggestions,
+                   e.passed as passed,
+                   e.model_used as model_used,
+                   e.prompt_version as prompt_version,
+                   e.evaluated_at as evaluated_at
+            ORDER BY e.evaluated_at DESC
+            """,
+            {"submission_id": submission_id},
         )
         return result
 

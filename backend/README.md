@@ -159,8 +159,10 @@ NEO4J_PASSWORD=password123
 
 Project summaries have matching `Project` KG nodes that connect to:
 - Project-owned KG nodes via `HAS_NODE`
+- Typed relationships: `HAS_SKILL`, `HAS_TOPIC`, `HAS_CONCEPT`, `HAS_MILESTONE`
 - Lessons and assessments via `HAS_LESSON` / `HAS_ASSESSMENT`
 - A `UserProfile` node via `HAS_PROFILE`
+Capstone submissions and evaluations are stored as `ProjectSubmission` and `ProjectEvaluation` nodes.
 
 The default "All" project exists for unassigned lessons and is not rendered in the KG.
 
@@ -233,6 +235,9 @@ Main service class combining LLM and database operations.
 | `/api/projects/{id}` | DELETE | Delete project (default project clears content) |
 | `/api/projects/{id}/chat` | GET | Project chat history |
 | `/api/projects/{id}/start` | POST | Reinitialize project (async job) |
+| `/api/projects/{id}/submit` | POST | Submit capstone (async evaluation) |
+| `/api/projects/{id}/submissions` | GET | Submission history |
+| `/api/submissions/{id}` | GET | Submission + evaluation details |
 
 ### Lessons & Assessments
 

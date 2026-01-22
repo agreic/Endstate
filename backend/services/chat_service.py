@@ -23,6 +23,8 @@ from backend.config import config
 from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
 from backend.services.agent_prompts import get_chat_system_prompt
+from backend.services.evaluation_service import evaluate_project_alignment, evaluate_kg_quality
+from backend.services.opik_client import log_metric
 
 
 LLM_TIMEOUT = config.llm.timeout_seconds  # seconds for LLM calls
@@ -623,6 +625,38 @@ Conversation:
 
         self.db.upsert_project_summary(project_id, project_name, json.dumps(summary))
         self.db.upsert_project_nodes_from_summary(project_id, summary)
+        project_info = summary.get("agreed_project", {}) if isinstance(summary.get("agreed_project"), dict) else {}
+        user_goal = ""
+        for msg in history:
+            if msg.get("role") == "user" and msg.get("content"):
+                user_goal = str(msg.get("content"))
+                break
+        async def _log_alignment():
+            result = await evaluate_project_alignment(user_goal, project_info)
+            if "error" in result:
+                return
+            prompt_version = str(result.get("prompt_version", "unknown"))
+            log_metric("project_alignment_score", float(result.get("score", 0.0)), session_id=project_id, tags=["alignment", prompt_version])
+
+        async def _log_kg_quality():
+            result = await evaluate_kg_quality(project_info, summary)
+            if "error" in result:
+                return
+            prompt_version = str(result.get("prompt_version", "unknown"))
+            log_metric("kg_coverage_score", float(result.get("coverage_score", 0.0)), session_id=project_id, tags=["kg", prompt_version])
+            log_metric("kg_redundancy_score", float(result.get("redundancy_score", 0.0)), session_id=project_id, tags=["kg", prompt_version])
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop:
+            loop.create_task(_log_alignment())
+            loop.create_task(_log_kg_quality())
+        else:
+            _log_alignment().close()
+            _log_kg_quality().close()
 
         history_payload = []
         for idx, message in enumerate(history):

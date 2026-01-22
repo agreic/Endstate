@@ -142,6 +142,14 @@ export interface ProjectSummary {
   updated_at: string;
   project_status?: string;
   started_at?: string;
+  capstone?: {
+    status?: string;
+    last_score?: number;
+    passed?: boolean;
+    completed_at?: string;
+    attempts?: number;
+    last_submission_id?: string;
+  };
   user_profile: {
     interests: string[];
     skill_level: string;
@@ -180,6 +188,31 @@ export interface ProjectAssessment {
   updated_at?: string;
   archived?: boolean;
   archived_at?: string;
+}
+
+export interface ProjectSubmission {
+  id: string;
+  project_id: string;
+  content: string;
+  attempt_number: number;
+  status: string;
+  score?: number;
+  passed?: boolean;
+  feedback?: string;
+  submitted_at?: string;
+  evaluated_at?: string;
+}
+
+export interface SubmissionEvaluation {
+  id: string;
+  score: number;
+  rubric?: Record<string, any>;
+  skill_evidence?: Record<string, string>;
+  overall_feedback?: string;
+  suggestions?: string[];
+  passed?: boolean;
+  model_used?: string;
+  evaluated_at?: string;
 }
 
 export interface ProjectListItem {
@@ -485,4 +518,20 @@ export async function getProjectChat(projectId: string): Promise<{ messages: Cha
 
 export async function listProjectNodes(projectId: string): Promise<{ nodes: ApiNode[] }> {
   return requestJson(`/api/projects/${encodeURIComponent(projectId)}/nodes`);
+}
+
+export async function submitCapstone(projectId: string, content: string): Promise<{ status: string; job_id: string; submission_id: string; attempt: number }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function listProjectSubmissions(projectId: string): Promise<{ submissions: ProjectSubmission[] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/submissions`);
+}
+
+export async function getSubmission(submissionId: string): Promise<{ submission: ProjectSubmission; evaluations: SubmissionEvaluation[] }> {
+  return requestJson(`/api/submissions/${encodeURIComponent(submissionId)}`);
 }
