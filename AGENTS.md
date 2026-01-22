@@ -2,18 +2,6 @@
 
 This file provides guidelines for agentic coding agents working on the Endstate project.
 
-## Project Structure
-
-```
-endstate/
-├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
-│   ├── src/           # Source code
-│   ├── public/        # Static assets
-│   └── dist/          # Build output
-├── src/               # Python backend
-└── tests/             # Test files
-```
-
 ## Build, Lint, and Test Commands
 
 ### Frontend (Vue 3 + TypeScript + Tailwind)

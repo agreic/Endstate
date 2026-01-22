@@ -208,6 +208,54 @@ Main service class combining LLM and database operations.
 - `query(cypher, params)` - Execute Cypher query
 - `get_stats()` - Get graph statistics
 - `get_nodes(label, limit)` - Get nodes
+
+## API Endpoints (FastAPI)
+
+### Graph
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/graph` | GET | Graph nodes + relationships (Skill, Concept, Topic, Project) |
+| `/api/graph/stats` | GET | Graph stats (filtered to KG entities) |
+| `/api/graph/node/{id}/connections` | GET | Connected nodes for a node |
+| `/api/graph/nodes/{id}` | DELETE | Delete a node |
+| `/api/graph/relationships` | DELETE | Delete a relationship |
+| `/api/merge` | POST | Merge duplicates (Skill/Concept/Topic only) |
+
+### Projects
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects` | GET | List project summaries |
+| `/api/projects/{id}` | GET | Project details |
+| `/api/projects/{id}/name` | PATCH | Rename project |
+| `/api/projects/{id}/profile` | PATCH | Update user profile |
+| `/api/projects/{id}` | DELETE | Delete project (default project clears content) |
+| `/api/projects/{id}/chat` | GET | Project chat history |
+| `/api/projects/{id}/start` | POST | Reinitialize project (async job) |
+
+### Lessons & Assessments
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects/{id}/lessons` | GET | List lessons |
+| `/api/projects/{id}/lessons/generate` | POST | Generate lesson for node in project |
+| `/api/projects/{id}/lessons/{lesson_id}/archive` | POST | Archive lesson |
+| `/api/projects/{id}/lessons/{lesson_id}` | DELETE | Delete lesson |
+| `/api/graph/nodes/{node_id}/lesson` | POST | Generate lesson for node (single project) |
+| `/api/graph/nodes/{node_id}/lessons/generate` | POST | Generate lessons for all connected projects |
+| `/api/projects/{id}/assessments` | GET | List assessments |
+| `/api/projects/{id}/assessments` | POST | Generate assessment (async job) |
+| `/api/projects/{id}/assessments/{assessment_id}/submit` | POST | Submit assessment |
+| `/api/projects/{id}/assessments/{assessment_id}/archive` | POST | Archive assessment |
+| `/api/projects/{id}/assessments/{assessment_id}` | DELETE | Delete assessment |
+
+### Jobs
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/jobs/{job_id}` | GET | Get async job status |
+| `/api/jobs/{job_id}` | DELETE | Cancel async job |
 - `get_relationships(limit)` - Get relationships
 - `visualize()` - Get visualization data
 
