@@ -19,6 +19,7 @@ const isStarting = ref(false);
 const startError = ref<string | null>(null);
 const startStats = ref<{ nodes: number; relationships: number } | null>(null);
 const reinitJobId = ref<string | null>(null);
+const reinitProjectId = ref<string | null>(null);
 let reinitPollTimer: number | null = null;
 const profileDraft = ref({
   interests: [] as string[],
@@ -89,6 +90,11 @@ const selectProject = async (projectId: string) => {
     assessments.value = [];
     projectJobs.value = [];
     clearJobTimers();
+    if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
+    reinitPollTimer = null;
+    reinitJobId.value = null;
+    reinitProjectId.value = null;
+    isStarting.value = false;
     localStorage.removeItem("endstate_active_project_id");
     return;
   }
@@ -101,6 +107,11 @@ const selectProject = async (projectId: string) => {
   assessments.value = [];
   projectJobs.value = [];
   clearJobTimers();
+  if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
+  reinitPollTimer = null;
+  reinitJobId.value = null;
+  reinitProjectId.value = null;
+  isStarting.value = false;
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
@@ -187,9 +198,10 @@ const loadProjectJobs = async (projectId: string) => {
     }));
     const reinitJob = projectJobs.value.find((job) => job.kind === "project-reinit");
     reinitJobId.value = reinitJob?.job_id || null;
+    reinitProjectId.value = reinitJob ? projectId : null;
     if (reinitJobId.value) {
       isStarting.value = true;
-      pollReinitJob();
+      pollReinitJob(reinitJobId.value, projectId);
     }
     projectJobs.value.forEach((job) => scheduleJobPoll(job.job_id, projectId));
   } catch (e) {
@@ -467,13 +479,18 @@ const confirmDelete = async (projectId: string) => {
 
 const handleReinitializeProject = async () => {
   if (!selectedProject.value) return;
+  if (reinitJobId.value && reinitProjectId.value === selectedProject.value.session_id) {
+    pollReinitJob(reinitJobId.value, selectedProject.value.session_id);
+    return;
+  }
   isStarting.value = true;
   startError.value = null;
   try {
     const response = await startProject(selectedProject.value.session_id);
     if (response.status === "queued" && response.job_id) {
       reinitJobId.value = response.job_id;
-      pollReinitJob();
+      reinitProjectId.value = selectedProject.value.session_id;
+      pollReinitJob(response.job_id, selectedProject.value.session_id);
       return;
     }
     applyReinitResult(response);
@@ -513,36 +530,40 @@ const applyReinitResult = async (response: any) => {
   await loadProjectExtras(selectedProject.value.session_id);
 };
 
-const pollReinitJob = async () => {
-  if (!reinitJobId.value || !selectedProject.value) return;
+const pollReinitJob = async (jobId: string, projectId: string) => {
+  if (!selectedProject.value || selectedProject.value.session_id !== projectId) return;
   if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
   try {
-    const status = await getJobStatus(reinitJobId.value);
+    const status = await getJobStatus(jobId);
     if (status.status === "completed" && status.result) {
       await applyReinitResult(status.result);
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
     if (status.status === "failed") {
       startError.value = status.error || "Failed to reinitialize project";
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
     if (status.status === "canceled") {
       startError.value = "Reinitialize canceled";
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
   } catch (e) {
     startError.value = e instanceof Error ? e.message : "Failed to reinitialize project";
     reinitJobId.value = null;
+    reinitProjectId.value = null;
     isStarting.value = false;
     return;
   }
-  reinitPollTimer = window.setTimeout(pollReinitJob, 2000);
+  reinitPollTimer = window.setTimeout(() => pollReinitJob(jobId, projectId), 2000);
 };
 
 const formatDate = (dateStr: string): string => {
