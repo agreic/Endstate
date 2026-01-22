@@ -3,6 +3,7 @@ Neo4j database client for Endstate.
 Provides connection management and graph operations.
 """
 import json
+import re
 from typing import Optional, Any
 
 DEFAULT_PROJECT_ID = "project-all"
@@ -197,9 +198,7 @@ class Neo4jClient:
     
     def merge_nodes_simple(self, label: str, match_property: str = "id") -> int:
         """
-        Simple node merge without APOC (for databases without APOC plugin).
-        Merges nodes by keeping the first and deleting duplicates.
-        Note: This version doesn't transfer relationships from duplicates.
+        Merge nodes without APOC while preserving relationships.
         
         Args:
             label: Node label to merge
@@ -208,16 +207,79 @@ class Neo4jClient:
         Returns:
             Number of duplicate nodes deleted
         """
-        result = self.query(f"""
+        duplicates = self.query(f"""
             MATCH (n:{label})
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
             WHERE SIZE(nodes) > 1
-            WITH nodes, HEAD(nodes) AS keep
-            UNWIND TAIL(nodes) AS dup
-            DETACH DELETE dup
-            RETURN count(dup) as deleted
+            RETURN elementId(HEAD(nodes)) as keep_id,
+                   [node IN TAIL(nodes) | elementId(node)] as dup_ids
         """)
-        return result[0]["deleted"] if result else 0
+
+        if not duplicates:
+            return 0
+
+        merged_count = 0
+        for row in duplicates:
+            keep_id = row.get("keep_id")
+            dup_ids = row.get("dup_ids") or []
+            for dup_id in dup_ids:
+                outgoing = self.query(
+                    """
+                    MATCH (dup)
+                    WHERE elementId(dup) = $dup_id
+                    MATCH (dup)-[r]->(m)
+                    RETURN type(r) as rel_type, properties(r) as props, elementId(m) as target_id
+                    """,
+                    {"dup_id": dup_id},
+                )
+                for rel in outgoing:
+                    rel_type = rel.get("rel_type", "")
+                    if not re.match(r"^[A-Z0-9_]+$", rel_type):
+                        continue
+                    self.query(
+                        f"""
+                        MATCH (a) WHERE elementId(a) = $from_id
+                        MATCH (b) WHERE elementId(b) = $to_id
+                        CREATE (a)-[r:{rel_type}]->(b)
+                        SET r += $props
+                        """,
+                        {"from_id": keep_id, "to_id": rel.get("target_id"), "props": rel.get("props") or {}},
+                    )
+
+                incoming = self.query(
+                    """
+                    MATCH (dup)
+                    WHERE elementId(dup) = $dup_id
+                    MATCH (m)-[r]->(dup)
+                    RETURN type(r) as rel_type, properties(r) as props, elementId(m) as source_id
+                    """,
+                    {"dup_id": dup_id},
+                )
+                for rel in incoming:
+                    rel_type = rel.get("rel_type", "")
+                    if not re.match(r"^[A-Z0-9_]+$", rel_type):
+                        continue
+                    self.query(
+                        f"""
+                        MATCH (a) WHERE elementId(a) = $from_id
+                        MATCH (b) WHERE elementId(b) = $to_id
+                        CREATE (a)-[r:{rel_type}]->(b)
+                        SET r += $props
+                        """,
+                        {"from_id": rel.get("source_id"), "to_id": keep_id, "props": rel.get("props") or {}},
+                    )
+
+                self.query(
+                    """
+                    MATCH (dup)
+                    WHERE elementId(dup) = $dup_id
+                    DETACH DELETE dup
+                    """,
+                    {"dup_id": dup_id},
+                )
+                merged_count += 1
+
+        return merged_count
     
     def get_node_count(self, label: Optional[str] = None) -> int:
         """
@@ -258,7 +320,7 @@ class Neo4jClient:
         Returns:
             Dictionary with node counts by label and relationship counts by type
         """
-        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         # Get node labels and counts
         node_stats = self.query("""
             CALL db.labels() YIELD label
@@ -325,16 +387,36 @@ class Neo4jClient:
         Returns:
             List of node dictionaries
         """
-        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
-        query = """
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
+        project_result = self.query(
+            """
+            MATCH (n:Project)
+            WHERE NOT COALESCE(n.is_default, false)
+            RETURN n
+            """,
+        )
+        remaining_limit = max(limit - len(project_result), 0)
+        other_result = self.query(
+            """
             MATCH (n)
             WHERE any(label IN labels(n) WHERE label IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN n
             LIMIT $limit
-        """
-        result = self.query(query, {"limit": limit, "labels": allowed_labels})
-        return [_serialize_node(row["n"]) for row in result]
+            """,
+            {"limit": remaining_limit, "labels": allowed_labels},
+        )
+        combined = project_result + other_result
+        seen = set()
+        nodes = []
+        for row in combined:
+            node = _serialize_node(row["n"])
+            node_id = node.get("id")
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            nodes.append(node)
+        return nodes
 
     def get_knowledge_graph_relationships(self, limit: int = 100) -> list[dict]:
         """
@@ -346,7 +428,7 @@ class Neo4jClient:
         Returns:
             List of relationship dictionaries
         """
-        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         query = """
             MATCH (n)-[r]->(m)
             WHERE any(label IN labels(n) WHERE label IN $labels)
@@ -366,7 +448,7 @@ class Neo4jClient:
         Returns:
             Dictionary with node counts by label and relationship counts by type
         """
-        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         node_stats = self.query(
             """
             UNWIND $labels as label
@@ -401,7 +483,7 @@ class Neo4jClient:
 
     def get_knowledge_graph_node_count(self) -> int:
         """Get count of knowledge graph nodes (excluding chat nodes)."""
-        allowed_labels = ["Skill", "Concept", "Topic", "Project"]
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         result = self.query(
             """
             MATCH (n)

@@ -318,7 +318,15 @@ class TestNeo4jClientMergeNodesSimple:
     @patch.object(Neo4jClient, "query")
     def test_merge_nodes_simple_success(self, mock_query):
         """Test simple node merge."""
-        mock_query.return_value = [{"deleted": 2}]
+        mock_query.side_effect = [
+            [{"keep_id": "keep-1", "dup_ids": ["dup-1", "dup-2"]}],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        ]
 
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)
@@ -326,15 +334,12 @@ class TestNeo4jClientMergeNodesSimple:
         deleted = client.merge_nodes_simple("Skill")
 
         assert deleted == 2
-        query = mock_query.call_args[0][0]
-        assert "DETACH DELETE dup" in query
-        assert "HEAD(nodes) AS keep" in query
-        assert "UNWIND TAIL(nodes) AS dup" in query
+        assert "elementId" in mock_query.call_args_list[0][0][0]
 
     @patch.object(Neo4jClient, "query")
     def test_merge_nodes_simple_no_duplicates(self, mock_query):
         """Test simple merge with no duplicates."""
-        mock_query.return_value = [{"deleted": 0}]
+        mock_query.return_value = []
 
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)

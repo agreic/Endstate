@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -59,6 +59,25 @@ const lessonQueuedText = computed(() => {
   return "Lesson queued. Check the Projects tab.";
 });
 
+const refreshLessonJobs = async (nodeId: string) => {
+  const projectId = localStorage.getItem("endstate_active_project_id") || "";
+  if (!projectId) {
+    lessonQueued.value = false;
+    lessonQueuedCount.value = 0;
+    return;
+  }
+  try {
+    const response = await listProjectJobs(projectId, { kind: "lesson", nodeId });
+    lessonQueuedCount.value = response.jobs.length;
+    lessonQueued.value = response.jobs.length > 0;
+    lessonJobIds.value = response.jobs.map((job) => job.job_id);
+    lessonJobNodeId.value = response.jobs.length > 0 ? nodeId : null;
+  } catch (e) {
+    lessonQueued.value = false;
+    lessonQueuedCount.value = 0;
+  }
+};
+
 const graphData = ref<GraphData>({ nodes: [], links: [] });
 
 const groupColors: Record<string, string> = {
@@ -76,12 +95,12 @@ const groupColors: Record<string, string> = {
 
 const PRIMARY_LABELS = [
   "Project",
+  "Milestone",
   "Skill",
   "Concept",
   "Topic",
   "Resource",
   "Assessment",
-  "Milestone",
   "Tool",
   "Person",
   "Domain",
@@ -386,6 +405,9 @@ watch(selectedNode, () => {
   lessonJobIds.value = [];
   lessonJobNodeId.value = null;
   lessonQueuedCount.value = 0;
+  if (selectedNode.value) {
+    refreshLessonJobs(selectedNode.value.id);
+  }
 });
 
 watch(activeLabelFilter, () => {

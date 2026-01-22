@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play, Zap } from "lucide-vue-next";
 import { marked } from "marked";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -29,6 +29,7 @@ const profileDraft = ref({
 });
 const profileSaving = ref(false);
 const profileError = ref<string | null>(null);
+const showProfileEditor = ref(false);
 const lessons = ref<ProjectLesson[]>([]);
 const selectedLesson = ref<ProjectLesson | null>(null);
 const showAssessmentPanel = ref(false);
@@ -37,8 +38,8 @@ const assessmentAnswers = ref<Record<string, string>>({});
 const assessmentError = ref<string | null>(null);
 const lessonsLoading = ref(false);
 const assessmentsLoading = ref(false);
-const assessmentJobs = ref<Array<{ job_id: string; lesson_id: string }>>([]);
-const assessmentJobTimers = new Map<string, number>();
+const projectJobs = ref<Array<{ job_id: string; kind: string; status: string; meta?: Record<string, any> }>>([]);
+const jobPollTimers = new Map<string, number>();
 
 const DEFAULT_PROJECT_ID = "project-all";
 
@@ -85,8 +86,8 @@ const selectProject = async (projectId: string) => {
     startStats.value = null;
     lessons.value = [];
     assessments.value = [];
-    assessmentJobs.value = [];
-    clearAssessmentJobTimers();
+    projectJobs.value = [];
+    clearJobTimers();
     localStorage.removeItem("endstate_active_project_id");
     return;
   }
@@ -97,8 +98,8 @@ const selectProject = async (projectId: string) => {
   startStats.value = null;
   lessons.value = [];
   assessments.value = [];
-  assessmentJobs.value = [];
-  clearAssessmentJobTimers();
+  projectJobs.value = [];
+  clearJobTimers();
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
@@ -113,7 +114,7 @@ const selectProject = async (projectId: string) => {
       learning_style: project.user_profile?.learning_style || "hybrid",
     };
     await loadProjectExtras(projectId);
-    loadAssessmentJobsForProject(projectId);
+    await loadProjectJobs(projectId);
   } catch (e) {
     error.value = "Failed to load project details";
     console.error(e);
@@ -144,53 +145,53 @@ const loadProjectExtras = async (projectId: string) => {
   }
 };
 
-const assessmentJobsKey = (projectId: string) => `endstate_assessment_jobs_${projectId}`;
-
-const persistAssessmentJobs = (projectId: string) => {
-  localStorage.setItem(assessmentJobsKey(projectId), JSON.stringify(assessmentJobs.value));
+const clearJobTimers = () => {
+  jobPollTimers.forEach((timerId) => window.clearTimeout(timerId));
+  jobPollTimers.clear();
 };
 
-const clearAssessmentJobTimers = () => {
-  assessmentJobTimers.forEach((timerId) => window.clearTimeout(timerId));
-  assessmentJobTimers.clear();
-};
-
-const scheduleAssessmentPoll = (jobId: string, projectId: string) => {
-  if (assessmentJobTimers.has(jobId)) return;
+const scheduleJobPoll = (jobId: string, projectId: string) => {
+  if (jobPollTimers.has(jobId)) return;
   const timerId = window.setTimeout(async () => {
-    assessmentJobTimers.delete(jobId);
+    jobPollTimers.delete(jobId);
     try {
       const status = await getJobStatus(jobId);
       if (status.status === "completed" && status.result) {
         await loadProjectExtras(projectId);
-        assessmentJobs.value = assessmentJobs.value.filter((job) => job.job_id !== jobId);
-        persistAssessmentJobs(projectId);
+        projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
       if (status.status === "failed" || status.status === "canceled") {
-        assessmentJobs.value = assessmentJobs.value.filter((job) => job.job_id !== jobId);
-        persistAssessmentJobs(projectId);
+        projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
     } catch (e) {
       console.error("Failed to poll assessment job", e);
     }
-    scheduleAssessmentPoll(jobId, projectId);
+    scheduleJobPoll(jobId, projectId);
   }, 2000);
-  assessmentJobTimers.set(jobId, timerId);
+  jobPollTimers.set(jobId, timerId);
 };
 
-const loadAssessmentJobsForProject = (projectId: string) => {
-  const stored = localStorage.getItem(assessmentJobsKey(projectId));
+const loadProjectJobs = async (projectId: string) => {
   try {
-    const parsed = stored ? JSON.parse(stored) : [];
-    assessmentJobs.value = Array.isArray(parsed)
-      ? parsed.filter((job) => job?.job_id && job?.lesson_id)
-      : [];
+    const response = await listProjectJobs(projectId);
+    projectJobs.value = response.jobs.map((job) => ({
+      job_id: job.job_id,
+      kind: job.kind,
+      status: job.status,
+      meta: job.meta || {},
+    }));
+    const reinitJob = projectJobs.value.find((job) => job.kind === "project-reinit");
+    reinitJobId.value = reinitJob?.job_id || null;
+    if (reinitJobId.value) {
+      isStarting.value = true;
+      pollReinitJob();
+    }
+    projectJobs.value.forEach((job) => scheduleJobPoll(job.job_id, projectId));
   } catch (e) {
-    assessmentJobs.value = [];
+    projectJobs.value = [];
   }
-  assessmentJobs.value.forEach((job) => scheduleAssessmentPoll(job.job_id, projectId));
 };
 
 const startRename = () => {
@@ -271,6 +272,10 @@ const closeLesson = () => {
   showAssessmentPanel.value = false;
 };
 
+const toggleProfileEditor = () => {
+  showProfileEditor.value = !showProfileEditor.value;
+};
+
 const openAssessmentPanel = () => {
   showAssessmentPanel.value = true;
 };
@@ -285,9 +290,11 @@ const generateAssessment = async (lessonId: string) => {
   try {
     const response = await createProjectAssessment(selectedProject.value.session_id, lessonId);
     if (response.job_id) {
-      assessmentJobs.value = [{ job_id: response.job_id, lesson_id: lessonId }, ...assessmentJobs.value];
-      persistAssessmentJobs(selectedProject.value.session_id);
-      scheduleAssessmentPoll(response.job_id, selectedProject.value.session_id);
+      projectJobs.value = [
+        { job_id: response.job_id, kind: "assessment", status: "running", meta: { lesson_id: lessonId } },
+        ...projectJobs.value,
+      ];
+      scheduleJobPoll(response.job_id, selectedProject.value.session_id);
       return;
     }
     assessmentError.value = "Assessment generation did not return a job id";
@@ -341,7 +348,7 @@ const lessonTitleById = (lessonId: string) => {
 };
 
 const isAssessmentJobActive = (lessonId: string) => {
-  return assessmentJobs.value.some((job) => job.lesson_id === lessonId);
+  return projectJobs.value.some((job) => job.kind === "assessment" && job.meta?.lesson_id === lessonId);
 };
 
 const isDefaultProject = computed(() => selectedProject.value?.session_id === DEFAULT_PROJECT_ID);
@@ -384,15 +391,14 @@ const removeAssessment = async (assessmentId: string) => {
   assessments.value = assessments.value.filter((assessment) => assessment.id !== assessmentId);
 };
 
-const cancelAssessmentJob = async (jobId: string) => {
+const cancelProjectJob = async (jobId: string) => {
   if (!selectedProject.value) return;
   try {
     await cancelJob(jobId);
   } catch (e) {
-    assessmentError.value = "Failed to cancel assessment generation";
+    assessmentError.value = "Failed to cancel job";
   } finally {
-    assessmentJobs.value = assessmentJobs.value.filter((job) => job.job_id !== jobId);
-    persistAssessmentJobs(selectedProject.value.session_id);
+    projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
   }
 };
 
@@ -559,7 +565,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
   window.removeEventListener("endstate:lesson-queued", handleLessonEvent as EventListener);
-  clearAssessmentJobTimers();
+  clearJobTimers();
   if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
 });
 </script>
@@ -758,8 +764,14 @@ onUnmounted(() => {
                 </div>
               </div>
               <div class="mt-4 border-t border-surface-100 pt-4">
-                <p class="text-xs text-surface-400 mb-2">Update Profile</p>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <button
+                  @click="toggleProfileEditor"
+                  class="w-full flex items-center justify-between text-left text-xs text-surface-500 font-medium"
+                >
+                  <span>Update Profile</span>
+                  <span>{{ showProfileEditor ? "Hide" : "Edit" }}</span>
+                </button>
+                <div v-if="showProfileEditor" class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div class="md:col-span-2">
                     <label class="text-xs text-surface-500 mb-1 block">Interests (comma separated)</label>
                     <input
@@ -922,12 +934,15 @@ onUnmounted(() => {
               </div>
               <div v-if="assessmentsLoading" class="text-sm text-surface-400">Loading assessments...</div>
               <div v-else>
-                <div v-if="activeAssessments.length === 0 && assessmentJobs.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
-                <div v-if="assessmentJobs.length > 0" class="mt-3 space-y-2">
-                  <div v-for="job in assessmentJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
-                    <span>Generating assessment for {{ lessonTitleById(job.lesson_id) }}...</span>
+                <div v-if="activeAssessments.length === 0 && projectJobs.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
+                <div v-if="projectJobs.length > 0" class="mt-3 space-y-2">
+                  <div v-for="job in projectJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
+                    <span v-if="job.kind === 'assessment'">Generating assessment for {{ lessonTitleById(job.meta?.lesson_id || '') }}...</span>
+                    <span v-else-if="job.kind === 'lesson'">Generating lesson...</span>
+                    <span v-else-if="job.kind === 'project-reinit'">Reinitializing project...</span>
+                    <span v-else>Processing job...</span>
                     <button
-                      @click="cancelAssessmentJob(job.job_id)"
+                      @click="cancelProjectJob(job.job_id)"
                       class="text-xs px-2 py-1 rounded border border-surface-200 text-surface-600 hover:bg-surface-100"
                     >
                       Cancel

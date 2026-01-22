@@ -793,7 +793,7 @@ async def generate_node_lessons(node_id: str):
                 raise RuntimeError(result["error"])
             return {"project_id": project_id, **result}
 
-        job = task_registry.register(project_id, "lesson", _task())
+        job = task_registry.register(project_id, "lesson", _task(), meta={"node_id": node_id})
         jobs.append({"project_id": project_id, "job_id": job.job_id})
 
     return {"status": "queued", "jobs": jobs, "skipped": skipped}
@@ -848,7 +848,7 @@ async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
             raise RuntimeError(result["error"])
         return result
 
-    job = task_registry.register(project_id, "lesson", _task())
+    job = task_registry.register(project_id, "lesson", _task(), meta={"node_id": request.node_id})
 
     return {"status": "queued", "job_id": job.job_id}
 
@@ -1006,7 +1006,7 @@ async def create_project_assessment(project_id: str, request: AssessmentRequest)
         db.save_project_assessment(project_id, assessment_id, request.lesson_id, result.get("prompt", ""))
         return {"assessment_id": assessment_id, "prompt": result.get("prompt", "")}
 
-    job = task_registry.register(project_id, "assessment", _task())
+    job = task_registry.register(project_id, "assessment", _task(), meta={"lesson_id": request.lesson_id})
 
     return {"status": "queued", "job_id": job.job_id}
 
@@ -1071,6 +1071,7 @@ def get_job_status(job_id: str):
         "status": job.status,
         "result": job.result,
         "error": job.error,
+        "meta": job.meta,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
     }
@@ -1088,6 +1089,26 @@ def cancel_job(job_id: str):
     return {
         "job_id": job_id,
         "status": job.status,
+    }
+
+
+@app.get("/api/projects/{project_id}/jobs")
+def list_project_jobs(project_id: str, kind: Optional[str] = None, node_id: Optional[str] = None):
+    """List active jobs for a project."""
+    jobs = task_registry.list_by_project(project_id, kind=kind, node_id=node_id)
+    return {
+        "jobs": [
+            {
+                "job_id": job.job_id,
+                "project_id": job.project_id,
+                "kind": job.kind,
+                "status": job.status,
+                "meta": job.meta,
+                "created_at": job.created_at.isoformat(),
+                "updated_at": job.updated_at.isoformat(),
+            }
+            for job in jobs
+        ]
     }
 
 
@@ -1159,7 +1180,7 @@ async def start_project(project_id: str):
             "started_at": summary.get("started_at"),
         }
 
-    job = task_registry.register(project_id, "project-reinit", _task())
+    job = task_registry.register(project_id, "project-reinit", _task(), meta={"project_id": project_id})
     return {"status": "queued", "job_id": job.job_id}
 
 

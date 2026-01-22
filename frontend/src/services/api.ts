@@ -468,6 +468,17 @@ export async function cancelJob(jobId: string): Promise<{ job_id: string; status
   });
 }
 
+export async function listProjectJobs(
+  projectId: string,
+  options: { kind?: string; nodeId?: string } = {},
+): Promise<{ jobs: Array<{ job_id: string; project_id: string; kind: string; status: string; meta?: any; created_at?: string; updated_at?: string }> }> {
+  const params = new URLSearchParams();
+  if (options.kind) params.set('kind', options.kind);
+  if (options.nodeId) params.set('node_id', options.nodeId);
+  const query = params.toString();
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/jobs${query ? `?${query}` : ''}`);
+}
+
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
   return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }
