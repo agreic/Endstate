@@ -56,9 +56,9 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
     learning_style = (profile or {}).get("learning_style", "")
     prompt = (
         "Create one assessment prompt based on the lesson below.\n"
-        "Return JSON with key: prompt.\n\n"
+        "Return JSON with key: prompt.\n"
+        "Use only the lesson content; do not invent new scope.\n\n"
         f"Lesson explanation: {lesson.get('explanation', '')}\n"
-        f"Lesson task: {lesson.get('task', '')}\n"
         f"Learning style: {learning_style or 'not specified'}\n"
         f"Instruction: {_style_hint(learning_style)}\n"
     )
@@ -81,7 +81,6 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
     prompt = (
         "Evaluate the learner's answer. Return JSON with keys: result (pass|fail), feedback.\n\n"
         f"Lesson explanation: {lesson.get('explanation', '')}\n"
-        f"Lesson task: {lesson.get('task', '')}\n"
         f"Assessment prompt: {assessment.get('prompt', '')}\n"
         f"Learner answer: {answer}\n"
     )

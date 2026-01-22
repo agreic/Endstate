@@ -35,7 +35,7 @@ def parse_lesson_content(content: str) -> dict:
     if data:
         return {
             "explanation": data.get("explanation", ""),
-            "task": data.get("task", ""),
+            "task": "",
         }
 
     cleaned = content.replace("```json", "").replace("```", "").strip()
@@ -70,8 +70,15 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
     time_available = (profile or {}).get("time_available", "2 hours/week")
 
     prompt = (
-        "You are a learning coach. Create a short lesson for the node below.\n"
-        "Return JSON with keys: explanation, task.\n\n"
+        "You are a learning coach. Create a short, focused lesson for the node below.\n"
+        "Return JSON with key: explanation.\n"
+        "Keep it bite-sized (4-8 short paragraphs or bullets) and cover ONE specific aspect.\n"
+        "Do not include tasks, exercises, or assessments.\n"
+        "Resource guidance:\n"
+        "- If you mention a resource, include a real, specific URL.\n"
+        "- Prefer official docs and reputable tutorials.\n"
+        "- Do not reference vague videos or placeholders.\n"
+        "- If you cannot provide a concrete URL, omit the resource.\n\n"
         f"Node name: {name}\n"
         f"Labels: {labels}\n"
         f"Description: {description}\n"
