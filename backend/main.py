@@ -18,6 +18,12 @@ from backend.services.project_service import build_project_extraction_text, extr
 from backend.schemas.skill_graph import SkillGraphSchema
 from backend.services.lesson_service import generate_lesson, generate_and_store_lesson, parse_lesson_content
 from backend.services.assessment_service import generate_assessment, evaluate_assessment, parse_assessment_content
+from backend.services.evaluation_service import (
+    build_project_brief,
+    derive_required_skills,
+    evaluate_submission,
+)
+from backend.services.opik_client import log_metric
 from backend.services.task_registry import TaskRegistry
 from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 
@@ -74,6 +80,10 @@ class AssessmentRequest(BaseModel):
 
 class AssessmentSubmission(BaseModel):
     answer: str
+
+
+class CapstoneSubmissionRequest(BaseModel):
+    content: str
 
 
 ALLOWED_SKILL_LEVELS = {"beginner", "intermediate", "experienced", "advanced"}
@@ -971,6 +981,183 @@ def delete_project_assessment(project_id: str, assessment_id: str):
     return {"assessment_id": assessment_id, "deleted": True}
 
 
+@app.post("/api/projects/{project_id}/submit")
+async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
+    """Submit a capstone project for evaluation."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+    from backend.config import config
+
+    db = Neo4jClient()
+    records = db.get_project_summary(project_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    summary_json = records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not request.content.strip():
+        raise HTTPException(status_code=400, detail="Submission content cannot be empty")
+
+    attempt_number = db.get_project_submission_count(project_id) + 1
+    submission_id = f"submission-{uuid.uuid4().hex[:8]}"
+    db.create_project_submission(project_id, submission_id, request.content, attempt_number)
+
+    skill_nodes = [
+        node.get("properties", {}).get("name")
+        for node in db.list_project_nodes(project_id)
+        if "Skill" in (node.get("labels") or [])
+    ]
+    required_skills = derive_required_skills(summary, skill_nodes)
+    project_brief = build_project_brief(summary)
+    model_used = config.llm.provider
+
+    async def _task():
+        try:
+            result = await evaluate_submission(request.content, project_brief, required_skills, model_used)
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            evaluation_id = f"eval-{uuid.uuid4().hex[:8]}"
+        db.save_submission_evaluation(
+            submission_id,
+            evaluation_id,
+            float(result.get("score", 0.0)),
+            result.get("criteria", {}),
+            result.get("skill_evidence", {}),
+            result.get("overall_feedback", ""),
+            result.get("suggestions", []),
+            bool(result.get("passed")),
+            model_used,
+            str(result.get("prompt_version", "")),
+        )
+            skill_evidence = result.get("skill_evidence", {}) if isinstance(result.get("skill_evidence"), dict) else {}
+            if required_skills:
+                covered = sum(1 for value in skill_evidence.values() if value and "missing" not in str(value).lower())
+                coverage = covered / max(len(required_skills), 1)
+            else:
+                coverage = 1.0
+        prompt_version = str(result.get("prompt_version", "unknown"))
+        log_metric("capstone_score", float(result.get("score", 0.0)), session_id=submission_id, tags=["capstone", project_id, prompt_version, model_used])
+        log_metric("skill_evidence_coverage", coverage, session_id=submission_id, tags=["capstone", project_id, prompt_version, model_used])
+            previous_score = None
+            submissions = db.list_project_submissions(project_id)
+            for submission in submissions:
+                if submission.get("id") == submission_id:
+                    continue
+                score = submission.get("score")
+                if score is not None:
+                    previous_score = float(score)
+                    break
+            if previous_score is not None:
+                improvement = float(result.get("score", 0.0)) - previous_score
+            log_metric("learning_improvement", improvement, session_id=project_id, tags=["capstone", project_id, prompt_version, model_used])
+            capstone = summary.get("capstone") if isinstance(summary.get("capstone"), dict) else {}
+            capstone.update({
+                "last_submission_id": submission_id,
+                "last_score": float(result.get("score", 0.0)),
+                "passed": bool(result.get("passed")),
+                "attempts": attempt_number,
+                "status": "completed" if result.get("passed") else "in_progress",
+            })
+            completed_at = None
+            if result.get("passed"):
+                completed_at = datetime.utcnow().isoformat()
+                capstone["completed_at"] = completed_at
+            summary["capstone"] = capstone
+            db.update_project_summary_json(project_id, json.dumps(summary))
+            db.update_project_capstone_state(
+                project_id,
+                capstone.get("status", "in_progress"),
+                capstone.get("last_score", 0.0),
+                completed_at,
+            )
+            return {"submission_id": submission_id, "evaluation_id": evaluation_id, **result}
+        except Exception as exc:
+            db.update_submission_status(submission_id, "failed", feedback=str(exc))
+            raise
+
+    job = task_registry.register(project_id, "capstone-eval", _task(), meta={"submission_id": submission_id})
+    return {"status": "queued", "job_id": job.job_id, "submission_id": submission_id, "attempt": attempt_number}
+
+
+@app.get("/api/projects/{project_id}/submissions")
+def list_project_submissions(project_id: str):
+    """List capstone submissions for a project."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.list_project_submissions(project_id)
+    submissions = []
+    for row in records:
+        submitted_at = row.get("submitted_at")
+        evaluated_at = row.get("evaluated_at")
+        if isinstance(submitted_at, DateTime):
+            submitted_at = submitted_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        if isinstance(evaluated_at, DateTime):
+            evaluated_at = evaluated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        submissions.append({
+            "id": row.get("id"),
+            "project_id": row.get("project_id"),
+            "content": row.get("content"),
+            "attempt_number": row.get("attempt_number"),
+            "status": row.get("status"),
+            "score": row.get("score"),
+            "passed": bool(row.get("passed")) if row.get("passed") is not None else False,
+            "feedback": row.get("feedback"),
+            "submitted_at": submitted_at,
+            "evaluated_at": evaluated_at,
+        })
+    return {"submissions": submissions}
+
+
+@app.get("/api/submissions/{submission_id}")
+def get_submission(submission_id: str):
+    """Get submission with evaluations."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    records = db.get_submission(submission_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    row = records[0]
+    submitted_at = row.get("submitted_at")
+    evaluated_at = row.get("evaluated_at")
+    if isinstance(submitted_at, DateTime):
+        submitted_at = submitted_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    if isinstance(evaluated_at, DateTime):
+        evaluated_at = evaluated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    evaluations = db.list_submission_evaluations(submission_id)
+    formatted_evals = []
+    for entry in evaluations:
+        eval_at = entry.get("evaluated_at")
+        if isinstance(eval_at, DateTime):
+            eval_at = eval_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        formatted_evals.append({**entry, "evaluated_at": eval_at})
+
+    return {
+        "submission": {
+            "id": row.get("id"),
+            "project_id": row.get("project_id"),
+            "content": row.get("content"),
+            "attempt_number": row.get("attempt_number"),
+            "status": row.get("status"),
+            "score": row.get("score"),
+            "passed": bool(row.get("passed")) if row.get("passed") is not None else False,
+            "feedback": row.get("feedback"),
+            "submitted_at": submitted_at,
+            "evaluated_at": evaluated_at,
+        },
+        "evaluations": formatted_evals,
+    }
+
+
 @app.post("/api/projects/{project_id}/assessments")
 async def create_project_assessment(project_id: str, request: AssessmentRequest):
     """Queue assessment generation for a lesson."""
@@ -1050,6 +1237,11 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
         request.answer,
         archived=archive_assessment,
     )
+    try:
+        from backend.services.opik_client import log_metric
+        log_metric("assessment_pass_rate", 1.0 if status == "pass" else 0.0, session_id=assessment_id, tags=["assessment", project_id])
+    except Exception:
+        pass
     if archive_assessment:
         db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play, Zap } from "lucide-vue-next";
 import { marked } from "marked";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, submitCapstone, listProjectSubmissions, getSubmission, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode, type ProjectSubmission, type SubmissionEvaluation } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -19,6 +19,7 @@ const isStarting = ref(false);
 const startError = ref<string | null>(null);
 const startStats = ref<{ nodes: number; relationships: number } | null>(null);
 const reinitJobId = ref<string | null>(null);
+const reinitProjectId = ref<string | null>(null);
 let reinitPollTimer: number | null = null;
 const profileDraft = ref({
   interests: [] as string[],
@@ -41,6 +42,13 @@ const assessmentsLoading = ref(false);
 const projectJobs = ref<Array<{ job_id: string; kind: string; status: string; meta?: Record<string, any> }>>([]);
 const jobPollTimers = new Map<string, number>();
 const projectNodes = ref<ApiNode[]>([]);
+const capstoneContent = ref("");
+const capstoneSubmitting = ref(false);
+const capstoneError = ref<string | null>(null);
+const capstoneSubmissions = ref<ProjectSubmission[]>([]);
+const capstoneDetails = ref<{ submission: ProjectSubmission; evaluations: SubmissionEvaluation[] } | null>(null);
+const capstoneLoading = ref(false);
+const showCapstone = ref(false);
 
 const DEFAULT_PROJECT_ID = "project-all";
 
@@ -48,6 +56,8 @@ const activeLessons = computed(() => lessons.value.filter((lesson) => !lesson.ar
 const archivedLessons = computed(() => lessons.value.filter((lesson) => lesson.archived));
 const activeAssessments = computed(() => assessments.value.filter((assessment) => !assessment.archived));
 const archivedAssessments = computed(() => assessments.value.filter((assessment) => assessment.archived));
+const latestSubmission = computed(() => capstoneSubmissions.value[0] || null);
+const isCapstoneComplete = computed(() => Boolean(selectedProject.value?.capstone?.passed));
 
 const SKILL_LEVELS = ["Beginner", "Intermediate", "Experienced", "Advanced"];
 const TIME_OPTIONS = [
@@ -88,7 +98,16 @@ const selectProject = async (projectId: string) => {
     lessons.value = [];
     assessments.value = [];
     projectJobs.value = [];
+    capstoneSubmissions.value = [];
+    capstoneDetails.value = null;
+    capstoneContent.value = "";
+    capstoneError.value = null;
     clearJobTimers();
+    if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
+    reinitPollTimer = null;
+    reinitJobId.value = null;
+    reinitProjectId.value = null;
+    isStarting.value = false;
     localStorage.removeItem("endstate_active_project_id");
     return;
   }
@@ -100,7 +119,16 @@ const selectProject = async (projectId: string) => {
   lessons.value = [];
   assessments.value = [];
   projectJobs.value = [];
+  capstoneSubmissions.value = [];
+  capstoneDetails.value = null;
+  capstoneContent.value = "";
+  capstoneError.value = null;
   clearJobTimers();
+  if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
+  reinitPollTimer = null;
+  reinitJobId.value = null;
+  reinitProjectId.value = null;
+  isStarting.value = false;
   try {
     const project = await getProject(projectId);
     selectedProject.value = project;
@@ -127,11 +155,13 @@ const selectProject = async (projectId: string) => {
 const loadProjectExtras = async (projectId: string) => {
   lessonsLoading.value = true;
   assessmentsLoading.value = true;
+  capstoneLoading.value = true;
   try {
-    const [lessonsResponse, assessmentsResponse, nodesResponse] = await Promise.all([
+    const [lessonsResponse, assessmentsResponse, nodesResponse, submissionsResponse] = await Promise.all([
       listProjectLessons(projectId),
       listProjectAssessments(projectId),
       listProjectNodes(projectId),
+      listProjectSubmissions(projectId),
     ]);
     lessons.value = [...lessonsResponse.lessons].sort((a, b) => {
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -140,11 +170,13 @@ const loadProjectExtras = async (projectId: string) => {
     });
     assessments.value = assessmentsResponse.assessments;
     projectNodes.value = nodesResponse.nodes;
+    capstoneSubmissions.value = submissionsResponse.submissions;
   } catch (e) {
     console.error("Failed to load project extras", e);
   } finally {
     lessonsLoading.value = false;
     assessmentsLoading.value = false;
+    capstoneLoading.value = false;
   }
 };
 
@@ -187,9 +219,10 @@ const loadProjectJobs = async (projectId: string) => {
     }));
     const reinitJob = projectJobs.value.find((job) => job.kind === "project-reinit");
     reinitJobId.value = reinitJob?.job_id || null;
+    reinitProjectId.value = reinitJob ? projectId : null;
     if (reinitJobId.value) {
       isStarting.value = true;
-      pollReinitJob();
+      pollReinitJob(reinitJobId.value, projectId);
     }
     projectJobs.value.forEach((job) => scheduleJobPoll(job.job_id, projectId));
   } catch (e) {
@@ -367,6 +400,10 @@ const isAssessmentJobActive = (lessonId: string) => {
 };
 
 const isDefaultProject = computed(() => selectedProject.value?.session_id === DEFAULT_PROJECT_ID);
+const capstoneHeaderClass = computed(() =>
+  isCapstoneComplete.value ? "bg-gradient-to-r from-emerald-500 to-emerald-600" : "bg-gradient-to-r from-primary-500 to-primary-600",
+);
+const capstoneJobs = computed(() => projectJobs.value.filter((job) => job.kind === "capstone-eval"));
 
 const archiveLesson = async (lessonId: string) => {
   if (!selectedProject.value) return;
@@ -414,6 +451,40 @@ const cancelProjectJob = async (jobId: string) => {
     assessmentError.value = "Failed to cancel job";
   } finally {
     projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
+  }
+};
+
+const submitCapstoneWork = async () => {
+  if (!selectedProject.value) return;
+  if (!capstoneContent.value.trim()) {
+    capstoneError.value = "Submission cannot be empty";
+    return;
+  }
+  capstoneSubmitting.value = true;
+  capstoneError.value = null;
+  try {
+    const response = await submitCapstone(selectedProject.value.session_id, capstoneContent.value.trim());
+    projectJobs.value = [
+      { job_id: response.job_id, kind: "capstone-eval", status: "running", meta: { submission_id: response.submission_id } },
+      ...projectJobs.value,
+    ];
+    scheduleJobPoll(response.job_id, selectedProject.value.session_id);
+    capstoneContent.value = "";
+    await loadProjectExtras(selectedProject.value.session_id);
+  } catch (e) {
+    capstoneError.value = e instanceof Error ? e.message : "Failed to submit capstone";
+  } finally {
+    capstoneSubmitting.value = false;
+  }
+};
+
+const loadSubmissionDetails = async (submissionId: string) => {
+  if (!selectedProject.value) return;
+  capstoneError.value = null;
+  try {
+    capstoneDetails.value = await getSubmission(submissionId);
+  } catch (e) {
+    capstoneError.value = "Failed to load evaluation details";
   }
 };
 
@@ -467,13 +538,18 @@ const confirmDelete = async (projectId: string) => {
 
 const handleReinitializeProject = async () => {
   if (!selectedProject.value) return;
+  if (reinitJobId.value && reinitProjectId.value === selectedProject.value.session_id) {
+    pollReinitJob(reinitJobId.value, selectedProject.value.session_id);
+    return;
+  }
   isStarting.value = true;
   startError.value = null;
   try {
     const response = await startProject(selectedProject.value.session_id);
     if (response.status === "queued" && response.job_id) {
       reinitJobId.value = response.job_id;
-      pollReinitJob();
+      reinitProjectId.value = selectedProject.value.session_id;
+      pollReinitJob(response.job_id, selectedProject.value.session_id);
       return;
     }
     applyReinitResult(response);
@@ -513,36 +589,40 @@ const applyReinitResult = async (response: any) => {
   await loadProjectExtras(selectedProject.value.session_id);
 };
 
-const pollReinitJob = async () => {
-  if (!reinitJobId.value || !selectedProject.value) return;
+const pollReinitJob = async (jobId: string, projectId: string) => {
+  if (!selectedProject.value || selectedProject.value.session_id !== projectId) return;
   if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
   try {
-    const status = await getJobStatus(reinitJobId.value);
+    const status = await getJobStatus(jobId);
     if (status.status === "completed" && status.result) {
       await applyReinitResult(status.result);
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
     if (status.status === "failed") {
       startError.value = status.error || "Failed to reinitialize project";
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
     if (status.status === "canceled") {
       startError.value = "Reinitialize canceled";
       reinitJobId.value = null;
+      reinitProjectId.value = null;
       isStarting.value = false;
       return;
     }
   } catch (e) {
     startError.value = e instanceof Error ? e.message : "Failed to reinitialize project";
     reinitJobId.value = null;
+    reinitProjectId.value = null;
     isStarting.value = false;
     return;
   }
-  reinitPollTimer = window.setTimeout(pollReinitJob, 2000);
+  reinitPollTimer = window.setTimeout(() => pollReinitJob(jobId, projectId), 2000);
 };
 
 const formatDate = (dateStr: string): string => {
@@ -666,7 +746,7 @@ onUnmounted(() => {
           
           <div v-else class="space-y-4">
             <div class="bg-white rounded-xl shadow-sm border border-surface-200 overflow-hidden">
-              <div class="bg-gradient-to-r from-primary-500 to-primary-600 p-6 text-white">
+              <div :class="['p-6 text-white', capstoneHeaderClass]">
                 <div class="flex items-start justify-between gap-4">
                   <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2 opacity-90">
@@ -878,6 +958,117 @@ onUnmounted(() => {
             </div>
 
             <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center justify-between gap-2 mb-4">
+                <div class="flex items-center gap-2">
+                  <Target :size="18" class="text-emerald-500" />
+                  <h4 class="font-semibold text-surface-800">Capstone Mode</h4>
+                </div>
+                <button
+                  @click="showCapstone = !showCapstone"
+                  class="text-xs text-surface-500 font-medium"
+                >
+                  {{ showCapstone ? "Hide" : "I'm ready" }}
+                </button>
+              </div>
+              <div v-if="isCapstoneComplete" class="mb-3 text-xs font-semibold text-emerald-700">
+                Project complete ✓
+              </div>
+              <div v-if="showCapstone" class="space-y-4">
+                <div>
+                  <p class="text-xs text-surface-400 uppercase mb-1">Project brief</p>
+                  <p class="text-sm text-surface-700">{{ selectedProject.agreed_project?.description || "No brief provided." }}</p>
+                </div>
+                <div>
+                  <p class="text-xs text-surface-400 uppercase mb-2">Required skills</p>
+                  <div v-if="selectedProject.skills?.length" class="flex flex-wrap gap-2">
+                    <span
+                      v-for="skill in selectedProject.skills"
+                      :key="skill"
+                      class="text-xs px-3 py-1 rounded-full bg-emerald-50 text-emerald-700"
+                    >
+                      {{ skill }}
+                    </span>
+                  </div>
+                  <p v-else class="text-xs text-surface-400">No skills listed for this project.</p>
+                </div>
+                <div>
+                  <label class="text-xs text-surface-500 mb-1 block">Submission</label>
+                  <textarea
+                    v-model="capstoneContent"
+                    rows="5"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-surface-200"
+                    placeholder="Describe your solution. Explain where and how you applied each required skill."
+                  ></textarea>
+                  <div class="mt-2 flex items-center justify-between">
+                    <p v-if="capstoneError" class="text-xs text-red-500">{{ capstoneError }}</p>
+                    <button
+                      @click="submitCapstoneWork"
+                      :disabled="capstoneSubmitting"
+                      class="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-60"
+                    >
+                      {{ capstoneSubmitting ? "Submitting..." : "Submit for evaluation" }}
+                    </button>
+                  </div>
+                  <div v-if="capstoneJobs.length" class="mt-3 text-xs text-surface-500">
+                    Evaluation in progress...
+                  </div>
+                </div>
+                <div>
+                  <p class="text-xs text-surface-400 uppercase mb-2">Submission history</p>
+                  <div v-if="capstoneLoading" class="text-xs text-surface-400">Loading submissions...</div>
+                  <div v-else-if="capstoneSubmissions.length === 0" class="text-xs text-surface-400">No submissions yet.</div>
+                  <div v-else class="space-y-2">
+                    <div
+                      v-for="submission in capstoneSubmissions"
+                      :key="submission.id"
+                      class="p-3 rounded-lg border border-surface-100 bg-surface-50"
+                    >
+                      <div class="flex items-center justify-between">
+                        <p class="text-xs font-semibold text-surface-700">Attempt {{ submission.attempt_number }}</p>
+                        <button
+                          @click="loadSubmissionDetails(submission.id)"
+                          class="text-xs text-primary-600 hover:text-primary-700"
+                        >
+                          View evaluation
+                        </button>
+                      </div>
+                      <p class="text-xs text-surface-500 mt-1">
+                        Status: {{ submission.status }} · Score: {{ submission.score ?? "—" }}
+                      </p>
+                      <p v-if="submission.feedback" class="text-xs text-surface-600 mt-2">{{ submission.feedback }}</p>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="capstoneDetails">
+                  <p class="text-xs text-surface-400 uppercase mb-2">Latest evaluation</p>
+                  <div v-if="capstoneDetails.evaluations.length === 0" class="text-xs text-surface-400">
+                    Evaluation pending.
+                  </div>
+                  <div v-else class="space-y-3">
+                    <div v-for="evalItem in capstoneDetails.evaluations" :key="evalItem.id" class="p-3 rounded-lg bg-surface-50 border border-surface-100">
+                      <p class="text-xs text-surface-500 mb-1">Score: {{ evalItem.score }}</p>
+                      <p class="text-xs text-surface-600 mb-2">{{ evalItem.overall_feedback }}</p>
+                      <div v-if="evalItem.skill_evidence" class="text-xs text-surface-600">
+                        <p class="font-semibold text-surface-500 mb-1">Skill evidence</p>
+                        <div class="space-y-1">
+                          <p v-for="(evidence, skill) in evalItem.skill_evidence" :key="skill">
+                            <span class="font-medium">{{ skill }}:</span> {{ evidence }}
+                          </p>
+                        </div>
+                      </div>
+                      <div v-if="evalItem.suggestions?.length" class="text-xs text-surface-600 mt-2">
+                        <p class="font-semibold text-surface-500 mb-1">Suggestions</p>
+                        <ul class="list-disc list-inside">
+                          <li v-for="(tip, idx) in evalItem.suggestions" :key="idx">{{ tip }}</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
               <div class="flex items-center gap-2 mb-4">
                 <MessageSquare :size="18" class="text-primary-500" />
                 <h4 class="font-semibold text-surface-800">Lessons</h4>
@@ -979,6 +1170,7 @@ onUnmounted(() => {
                     <span v-if="job.kind === 'assessment'">Generating assessment for {{ lessonTitleById(job.meta?.lesson_id || '') }}...</span>
                     <span v-else-if="job.kind === 'lesson'">Generating lesson...</span>
                     <span v-else-if="job.kind === 'project-reinit'">Reinitializing project...</span>
+                    <span v-else-if="job.kind === 'capstone-eval'">Evaluating capstone submission...</span>
                     <span v-else>Processing job...</span>
                     <button
                       @click="cancelProjectJob(job.job_id)"
