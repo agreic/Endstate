@@ -992,6 +992,7 @@ class Neo4jClient:
         title: str,
         explanation: str,
         task: str,
+        lesson_index: int,
     ) -> None:
         """Persist a generated lesson."""
         self.query(
@@ -1004,6 +1005,7 @@ class Neo4jClient:
                 title: $title,
                 explanation: $explanation,
                 task: $task,
+                lesson_index: $lesson_index,
                 archived: false,
                 created_at: datetime()
             })
@@ -1022,15 +1024,27 @@ class Neo4jClient:
                 "title": title,
                 "explanation": explanation,
                 "task": task,
+                "lesson_index": lesson_index,
             },
+        )
+
+    def ensure_lesson_index(self) -> None:
+        """Ensure lesson_index exists on all ProjectLesson nodes."""
+        self.query(
+            """
+            MATCH (l:ProjectLesson)
+            WHERE l.lesson_index IS NULL
+            SET l.lesson_index = 0
+            """
         )
 
     def list_project_lessons(self, project_id: str) -> list[dict]:
         """List lessons for a project."""
+        self.ensure_lesson_index()
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.lesson_index as lesson_index, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             """,
             {"project_id": project_id},
@@ -1039,12 +1053,30 @@ class Neo4jClient:
 
     def get_project_lesson_by_node(self, project_id: str, node_id: str) -> list[dict]:
         """Get latest lesson for a node in a project."""
+        self.ensure_lesson_index()
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.lesson_index as lesson_index, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             LIMIT 1
+            """,
+            {"project_id": project_id, "node_id": node_id},
+        )
+        return result
+
+    def list_project_lessons_for_node(self, project_id: str, node_id: str) -> list[dict]:
+        """List lessons for a node in a project."""
+        self.ensure_lesson_index()
+        result = self.query(
+            """
+            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
+            RETURN l.id as id,
+                   l.title as title,
+                   l.explanation as explanation,
+                   COALESCE(l.lesson_index, 0) as lesson_index,
+                   l.created_at as created_at
+            ORDER BY l.created_at ASC
             """,
             {"project_id": project_id, "node_id": node_id},
         )

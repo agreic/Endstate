@@ -729,7 +729,10 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
             except Exception:
                 profile = None
 
-    result = await generate_lesson(node, profile)
+    existing = db.list_project_lessons_for_node(request.project_id, node_id) if request.project_id else []
+    lesson_index = len(existing) + 1
+    prior_titles = [entry.get("title", "") for entry in existing[-3:]]
+    result = await generate_lesson(node, profile, lesson_index, prior_titles)
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
@@ -746,6 +749,7 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
             title,
             result.get("explanation", ""),
             result.get("task", ""),
+            lesson_index,
         )
 
     return {"node_id": node_id, "lesson_id": lesson_id, **result}
@@ -772,24 +776,14 @@ async def generate_node_lessons(node_id: str):
         projects = [{"id": DEFAULT_PROJECT_ID, "is_default": True}]
 
     jobs = []
-    skipped = []
     for project in projects:
         project_id = project.get("id")
         summary_records = db.get_project_summary(project_id)
         if not summary_records:
             continue
-
-        existing = db.get_project_lesson_by_node(project_id, node_id)
-        if existing:
-            created_at = existing[0].get("created_at")
-            if isinstance(created_at, DateTime):
-                created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            skipped.append({
-                "project_id": project_id,
-                "lesson_id": existing[0].get("id"),
-                "created_at": created_at,
-            })
-            continue
+        existing = db.list_project_lessons_for_node(project_id, node_id)
+        lesson_index = len(existing) + 1
+        prior_titles = [entry.get("title", "") for entry in existing[-3:]]
 
         summary_json = summary_records[0].get("summary_json") or "{}"
         try:
@@ -798,8 +792,13 @@ async def generate_node_lessons(node_id: str):
             summary = {}
         profile = summary.get("user_profile")
 
-        async def _task(project_id: str = project_id, profile: dict | None = profile):
-            result = await generate_and_store_lesson(db, project_id, node, profile)
+        async def _task(
+            project_id: str = project_id,
+            profile: dict | None = profile,
+            lesson_index: int = lesson_index,
+            prior_titles: list[str] = prior_titles,
+        ):
+            result = await generate_and_store_lesson(db, project_id, node, profile, lesson_index, prior_titles)
             if "error" in result:
                 raise RuntimeError(result["error"])
             return {"project_id": project_id, **result}
@@ -807,7 +806,7 @@ async def generate_node_lessons(node_id: str):
         job = task_registry.register(project_id, "lesson", _task(), meta={"node_id": node_id})
         jobs.append({"project_id": project_id, "job_id": job.job_id})
 
-    return {"status": "queued", "jobs": jobs, "skipped": skipped}
+    return {"status": "queued", "jobs": jobs}
 
 
 @app.post("/api/projects/{project_id}/lessons/generate")
@@ -823,22 +822,9 @@ async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     if not summary_records:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    existing = db.get_project_lesson_by_node(project_id, request.node_id)
-    if existing:
-        created_at = existing[0].get("created_at")
-        if isinstance(created_at, DateTime):
-            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        return {
-            "status": "exists",
-            "lesson": {
-                "id": existing[0].get("id"),
-                "node_id": existing[0].get("node_id"),
-                "title": existing[0].get("title"),
-                "explanation": existing[0].get("explanation"),
-                "task": existing[0].get("task"),
-                "created_at": created_at,
-            },
-        }
+    existing = db.list_project_lessons_for_node(project_id, request.node_id)
+    lesson_index = len(existing) + 1
+    prior_titles = [entry.get("title", "") for entry in existing[-3:]]
 
     node_result = db.get_node_by_id(request.node_id)
     if not node_result:
@@ -854,7 +840,7 @@ async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     profile = summary.get("user_profile")
 
     async def _task():
-        result = await generate_and_store_lesson(db, project_id, node, profile)
+        result = await generate_and_store_lesson(db, project_id, node, profile, lesson_index, prior_titles)
         if "error" in result:
             raise RuntimeError(result["error"])
         return result
@@ -894,6 +880,7 @@ def list_project_lessons(project_id: str):
             "title": row.get("title"),
             "explanation": explanation,
             "task": task,
+            "lesson_index": row.get("lesson_index"),
             "created_at": created_at,
             "archived": bool(row.get("archived")) if row.get("archived") is not None else False,
             "archived_at": archived_at,

@@ -283,14 +283,16 @@ const loadLesson = async () => {
   lessonQueuedCount.value = 0;
   try {
     const response = await generateNodeLessons(selectedNode.value.id);
-    lessonQueued.value = true;
+    const jobs = response.jobs || [];
+    const skipped = response.skipped || [];
+    lessonQueued.value = jobs.length > 0 || skipped.length > 0;
     lessonJobNodeId.value = selectedNode.value.id;
-    lessonJobIds.value = response.jobs.map((job) => job.job_id);
-    lessonQueuedCount.value = response.jobs.length + response.skipped.length;
-    response.jobs.forEach((job) => {
+    lessonJobIds.value = jobs.map((job) => job.job_id);
+    lessonQueuedCount.value = jobs.length + skipped.length;
+    jobs.forEach((job) => {
       window.dispatchEvent(new CustomEvent("endstate:lesson-queued", { detail: { projectId: job.project_id } }));
     });
-    response.skipped.forEach((entry) => {
+    skipped.forEach((entry) => {
       window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId: entry.project_id } }));
     });
   } catch (e) {

@@ -56,7 +56,12 @@ def _style_instruction(style: str) -> str:
     return "Provide a balanced explanation and a simple task."
 
 
-async def generate_lesson(node: dict, profile: dict | None) -> dict:
+async def generate_lesson(
+    node: dict,
+    profile: dict | None,
+    lesson_index: int,
+    prior_titles: list[str],
+) -> dict:
     llm = get_llm()
 
     name = node.get("properties", {}).get("name") or node.get("id")
@@ -68,6 +73,11 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
 
     skill_level = (profile or {}).get("skill_level", "intermediate")
     time_available = (profile or {}).get("time_available", "2 hours/week")
+
+    prior_section = ""
+    if prior_titles:
+        joined = "\n".join(f"- {title}" for title in prior_titles if title)
+        prior_section = f"Previous lesson topics to avoid repeating:\n{joined}\n"
 
     prompt = (
         "You are a learning coach. Create a short, focused lesson for the node below.\n"
@@ -86,6 +96,8 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
         f"Skill level: {skill_level}\n"
         f"Time available: {time_available}\n"
         f"Instruction: {instruction}\n"
+        f"Lesson sequence: This is lesson {lesson_index} for this node.\n"
+        f"{prior_section}"
     )
 
     try:
@@ -99,8 +111,15 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
     return parse_lesson_content(content)
 
 
-async def generate_and_store_lesson(db, project_id: str, node: dict, profile: dict | None) -> dict:
-    result = await generate_lesson(node, profile)
+async def generate_and_store_lesson(
+    db,
+    project_id: str,
+    node: dict,
+    profile: dict | None,
+    lesson_index: int,
+    prior_titles: list[str],
+) -> dict:
+    result = await generate_lesson(node, profile, lesson_index, prior_titles)
     if "error" in result:
         return result
 
@@ -115,5 +134,6 @@ async def generate_and_store_lesson(db, project_id: str, node: dict, profile: di
         title,
         result.get("explanation", ""),
         result.get("task", ""),
+        lesson_index,
     )
     return {"lesson_id": lesson_id, **result}
