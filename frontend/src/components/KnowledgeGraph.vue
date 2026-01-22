@@ -398,6 +398,8 @@ watch(searchQuery, () => {
   updateLinkStyles();
 });
 
+const showProperties = ref(false);
+
 watch(selectedNode, () => {
   lessonError.value = null;
   lessonLoading.value = false;
@@ -405,6 +407,7 @@ watch(selectedNode, () => {
   lessonJobIds.value = [];
   lessonJobNodeId.value = null;
   lessonQueuedCount.value = 0;
+  showProperties.value = false;
   if (selectedNode.value) {
     refreshLessonJobs(selectedNode.value.id);
   }
@@ -673,6 +676,11 @@ const legendItems = computed(() => {
 const toggleLabelFilter = (label: string) => {
   activeLabelFilter.value = activeLabelFilter.value === label ? null : label;
 };
+
+const getDisplayLabels = (labels?: string[]): string[] => {
+  if (!labels) return [];
+  return labels.filter((label) => label !== "__Entity__");
+};
 </script>
 
 <template>
@@ -816,11 +824,11 @@ const toggleLabelFilter = (label: string) => {
           {{ selectedNode.description }}
         </p>
         
-        <div v-if="selectedNode.labels?.length" class="mb-3">
+        <div v-if="getDisplayLabels(selectedNode.labels).length" class="mb-3">
           <p class="text-xs text-surface-400 uppercase mb-1">Type</p>
           <div class="flex gap-1 flex-wrap">
             <span
-              v-for="label in selectedNode.labels"
+              v-for="label in getDisplayLabels(selectedNode.labels)"
               :key="label"
               class="text-xs px-2 py-0.5 bg-surface-100 text-surface-600 rounded-full"
             >
@@ -828,10 +836,16 @@ const toggleLabelFilter = (label: string) => {
             </span>
           </div>
         </div>
-        
+
         <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
-          <p class="text-xs text-surface-400 uppercase mb-1">Properties</p>
-          <div class="space-y-1 text-sm">
+          <button
+            @click="showProperties = !showProperties"
+            class="flex items-center gap-2 text-xs text-surface-500 font-medium"
+          >
+            <span>Properties</span>
+            <span class="text-surface-400">{{ showProperties ? "Hide" : "Show" }}</span>
+          </button>
+          <div v-if="showProperties" class="mt-2 space-y-1 text-sm">
             <p v-for="item in getDisplayProperties(selectedNode)" :key="item.key" class="text-surface-600">
               <span class="font-medium text-surface-500">{{ item.key }}:</span> {{ formatPropertyValue(item.value) }}
             </p>

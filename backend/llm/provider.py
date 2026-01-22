@@ -54,7 +54,7 @@ def _get_ollama_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     from langchain_ollama import ChatOllama
     
     ollama_config = llm_config.ollama
-    timeout = kwargs.get("timeout_seconds", ollama_config.timeout_seconds)
+    timeout = kwargs.get("timeout_seconds", llm_config.timeout_seconds)
     keep_alive = kwargs.get("keep_alive", ollama_config.keep_alive)
     
     return ChatOllama(

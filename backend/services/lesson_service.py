@@ -83,6 +83,8 @@ async def generate_lesson(node: dict, profile: dict | None) -> dict:
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=LESSON_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         return {"error": f"Lesson generation failed: {e}"}
 

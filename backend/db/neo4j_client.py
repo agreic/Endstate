@@ -30,13 +30,25 @@ def _serialize_neo4j_value(value: Any) -> Any:
 def _serialize_node(node) -> dict:
     """Serialize a Neo4j Node object to a dictionary."""
     if isinstance(node, dict):
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            return {
+                "id": node.get("id") or node.get("element_id"),
+                "labels": node.get("labels", []),
+                "properties": _serialize_neo4j_value(properties),
+            }
         return {
             "id": node.get("id") or node.get("element_id"),
             "labels": node.get("labels", []),
             "properties": _serialize_neo4j_value({k: v for k, v in node.items() if k not in ("id", "labels")}),
         }
+    node_id = None
+    try:
+        node_id = node.get("id")
+    except Exception:
+        node_id = None
     return {
-        "id": node.element_id if hasattr(node, 'element_id') else node.get("id"),
+        "id": node_id or (node.element_id if hasattr(node, "element_id") else None),
         "labels": list(node.labels),
         "properties": _serialize_neo4j_value(dict(node)),
     }
@@ -148,6 +160,11 @@ class Neo4jClient:
             include_source=include_source,
             baseEntityLabel=base_entity_label,
         )
+        for label in ("Skill", "Concept", "Topic"):
+            try:
+                self.merge_nodes_simple(label, match_property="name")
+            except Exception:
+                continue
     
     def merge_nodes(self, label: str, match_property: str = "id") -> int:
         """
@@ -392,7 +409,10 @@ class Neo4jClient:
             """
             MATCH (n:Project)
             WHERE NOT COALESCE(n.is_default, false)
-            RETURN n
+            RETURN labels(n) as labels,
+                   properties(n) as properties,
+                   elementId(n) as element_id,
+                   n.id as id
             """,
         )
         remaining_limit = max(limit - len(project_result), 0)
@@ -401,7 +421,10 @@ class Neo4jClient:
             MATCH (n)
             WHERE any(label IN labels(n) WHERE label IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
-            RETURN n
+            RETURN labels(n) as labels,
+                   properties(n) as properties,
+                   elementId(n) as element_id,
+                   n.id as id
             LIMIT $limit
             """,
             {"limit": remaining_limit, "labels": allowed_labels},
@@ -410,7 +433,7 @@ class Neo4jClient:
         seen = set()
         nodes = []
         for row in combined:
-            node = _serialize_node(row["n"])
+            node = _serialize_node(row)
             node_id = node.get("id")
             if node_id in seen:
                 continue
@@ -435,7 +458,10 @@ class Neo4jClient:
               AND any(label IN labels(m) WHERE label IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
               AND NOT (m:Project AND COALESCE(m.is_default, false))
-            RETURN n.id as source, type(r) as type, m.id as target, properties(r) as properties
+            RETURN COALESCE(n.id, elementId(n)) as source,
+                   type(r) as type,
+                   COALESCE(m.id, elementId(m)) as target,
+                   properties(r) as properties
             LIMIT $limit
         """
         result = self.query(query, {"limit": limit, "labels": allowed_labels})
@@ -855,7 +881,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:Project)-[:HAS_NODE]->(n)
-            WHERE n.id = $node_id OR n.name = $node_name
+            WHERE n.id = $node_id OR elementId(n) = $node_id OR n.name = $node_name
             RETURN p.id as id, p.is_default as is_default
             ORDER BY p.created_at ASC
             """,
@@ -1148,7 +1174,7 @@ class Neo4jClient:
     def get_node_by_id(self, node_id: str) -> Optional[dict]:
         """Get a node by its ID."""
         result = self.query(
-            "MATCH (n) WHERE n.id = $node_id RETURN n",
+            "MATCH (n) WHERE n.id = $node_id OR elementId(n) = $node_id RETURN n",
             {"node_id": node_id}
         )
         if result:
@@ -1168,7 +1194,8 @@ class Neo4jClient:
         # First get the count of relationships
         count_result = self.query(
             """
-            MATCH (n {id: $node_id})-[r]-()
+            MATCH (n)-[r]-()
+            WHERE n.id = $node_id OR elementId(n) = $node_id
             RETURN COUNT(r) as rel_count
             """,
             {"node_id": node_id}
@@ -1178,7 +1205,8 @@ class Neo4jClient:
         # Then delete the node with relationships
         self.query(
             """
-            MATCH (n {id: $node_id})
+            MATCH (n)
+            WHERE n.id = $node_id OR elementId(n) = $node_id
             DETACH DELETE n
             """,
             {"node_id": node_id}
@@ -1231,8 +1259,9 @@ class Neo4jClient:
         """
         result = self.query(
             """
-            MATCH (n {id: $node_id})-[r]-(connected)
-            RETURN connected.id as id, labels(connected) as labels, type(r) as rel_type
+            MATCH (n)-[r]-(connected)
+            WHERE n.id = $node_id OR elementId(n) = $node_id
+            RETURN COALESCE(connected.id, elementId(connected)) as id, labels(connected) as labels, type(r) as rel_type
             """,
             {"node_id": node_id}
         )
