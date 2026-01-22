@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play, Zap } from "lucide-vue-next";
 import { marked } from "marked";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -40,6 +40,7 @@ const lessonsLoading = ref(false);
 const assessmentsLoading = ref(false);
 const projectJobs = ref<Array<{ job_id: string; kind: string; status: string; meta?: Record<string, any> }>>([]);
 const jobPollTimers = new Map<string, number>();
+const projectNodes = ref<ApiNode[]>([]);
 
 const DEFAULT_PROJECT_ID = "project-all";
 
@@ -127,9 +128,10 @@ const loadProjectExtras = async (projectId: string) => {
   lessonsLoading.value = true;
   assessmentsLoading.value = true;
   try {
-    const [lessonsResponse, assessmentsResponse] = await Promise.all([
+    const [lessonsResponse, assessmentsResponse, nodesResponse] = await Promise.all([
       listProjectLessons(projectId),
       listProjectAssessments(projectId),
+      listProjectNodes(projectId),
     ]);
     lessons.value = [...lessonsResponse.lessons].sort((a, b) => {
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -137,6 +139,7 @@ const loadProjectExtras = async (projectId: string) => {
       return aTime - bTime;
     });
     assessments.value = assessmentsResponse.assessments;
+    projectNodes.value = nodesResponse.nodes;
   } catch (e) {
     console.error("Failed to load project extras", e);
   } finally {
@@ -346,6 +349,18 @@ const lessonTitleById = (lessonId: string) => {
   const lesson = lessons.value.find((item) => item.id === lessonId);
   return lesson?.title || "Lesson";
 };
+
+const groupedProjectNodes = computed(() => {
+  const groups: Record<string, ApiNode[]> = {};
+  projectNodes.value.forEach((node) => {
+    const label = node.labels?.find((value) => value !== "__Entity__") || "Node";
+    if (!groups[label]) {
+      groups[label] = [];
+    }
+    groups[label].push(node);
+  });
+  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+});
 
 const isAssessmentJobActive = (lessonId: string) => {
   return projectJobs.value.some((job) => job.kind === "assessment" && job.meta?.lesson_id === lessonId);
@@ -834,6 +849,30 @@ onUnmounted(() => {
                     {{ index + 1 }}
                   </span>
                   <span class="text-sm text-surface-700">{{ milestone }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+              <div class="flex items-center gap-2 mb-4">
+                <Brain :size="18" class="text-indigo-500" />
+                <h4 class="font-semibold text-surface-800">Knowledge Graph Nodes</h4>
+              </div>
+              <div v-if="groupedProjectNodes.length === 0" class="text-sm text-surface-400">
+                No linked knowledge graph nodes yet.
+              </div>
+              <div v-else class="space-y-4">
+                <div v-for="[label, nodes] in groupedProjectNodes" :key="label">
+                  <p class="text-xs uppercase tracking-wide text-surface-400">{{ label }}</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span
+                      v-for="node in nodes"
+                      :key="node.id"
+                      class="text-xs px-3 py-1 rounded-full bg-surface-50 text-surface-700 border border-surface-200"
+                    >
+                      {{ node.properties?.name || node.id }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

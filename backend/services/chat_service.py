@@ -8,6 +8,7 @@ This module provides the core chat functionality with:
 - Separation of chat storage from knowledge graph
 """
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -94,6 +95,10 @@ class BackgroundTaskStore:
     _tasks: dict[str, asyncio.Task] = {}
     _subscribers: dict[str, set[asyncio.Queue]] = {}
     
+    @classmethod
+    def has_task(cls, session_id: str) -> bool:
+        return session_id in cls._tasks
+
     @classmethod
     def store(cls, session_id: str, task: asyncio.Task):
         cls._tasks[session_id] = task
@@ -334,9 +339,22 @@ class ChatService:
     
     async def _handle_acceptance(self, session_id: str) -> ChatResponse:
         """Handle project acceptance - start async extraction."""
-        self.set_locked(session_id, True)
-
         history = self.get_messages(session_id)
+        proposal_hash = self._proposal_signature(history)
+        session_meta = self.db.get_chat_session_metadata(session_id)
+        last_project_id = session_meta.get("last_project_id")
+        last_hash = session_meta.get("last_proposal_hash")
+
+        if proposal_hash and last_project_id and last_hash == proposal_hash:
+            message = "That project is already saved. You can find it in the Projects tab."
+            already_message = self.add_message(session_id, "assistant", message)
+            await BackgroundTaskStore.notify(session_id, "message_added", already_message)
+            return ChatResponse(success=True, content=message, already_processed=True)
+
+        if BackgroundTaskStore.has_task(session_id):
+            return ChatResponse(success=False, is_processing=True)
+
+        self.set_locked(session_id, True)
 
         acceptance_message = self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
         await BackgroundTaskStore.notify(session_id, "message_added", acceptance_message)
@@ -576,6 +594,18 @@ Conversation:
             "concepts": [],
         }
 
+    def _proposal_signature(self, history: list[dict]) -> str | None:
+        last_assistant = next(
+            (m for m in reversed(history) if m.get("role") == "assistant" and "accept" in str(m.get("content", "")).lower()),
+            None,
+        )
+        if not last_assistant:
+            return None
+        content = str(last_assistant.get("content", "")).strip()
+        if not content:
+            return None
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     def _persist_project(self, session_id: str, summary: dict, history: list[dict], project_id: str | None = None) -> tuple[str, str]:
         if "agreed_project" not in summary or not isinstance(summary.get("agreed_project"), dict):
             summary["agreed_project"] = {
@@ -603,6 +633,8 @@ Conversation:
                 "idx": idx,
             })
         self.db.save_project_chat_history(project_id, history_payload)
+        proposal_hash = self._proposal_signature(history)
+        self.db.update_chat_session_metadata(session_id, project_id, proposal_hash)
         return project_name, project_id
     
     async def event_stream(self, session_id: str) -> AsyncGenerator[str, None]:

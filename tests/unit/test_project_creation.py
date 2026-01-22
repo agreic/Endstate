@@ -7,6 +7,7 @@ class DummyProjectDb:
     def __init__(self) -> None:
         self.summary = None
         self.chat_messages = None
+        self.session_metadata = {}
 
     def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str, is_default: bool = False) -> None:
         self.summary = {
@@ -19,6 +20,12 @@ class DummyProjectDb:
         self.chat_messages = {
             "id": project_id,
             "messages": messages,
+        }
+
+    def update_chat_session_metadata(self, session_id: str, project_id: str, proposal_hash: str | None) -> None:
+        self.session_metadata[session_id] = {
+            "last_project_id": project_id,
+            "last_proposal_hash": proposal_hash,
         }
 
 
@@ -67,6 +74,7 @@ def test_project_creation_persists_summary_and_chat_history():
     assert len(db.chat_messages["messages"]) == 3
     assert db.chat_messages["messages"][0]["idx"] == 0
     assert db.chat_messages["messages"][2]["idx"] == 2
+    assert db.session_metadata["session-123"]["last_project_id"] == "project-123"
 
 
 def test_project_name_from_option_selection():

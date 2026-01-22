@@ -164,7 +164,7 @@ class Neo4jClient:
         result = self.query(f"""
             MATCH (n:{label})
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
-            WHERE SIZE(nodes) > 1
+            WHERE prop IS NOT NULL AND SIZE(nodes) > 1
             CALL {{
                 WITH nodes
                 WITH HEAD(nodes) AS keep, TAIL(nodes) AS duplicates
@@ -210,7 +210,7 @@ class Neo4jClient:
         duplicates = self.query(f"""
             MATCH (n:{label})
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
-            WHERE SIZE(nodes) > 1
+            WHERE prop IS NOT NULL AND SIZE(nodes) > 1
             RETURN elementId(HEAD(nodes)) as keep_id,
                    [node IN TAIL(nodes) | elementId(node)] as dup_ids
         """)
@@ -571,6 +571,30 @@ class Neo4jClient:
             {"session_id": session_id}
         )
 
+    def get_chat_session_metadata(self, session_id: str) -> dict:
+        """Get chat session metadata."""
+        result = self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            RETURN s.last_project_id as last_project_id,
+                   s.last_proposal_hash as last_proposal_hash
+            """,
+            {"session_id": session_id},
+        )
+        return result[0] if result else {}
+
+    def update_chat_session_metadata(self, session_id: str, project_id: str, proposal_hash: str | None) -> None:
+        """Update chat session metadata after project creation."""
+        self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            SET s.last_project_id = $project_id,
+                s.last_proposal_hash = $proposal_hash,
+                s.updated_at = datetime()
+            """,
+            {"session_id": session_id, "project_id": project_id, "proposal_hash": proposal_hash},
+        )
+
     def add_chat_message(self, session_id: str, role: str, content: str) -> None:
         """Add a message to a chat session."""
         self.query(
@@ -792,6 +816,18 @@ class Neo4jClient:
                 """,
                 {"project_id": project_id, "names": list(names)},
             )
+
+    def list_project_nodes(self, project_id: str) -> list[dict]:
+        """List KG nodes connected to a project."""
+        result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[:HAS_NODE]->(n)
+            RETURN n
+            ORDER BY n.name ASC
+            """,
+            {"project_id": project_id},
+        )
+        return [_serialize_node(row["n"]) for row in result]
 
     def clear_project_nodes(self, project_id: str) -> None:
         """Remove project links and delete nodes unique to this project."""

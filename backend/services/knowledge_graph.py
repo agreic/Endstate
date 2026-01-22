@@ -198,6 +198,11 @@ class KnowledgeGraphService:
             include_source=include_source,
             base_entity_label=base_entity_label,
         )
+        for label in ("Skill", "Concept", "Topic"):
+            try:
+                self.merge_duplicates(label, match_property="name")
+            except Exception:
+                continue
     
     def extract_and_add(
         self,

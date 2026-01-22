@@ -652,6 +652,17 @@ def get_project_chat(project_id: str):
     return {"messages": messages}
 
 
+@app.get("/api/projects/{project_id}/nodes")
+def get_project_nodes(project_id: str):
+    """Get KG nodes connected to a project."""
+    from backend.db.neo4j_client import Neo4jClient
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
+    return {"nodes": db.list_project_nodes(project_id)}
+
+
 @app.patch("/api/projects/{project_id}/profile")
 def update_project_profile(project_id: str, request: ProfileUpdateRequest):
     """Update project profile fields."""

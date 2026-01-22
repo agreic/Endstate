@@ -482,3 +482,7 @@ export async function listProjectJobs(
 export async function getProjectChat(projectId: string): Promise<{ messages: ChatMessage[] }> {
   return requestJsonAllowNotFound(`/api/projects/${encodeURIComponent(projectId)}/chat`, { messages: [] });
 }
+
+export async function listProjectNodes(projectId: string): Promise<{ nodes: ApiNode[] }> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/nodes`);
+}
