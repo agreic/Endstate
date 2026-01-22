@@ -8,6 +8,7 @@ class DummyProjectDb:
         self.summary = None
         self.chat_messages = None
         self.session_metadata = {}
+        self.summary_nodes = []
 
     def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str, is_default: bool = False) -> None:
         self.summary = {
@@ -27,6 +28,9 @@ class DummyProjectDb:
             "last_project_id": project_id,
             "last_proposal_hash": proposal_hash,
         }
+
+    def upsert_project_nodes_from_summary(self, project_id: str, summary: dict) -> None:
+        self.summary_nodes.append((project_id, summary))
 
 
 def test_project_creation_persists_summary_and_chat_history():

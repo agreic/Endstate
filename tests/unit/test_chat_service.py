@@ -14,6 +14,9 @@ class DummyDb:
     def get_chat_session_metadata(self, session_id: str) -> dict:
         return {}
 
+    def upsert_project_nodes_from_summary(self, project_id: str, summary: dict) -> None:
+        return None
+
 
 def parse_sse(payload: str) -> Tuple[str, dict]:
     lines = [line for line in payload.splitlines() if line]
@@ -88,6 +91,7 @@ async def test_project_persists_on_extraction_error():
             self.summary = None
             self.chat_messages = None
             self.session_metadata = {}
+            self.summary_nodes = []
 
         def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str, is_default: bool = False) -> None:
             self.summary = {"id": project_id, "name": project_name, "summary_json": summary_json}
@@ -100,6 +104,9 @@ async def test_project_persists_on_extraction_error():
                 "last_project_id": project_id,
                 "last_proposal_hash": proposal_hash,
             }
+
+        def upsert_project_nodes_from_summary(self, project_id: str, summary: dict) -> None:
+            self.summary_nodes.append((project_id, summary))
 
     history = [
         {"role": "assistant", "content": "Project: Deep Dive into Python Lambda Functions", "timestamp": "2024-01-01T00:01:00.000Z"},

@@ -1140,6 +1140,7 @@ async def start_project(project_id: str):
         project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
         db.upsert_project_summary(project_id, project_name, json.dumps(summary))
         db.upsert_project_profile_node(project_id, summary.get("user_profile", {}))
+        summary_counts = db.upsert_project_nodes_from_summary(project_id, summary)
 
         db.clear_project_nodes(project_id)
 
@@ -1149,8 +1150,9 @@ async def start_project(project_id: str):
         normalized = service.normalize_documents(documents)
         service.add_documents(normalized, normalize=False)
 
-        node_count = sum(len(doc.nodes) for doc in normalized)
-        rel_count = sum(len(doc.relationships) for doc in normalized)
+        graph_counts = db.get_project_graph_counts(project_id)
+        node_count = graph_counts.get("nodes", 0)
+        rel_count = graph_counts.get("relationships", 0)
 
         for label in ("Skill", "Concept", "Topic"):
             try:
@@ -1163,6 +1165,10 @@ async def start_project(project_id: str):
             for node in doc.nodes:
                 node_refs.append({"label": node.type, "name": node.properties.get("name")})
         db.connect_project_to_nodes(project_id, node_refs)
+        summary_extra = db.upsert_project_nodes_from_summary(project_id, summary)
+        graph_counts = db.get_project_graph_counts(project_id)
+        node_count = graph_counts.get("nodes", 0)
+        rel_count = graph_counts.get("relationships", 0)
 
         summary["project_status"] = "initialized"
         summary["started_at"] = datetime.utcnow().isoformat()

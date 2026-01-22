@@ -622,6 +622,7 @@ Conversation:
         summary["session_id"] = session_id
 
         self.db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+        self.db.upsert_project_nodes_from_summary(project_id, summary)
 
         history_payload = []
         for idx, message in enumerate(history):

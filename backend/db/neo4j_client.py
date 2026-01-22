@@ -54,6 +54,19 @@ def _serialize_node(node) -> dict:
     }
 
 
+def _slugify(value: str) -> str:
+    safe = []
+    for ch in value.lower().strip():
+        if ch.isalnum():
+            safe.append(ch)
+        elif ch in {" ", "-", "_"}:
+            safe.append("-")
+    slug = "".join(safe).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "node"
+
+
 class Neo4jClient:
     """
     Neo4j database client with graph operations.
@@ -822,23 +835,113 @@ class Neo4jClient:
             },
         )
 
+    def upsert_project_nodes_from_summary(self, project_id: str, summary: dict) -> dict:
+        """Create KG nodes from project summary fields and link to the project."""
+        nodes: dict[str, set[str]] = {
+            "Skill": set(),
+            "Concept": set(),
+            "Topic": set(),
+            "Milestone": set(),
+        }
+        for key, label in (("skills", "Skill"), ("concepts", "Concept"), ("topics", "Topic")):
+            values = summary.get(key) if isinstance(summary.get(key), list) else []
+            for value in values:
+                if isinstance(value, str) and value.strip():
+                    nodes[label].add(value.strip())
+        agreed = summary.get("agreed_project", {}) if isinstance(summary.get("agreed_project"), dict) else {}
+        milestones = agreed.get("milestones") if isinstance(agreed.get("milestones"), list) else []
+        for value in milestones:
+            if isinstance(value, str) and value.strip():
+                nodes["Milestone"].add(value.strip())
+
+        relationship_count = 0
+        for label, names in nodes.items():
+            if not names:
+                continue
+            payload = [{"name": name, "id": f"{label.lower()}-{_slugify(name)}"} for name in names]
+            rel_type = {
+                "Skill": "HAS_SKILL",
+                "Concept": "HAS_CONCEPT",
+                "Topic": "HAS_TOPIC",
+                "Milestone": "HAS_MILESTONE",
+            }.get(label, "HAS_NODE")
+            self.query(
+                f"""
+                MATCH (p:Project {{id: $project_id}})
+                UNWIND $items as item
+                MERGE (n:{label} {{name: item.name}})
+                ON CREATE SET n.created_at = datetime()
+                SET n.name = item.name,
+                    n.id = COALESCE(n.id, item.id),
+                    n.updated_at = datetime()
+                MERGE (p)-[:HAS_NODE]->(n)
+                MERGE (p)-[:{rel_type}]->(n)
+                """,
+                {"project_id": project_id, "items": payload},
+            )
+            if label == "Milestone":
+                self.query(
+                    """
+                    MATCH (p:Project {id: $project_id})
+                    UNWIND $items as item
+                    MATCH (m:Milestone {name: item.name})
+                    MERGE (m)-[:PART_OF]->(p)
+                    """,
+                    {"project_id": project_id, "items": payload},
+                )
+                relationship_count += len(payload) * 3
+            else:
+                relationship_count += len(payload) * 2
+
+        milestone_skill_pairs: list[dict] = []
+        if nodes["Milestone"] and nodes["Skill"]:
+            for milestone in nodes["Milestone"]:
+                for skill in nodes["Skill"]:
+                    if skill.lower() in milestone.lower():
+                        milestone_skill_pairs.append({"milestone": milestone, "skill": skill})
+        if milestone_skill_pairs:
+            self.query(
+                """
+                UNWIND $pairs as pair
+                MATCH (m:Milestone {name: pair.milestone})
+                MATCH (s:Skill {name: pair.skill})
+                MERGE (m)-[:REQUIRES]->(s)
+                """,
+                {"pairs": milestone_skill_pairs},
+            )
+            relationship_count += len(milestone_skill_pairs)
+
+        for label in ("Skill", "Concept", "Topic"):
+            try:
+                self.merge_nodes_simple(label, match_property="name")
+            except Exception:
+                continue
+        return {"nodes": sum(len(names) for names in nodes.values()), "relationships": relationship_count}
+
     def connect_project_to_nodes(self, project_id: str, nodes: list[dict]) -> None:
         """Connect a project to skill/concept/topic nodes by name."""
         grouped: dict[str, set[str]] = {}
         for node in nodes:
             name = node.get("name")
             label = node.get("label")
-            if not name or label not in {"Skill", "Concept", "Topic"}:
+            if not name or label not in {"Skill", "Concept", "Topic", "Milestone"}:
                 continue
             grouped.setdefault(label, set()).add(name)
 
         for label, names in grouped.items():
+            rel_type = {
+                "Skill": "HAS_SKILL",
+                "Concept": "HAS_CONCEPT",
+                "Topic": "HAS_TOPIC",
+                "Milestone": "HAS_MILESTONE",
+            }.get(label, "HAS_NODE")
             self.query(
                 f"""
                 MATCH (p:Project {{id: $project_id}})
                 UNWIND $names as node_name
                 MATCH (n:{label} {{name: node_name}})
                 MERGE (p)-[:HAS_NODE]->(n)
+                MERGE (p)-[:{rel_type}]->(n)
                 """,
                 {"project_id": project_id, "names": list(names)},
             )
@@ -1081,6 +1184,27 @@ class Neo4jClient:
             {"project_id": project_id, "node_id": node_id},
         )
         return result
+
+    def get_project_graph_counts(self, project_id: str) -> dict:
+        """Return counts of nodes and relationships connected to a project."""
+        node_result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[:HAS_NODE]->(n)
+            RETURN count(DISTINCT n) as node_count
+            """,
+            {"project_id": project_id},
+        )
+        rel_result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[r]->()
+            RETURN count(r) as rel_count
+            """,
+            {"project_id": project_id},
+        )
+        return {
+            "nodes": node_result[0].get("node_count", 0) if node_result else 0,
+            "relationships": rel_result[0].get("rel_count", 0) if rel_result else 0,
+        }
 
     def archive_project_lesson(self, project_id: str, lesson_id: str) -> None:
         """Archive a lesson."""

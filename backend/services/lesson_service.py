@@ -39,6 +39,12 @@ def parse_lesson_content(content: str) -> dict:
         }
 
     cleaned = content.replace("```json", "").replace("```", "").strip()
+    lowered = cleaned.lower()
+    for marker in ("task:", "practical task", "assessment:"):
+        idx = lowered.find(marker)
+        if idx != -1:
+            cleaned = cleaned[:idx].strip()
+            break
     return {
         "explanation": cleaned,
         "task": "",
@@ -56,6 +62,17 @@ def _style_instruction(style: str) -> str:
     return "Provide a balanced explanation and a simple task."
 
 
+def _display_name(node: dict) -> str:
+    props = node.get("properties", {}) if isinstance(node.get("properties"), dict) else {}
+    name = (props.get("name") or props.get("title") or "").strip()
+    if name:
+        return name
+    labels = node.get("labels") or []
+    if labels:
+        return f"{labels[0]} topic"
+    return "Untitled topic"
+
+
 async def generate_lesson(
     node: dict,
     profile: dict | None,
@@ -64,7 +81,7 @@ async def generate_lesson(
 ) -> dict:
     llm = get_llm()
 
-    name = node.get("properties", {}).get("name") or node.get("id")
+    name = _display_name(node)
     labels = ", ".join(node.get("labels", []))
     description = node.get("properties", {}).get("description", "")
 
@@ -83,7 +100,10 @@ async def generate_lesson(
         "You are a learning coach. Create a short, focused lesson for the node below.\n"
         "Return JSON with key: explanation.\n"
         "Keep it bite-sized (4-8 short paragraphs or bullets) and cover ONE specific aspect.\n"
-        "Do not include tasks, exercises, or assessments.\n"
+        "Be concrete and specific to the topic; explain one subtopic in depth.\n"
+        "Include at most one short, precise example (code or query) if helpful.\n"
+        "Do not include tasks, exercises, assessments, or lesson plans.\n"
+        "Do not label sections as 'Lesson', 'Day', or 'Task'.\n"
         "Resource guidance:\n"
         "- If you mention a resource, include a real, specific URL.\n"
         "- Prefer official docs and reputable tutorials.\n"
@@ -126,7 +146,7 @@ async def generate_and_store_lesson(
     from uuid import uuid4
 
     lesson_id = f"lesson-{uuid4().hex[:8]}"
-    title = node.get("properties", {}).get("name") or node.get("id")
+    title = _display_name(node)
     db.save_project_lesson(
         project_id,
         lesson_id,
