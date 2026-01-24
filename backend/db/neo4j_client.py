@@ -364,22 +364,22 @@ class Neo4jClient:
         """
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         # Get node labels and counts
-        node_stats = self.query("""
+        node_stats = self.query(
+            """
             CALL db.labels() YIELD label
-            CALL {
-                WITH label
+            CALL (label) {
                 MATCH (n) WHERE label IN labels(n)
                 RETURN count(n) as count
             }
             RETURN label, count
-        """)
+            """
+        )
         
         # Get relationship types and counts
         rel_stats = self.query(
             """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL {
-                WITH relationshipType
+            CALL (relationshipType) {
                 MATCH (n)-[r]->(m)
                 WHERE type(r) = relationshipType
                   AND any(label IN labels(n) WHERE label IN $labels)
@@ -503,8 +503,7 @@ class Neo4jClient:
         node_stats = self.query(
             """
             UNWIND $labels as label
-            CALL {
-                WITH label
+            CALL (label) {
                 MATCH (n)
                 WHERE label IN labels(n)
                   AND NOT (n:Project AND COALESCE(n.is_default, false))
@@ -515,15 +514,16 @@ class Neo4jClient:
             {"labels": allowed_labels},
         )
 
-        rel_stats = self.query("""
+        rel_stats = self.query(
+            """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL {
-                WITH relationshipType
+            CALL (relationshipType) {
                 MATCH ()-[r]->() WHERE type(r) = relationshipType
                 RETURN count(r) as count
             }
             RETURN relationshipType, count
-        """)
+            """
+        )
 
         return {
             "nodes": {row["label"]: row["count"] for row in node_stats if row["count"] > 0},
