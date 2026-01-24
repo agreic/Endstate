@@ -9,6 +9,7 @@ class DummyProjectDb:
         self.chat_messages = None
         self.session_metadata = {}
         self.summary_nodes = []
+        self.profile_nodes = []
 
     def upsert_project_summary(self, project_id: str, project_name: str, summary_json: str, is_default: bool = False) -> None:
         self.summary = {
@@ -32,6 +33,9 @@ class DummyProjectDb:
     def upsert_project_nodes_from_summary(self, project_id: str, summary: dict) -> None:
         self.summary_nodes.append((project_id, summary))
 
+    def upsert_project_profile_node(self, project_id: str, profile: dict) -> None:
+        self.profile_nodes.append((project_id, profile))
+
 
 def test_project_creation_persists_summary_and_chat_history():
     history = [
@@ -39,15 +43,11 @@ def test_project_creation_persists_summary_and_chat_history():
         {
             "role": "assistant",
             "content": (
-                "Excellent! Knowing you're comfortable with Python and prefer a theoretical approach with 2 hours per week, "
-                "here's a project proposal focused on understanding Python lambdas:\n"
-                "Project: Deep Dive into Python Lambda Functions\n"
-                "* Goal: Gain a thorough theoretical understanding of Python's lambda functions.\n"
-                "Do you accept this project proposal? If yes, type: I accept"
+                "Tell me more about what you want to build so I can understand your goals."
             ),
             "timestamp": "2024-01-01T00:01:00.000Z",
         },
-        {"role": "user", "content": "I accept", "timestamp": "2024-01-01T00:02:00.000Z"},
+        {"role": "user", "content": "I want to explore Python lambdas.", "timestamp": "2024-01-01T00:02:00.000Z"},
     ]
 
     db = DummyProjectDb()
@@ -55,7 +55,7 @@ def test_project_creation_persists_summary_and_chat_history():
 
     summary = {
         "user_profile": {"interests": [], "skill_level": "", "time_available": "", "learning_style": ""},
-        "agreed_project": {"name": "", "description": "", "timeline": "", "milestones": []},
+        "agreed_project": {"name": "Deep Dive into Python Lambda Functions", "description": "", "timeline": "", "milestones": []},
         "topics": [],
         "skills": [],
         "concepts": [],
@@ -79,25 +79,3 @@ def test_project_creation_persists_summary_and_chat_history():
     assert db.chat_messages["messages"][0]["idx"] == 0
     assert db.chat_messages["messages"][2]["idx"] == 2
     assert db.session_metadata["session-123"]["last_project_id"] == "project-123"
-
-
-def test_project_name_from_option_selection():
-    history = [
-        {
-            "role": "assistant",
-            "content": (
-                "Here are options:\n"
-                "1. **Build a CLI tool**\n"
-                "2. **Deep Dive into Python Lambda Functions**\n"
-                "Do you accept one of these proposals? If yes, type: I accept [option name]"
-            ),
-            "timestamp": "2024-01-01T00:01:00.000Z",
-        },
-        {"role": "user", "content": "I accept option 2", "timestamp": "2024-01-01T00:02:00.000Z"},
-    ]
-
-    db = DummyProjectDb()
-    service = ChatService(db=db)  # type: ignore[arg-type]
-
-    inferred = service._infer_project_name(history)
-    assert inferred == "Deep Dive into Python Lambda Functions"

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
 from backend.services.extraction_service import cancel_task
-from backend.services.project_service import build_project_extraction_text, extract_profile_from_history
+from backend.services.project_service import build_project_extraction_text
 from backend.schemas.skill_graph import SkillGraphSchema
 from backend.services.lesson_service import generate_lesson, generate_and_store_lesson, parse_lesson_content
 from backend.services.assessment_service import generate_assessment, evaluate_assessment, parse_assessment_content
@@ -40,6 +40,10 @@ class ChatRequest(BaseModel):
 
 class ExtractRequest(BaseModel):
     text: str
+
+
+class ProjectSuggestionRequest(BaseModel):
+    count: Optional[int] = 3
 
 
 class ChatResponse(BaseModel):
@@ -423,10 +427,45 @@ def get_chat_messages(session_id: str):
     try:
         messages = chat_service.get_messages(session_id)
         is_locked = chat_service.is_locked(session_id)
-        return {"messages": messages, "is_locked": is_locked}
+        proposals = chat_service.get_pending_proposals(session_id)
+        return {"messages": messages, "is_locked": is_locked, "proposals": proposals}
     except Exception as e:
         print(f"[Chat] Error getting messages: {e}")
-        return {"messages": [], "is_locked": False}
+        return {"messages": [], "is_locked": False, "proposals": []}
+
+
+@app.get("/api/chat/{session_id}/proposals")
+def get_chat_proposals(session_id: str):
+    """Get pending project proposals for a chat session."""
+    proposals = chat_service.get_pending_proposals(session_id)
+    return {"proposals": proposals}
+
+
+@app.post("/api/chat/{session_id}/proposals")
+async def suggest_chat_projects(session_id: str, request: ProjectSuggestionRequest):
+    """Generate project suggestions from chat history."""
+    result = await chat_service.request_project_suggestions(session_id, count=request.count or 3)
+    return result
+
+
+@app.post("/api/chat/{session_id}/proposals/reject")
+async def reject_chat_projects(session_id: str):
+    """Reject all pending project proposals."""
+    await chat_service.reject_project_proposals(session_id)
+    await BackgroundTaskStore.notify(session_id, "proposals_cleared", {"proposals": []})
+    return {"status": "cleared"}
+
+
+@app.post("/api/chat/{session_id}/proposals/{proposal_id}/accept")
+async def accept_chat_project(session_id: str, proposal_id: str):
+    """Accept a project proposal and create a project."""
+    try:
+        result = await chat_service.accept_project_proposal(session_id, proposal_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    await BackgroundTaskStore.notify(session_id, "message_added", result.get("assistant_message", {}))
+    await BackgroundTaskStore.notify(session_id, "proposals_cleared", {"proposals": []})
+    return {"project_id": result.get("project_id"), "project_name": result.get("project_name")}
 
 
 @app.post("/api/chat/{session_id}/reset")
@@ -572,6 +611,7 @@ def get_project(project_id: str):
     data["session_id"] = row.get("id")
     data["created_at"] = created_at
     data["updated_at"] = updated_at
+    data["is_default"] = bool(row.get("is_default")) if row.get("is_default") is not None else False
     return data
 
 
@@ -1342,8 +1382,6 @@ async def start_project(project_id: str):
         history = db.get_project_chat_history(project_id)
         if not history:
             history = []
-
-        summary["user_profile"] = extract_profile_from_history(summary, history)
 
         project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
         db.upsert_project_summary(project_id, project_name, json.dumps(summary))

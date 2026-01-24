@@ -646,6 +646,50 @@ class Neo4jClient:
             {"session_id": session_id, "project_id": project_id, "proposal_hash": proposal_hash},
         )
 
+    def get_pending_proposals(self, session_id: str) -> list[dict]:
+        """Get pending project proposals for a chat session."""
+        result = self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            RETURN s.pending_proposals as pending_proposals
+            """,
+            {"session_id": session_id},
+        )
+        if not result:
+            return []
+        raw = result[0].get("pending_proposals")
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            return []
+        return data if isinstance(data, list) else []
+
+    def set_pending_proposals(self, session_id: str, proposals: list[dict]) -> None:
+        """Set pending project proposals for a chat session."""
+        self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            SET s.pending_proposals = $proposals,
+                s.pending_proposals_at = datetime(),
+                s.updated_at = datetime()
+            """,
+            {"session_id": session_id, "proposals": json.dumps(proposals)},
+        )
+
+    def clear_pending_proposals(self, session_id: str) -> None:
+        """Clear pending proposals for a chat session."""
+        self.query(
+            """
+            MATCH (s:ChatSession {id: $session_id})
+            REMOVE s.pending_proposals
+            REMOVE s.pending_proposals_at
+            SET s.updated_at = datetime()
+            """,
+            {"session_id": session_id},
+        )
+
     def add_chat_message(self, session_id: str, role: str, content: str) -> None:
         """Add a message to a chat session."""
         self.query(

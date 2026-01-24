@@ -13,17 +13,17 @@ const steps = [
   {
     icon: MessageSquare,
     title: 'Start a Conversation',
-    description: 'Tell the AI about your learning goals, interests, and what you want to achieve. Be as specific as you can about your interests and time availability.'
+    description: 'Tell the AI about your learning goals, interests, and what you want to achieve. The chat focuses on understanding your intent and constraints.'
   },
   {
     icon: Sparkles,
     title: 'Receive Project Proposals',
-    description: 'The AI will suggest 2-3 personalized project ideas based on your goals. Each proposal includes a timeline and milestones.'
+    description: 'Click “Suggest Projects” to generate 2-3 focused project options based on the chat so far.'
   },
   {
     icon: CheckCircle,
-    title: 'Accept a Project',
-    description: 'When you see a project you like, type "I accept" or similar. The AI will create a detailed learning plan with milestones and topics to cover.'
+    title: 'Choose or Reject',
+    description: 'Pick a proposal card to create a project, or reject all and continue chatting to refine ideas.'
   },
   {
     icon: FolderOpen,

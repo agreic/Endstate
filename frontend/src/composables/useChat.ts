@@ -1,5 +1,6 @@
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { ChatMessage } from '../types/chat';
+import type { ProjectProposal } from '../services/api';
 
 const SESSION_ID_KEY = 'endstate_chat_session_id';
 
@@ -19,13 +20,16 @@ export function useChat() {
   const error = ref<string | null>(null);
   const messages = ref<ChatMessage[]>([]);
   const isLocked = ref(false);
-  const processingMode = ref<'chat' | 'summary' | null>(null);
+  const processingMode = ref<'chat' | 'summary' | 'proposal' | null>(null);
+  const pendingProposals = ref<ProjectProposal[]>([]);
+  const isChatBlocked = computed(() => isLocked.value || pendingProposals.value.length > 0);
   const messageKeys = new Set<string>();
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let proposalPollTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const FETCH_TIMEOUT = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS) || 120000; // 120 seconds default
 
@@ -88,6 +92,7 @@ export function useChat() {
       
       const data = await response.json();
       isLocked.value = data.is_locked || false;
+      pendingProposals.value = Array.isArray(data.proposals) ? data.proposals : [];
       const mapped = (data.messages || []).map((m: any) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
@@ -106,6 +111,10 @@ export function useChat() {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
     }
+    if (proposalPollTimeout) {
+      clearTimeout(proposalPollTimeout);
+      proposalPollTimeout = null;
+    }
     if (eventSource) {
       eventSource.close();
       eventSource = null;
@@ -113,11 +122,37 @@ export function useChat() {
     reconnectAttempts = 0;
   };
 
+  const pollProposals = () => {
+    if (proposalPollTimeout) {
+      clearTimeout(proposalPollTimeout);
+      proposalPollTimeout = null;
+    }
+    if (pendingProposals.value.length > 0) return;
+    proposalPollTimeout = setTimeout(async () => {
+      try {
+        const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals`);
+        if (response.ok) {
+          const data = await response.json();
+          pendingProposals.value = Array.isArray(data.proposals) ? data.proposals : [];
+          if (pendingProposals.value.length > 0) {
+            isLocked.value = false;
+            processingMode.value = null;
+            return;
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+      pollProposals();
+    }, 2000);
+  };
+
   const applyInitialMessages = (payload: any) => {
     isLocked.value = payload.locked || false;
     if (isLocked.value && !processingMode.value) {
       processingMode.value = 'chat';
     }
+    pendingProposals.value = Array.isArray(payload.proposals) ? payload.proposals : [];
     if (payload.error) {
       error.value = payload.error;
     }
@@ -156,10 +191,23 @@ export function useChat() {
     } else if (payload.event === 'processing_cancelled') {
       isLocked.value = false;
       processingMode.value = null;
+    } else if (payload.event === 'proposals_updated') {
+      pendingProposals.value = Array.isArray(payload.proposals) ? payload.proposals : [];
+      if (proposalPollTimeout) {
+        clearTimeout(proposalPollTimeout);
+        proposalPollTimeout = null;
+      }
+    } else if (payload.event === 'proposals_cleared') {
+      pendingProposals.value = [];
+      if (proposalPollTimeout) {
+        clearTimeout(proposalPollTimeout);
+        proposalPollTimeout = null;
+      }
     } else if (payload.event === 'session_reset') {
       setMessages([]);
       isLocked.value = false;
       processingMode.value = null;
+      pendingProposals.value = [];
     } else if (payload.event === 'error') {
       error.value = payload.message || 'An error occurred';
       console.error('[Chat] Server error:', payload.message);
@@ -216,6 +264,28 @@ export function useChat() {
         }
       });
 
+      eventSource.addEventListener('proposals_updated', (event) => {
+        clearTimeout(connectionTimeout);
+        try {
+          const data = JSON.parse((event as MessageEvent).data);
+          pendingProposals.value = Array.isArray(data.proposals) ? data.proposals : [];
+          if (proposalPollTimeout) {
+            clearTimeout(proposalPollTimeout);
+            proposalPollTimeout = null;
+          }
+        } catch (e) {
+          console.error('[Chat] SSE parse error:', e);
+        }
+      });
+
+      eventSource.addEventListener('proposals_cleared', () => {
+        pendingProposals.value = [];
+        if (proposalPollTimeout) {
+          clearTimeout(proposalPollTimeout);
+          proposalPollTimeout = null;
+        }
+      });
+
       eventSource.addEventListener('processing_complete', () => {
         isLocked.value = false;
         processingMode.value = null;
@@ -225,7 +295,11 @@ export function useChat() {
         isLocked.value = true;
         try {
           const data = JSON.parse((event as MessageEvent).data);
-          processingMode.value = data.reason === 'summary' ? 'summary' : 'chat';
+          processingMode.value = data.reason === 'summary'
+            ? 'summary'
+            : data.reason === 'proposal'
+              ? 'proposal'
+              : 'chat';
         } catch (e) {
           processingMode.value = 'chat';
           console.error('[Chat] SSE parse error:', e);
@@ -294,6 +368,10 @@ export function useChat() {
 
   const sendMessage = async (content: string) => {
     if (isSending.value) return;
+    if (pendingProposals.value.length > 0) {
+      error.value = 'Choose a project or reject all before continuing the chat.';
+      return;
+    }
     if (isLocked.value) {
       error.value = 'Chat is processing. Please wait.';
       return;
@@ -338,9 +416,80 @@ export function useChat() {
       await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/reset`, { method: 'POST' });
       setMessages([]);
       isLocked.value = false;
+      pendingProposals.value = [];
       error.value = null;
     } catch (e: any) {
       error.value = e.message || 'Failed to reset chat';
+    }
+  };
+
+  const requestProjectSuggestions = async (count: number = 3) => {
+    if (isLocked.value || pendingProposals.value.length > 0) return;
+    error.value = null;
+    isLocked.value = true;
+    processingMode.value = 'proposal';
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      if (Array.isArray(data.proposals)) {
+        pendingProposals.value = data.proposals;
+        isLocked.value = false;
+        processingMode.value = null;
+      } else if (data.status === 'queued') {
+        pollProposals();
+      }
+    } catch (e: any) {
+      error.value = e.message || 'Failed to suggest projects';
+      isLocked.value = false;
+      processingMode.value = null;
+    }
+  };
+
+  const acceptProposal = async (proposalId: string) => {
+    error.value = null;
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals/${proposalId}/accept`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${response.status}`);
+      }
+      pendingProposals.value = [];
+      if (proposalPollTimeout) {
+        clearTimeout(proposalPollTimeout);
+        proposalPollTimeout = null;
+      }
+    } catch (e: any) {
+      error.value = e.message || 'Failed to accept proposal';
+    }
+  };
+
+  const rejectProposals = async () => {
+    error.value = null;
+    try {
+      const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals/reject`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${response.status}`);
+      }
+      pendingProposals.value = [];
+      if (proposalPollTimeout) {
+        clearTimeout(proposalPollTimeout);
+        proposalPollTimeout = null;
+      }
+    } catch (e: any) {
+      error.value = e.message || 'Failed to reject proposals';
     }
   };
 
@@ -358,10 +507,15 @@ export function useChat() {
     connectionStatus,
     isSending,
     isLocked,
+    isChatBlocked,
+    pendingProposals,
     processingMode,
     error,
     sendMessage,
     resetChat,
+    requestProjectSuggestions,
+    acceptProposal,
+    rejectProposals,
     loadMessages: fetchMessages,
   };
 }

@@ -8,10 +8,8 @@ This module provides the core chat functionality with:
 - Separation of chat storage from knowledge graph
 """
 import asyncio
-import hashlib
 import json
 import os
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -22,7 +20,7 @@ from typing import Optional, AsyncGenerator, Callable, Any
 from backend.config import config
 from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
-from backend.services.agent_prompts import get_chat_system_prompt
+from backend.services.agent_prompts import get_chat_system_prompt, get_project_suggestion_prompt
 from backend.services.evaluation_service import evaluate_project_alignment, evaluate_kg_quality
 from backend.services.opik_client import log_metric
 
@@ -71,7 +69,12 @@ def safe_run_with_timeout(func: Callable, timeout: float = LLM_TIMEOUT) -> Any:
         return None, timeout
 
 
-ACCEPTANCE_START_MESSAGE = "Excellent! I'm creating a detailed project plan for you. This will take just a moment..."
+DEFAULT_PROFILE = {
+    "interests": [],
+    "skill_level": "intermediate",
+    "time_available": "2 hours/week",
+    "learning_style": "hybrid",
+}
 
 
 @dataclass
@@ -247,9 +250,21 @@ class ChatService:
         """Check if session is locked."""
         result = self.db.query(
             "MATCH (s:ChatSession {id: $session_id}) RETURN COALESCE(s.is_processing, false) as locked",
-            {"session_id": session_id}
+            {"session_id": session_id},
         )
         return result[0].get("locked", False) if result else False
+
+    def get_pending_proposals(self, session_id: str) -> list[dict]:
+        """Return pending proposals for a chat session."""
+        return self.db.get_pending_proposals(session_id)
+
+    def has_pending_proposals(self, session_id: str) -> bool:
+        """Check if a chat session has pending proposals."""
+        return bool(self.db.get_pending_proposals(session_id))
+
+    def clear_pending_proposals(self, session_id: str) -> None:
+        """Clear any pending proposals for a chat session."""
+        self.db.clear_pending_proposals(session_id)
     
     def delete_session(self, session_id: str) -> None:
         """Delete a session and all its messages."""
@@ -259,21 +274,14 @@ class ChatService:
             {"session_id": session_id}
         )
     
-    def _is_acceptance(self, message: str) -> bool:
-        """Check if message indicates project acceptance."""
-        lower = message.lower().strip()
-        patterns = [
-            "i accept", "i agree", "yes, i accept", "yes i accept",
-            "that sounds good", "sounds good", "sounds great",
-            "let's do it", "lets do it", "yes please", "yes, please",
-            "i agree to this", "accepted", "i'm in", "im in",
-            "this looks good", "looks good", "perfect", "option 1", "option 2", "option 3"
-        ]
-        return any(pattern in lower for pattern in patterns)
-    
     async def send_message(self, session_id: str, content: str, request_id: str) -> ChatResponse:
         """Send a message - idempotent by request_id."""
         if self.is_locked(session_id):
+            return ChatResponse(success=False, is_processing=True)
+        if self.has_pending_proposals(session_id):
+            await BackgroundTaskStore.notify(session_id, "error", {
+                "message": "Please select a project or reject all proposals before continuing the chat."
+            })
             return ChatResponse(success=False, is_processing=True)
         self.create_session(session_id)
         
@@ -286,10 +294,6 @@ class ChatService:
         
         # Notify subscribers of new user message
         await BackgroundTaskStore.notify(session_id, "message_added", user_message)
-        
-        # Check for acceptance
-        if self._is_acceptance(content):
-            return await self._handle_acceptance(session_id)
         
         # Normal chat response - set locked state during processing
         self.set_locked(session_id, True)
@@ -339,274 +343,132 @@ class ChatService:
             self.set_locked(session_id, False)
             await BackgroundTaskStore.notify(session_id, "processing_complete", {"reason": "chat"})
     
-    async def _handle_acceptance(self, session_id: str) -> ChatResponse:
-        """Handle project acceptance - start async extraction."""
-        history = self.get_messages(session_id)
-        proposal_hash = self._proposal_signature(history)
-        session_meta = self.db.get_chat_session_metadata(session_id)
-        last_project_id = session_meta.get("last_project_id")
-        last_hash = session_meta.get("last_proposal_hash")
-
-        if proposal_hash and last_project_id and last_hash == proposal_hash:
-            message = "That project is already saved. You can find it in the Projects tab."
-            already_message = self.add_message(session_id, "assistant", message)
-            await BackgroundTaskStore.notify(session_id, "message_added", already_message)
-            return ChatResponse(success=True, content=message, already_processed=True)
-
-        if BackgroundTaskStore.has_task(session_id):
-            return ChatResponse(success=False, is_processing=True)
-
-        self.set_locked(session_id, True)
-
-        acceptance_message = self.add_message(session_id, "assistant", ACCEPTANCE_START_MESSAGE)
-        await BackgroundTaskStore.notify(session_id, "message_added", acceptance_message)
-
-        await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "summary"})
-
-        task = asyncio.create_task(self._extract_summary_async(session_id, [m.copy() for m in history]))
-        BackgroundTaskStore.store(session_id, task)
-        
-        return ChatResponse(success=True, content=ACCEPTANCE_START_MESSAGE, is_processing=True)
-    
-    async def _extract_summary_async(self, session_id: str, history: list[dict]):
-        """Extract project summary asynchronously."""
-        summary = None
-        timeout_notice = None
+    def _parse_project_suggestions(self, content: str) -> list[dict]:
         try:
-            loop = asyncio.get_event_loop()
-            try:
-                has_llm, llm_summary = await asyncio.wait_for(
-                    loop.run_in_executor(None, self._extract_summary_llm_with_invoke, history),
-                    timeout=LLM_TIMEOUT
-                )
-            except asyncio.TimeoutError:
-                has_llm = False
-                llm_summary = None
-                timeout_notice = "Project extraction timed out. The plan was saved with available details."
+            data = json.loads(content)
+            if isinstance(data, dict):
+                return data.get("projects") if isinstance(data.get("projects"), list) else []
+        except Exception:
+            pass
+        try:
+            import re
+            match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                if isinstance(data, dict):
+                    return data.get("projects") if isinstance(data.get("projects"), list) else []
+        except Exception:
+            return []
+        return []
 
-            if has_llm and llm_summary:
-                summary = llm_summary
-            else:
-                has_fast, fast_summary = self._extract_summary_fast(history)
-                if has_fast and fast_summary:
-                    summary = fast_summary
+    def _normalize_project_suggestions(self, raw: list[dict]) -> list[dict]:
+        normalized = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", "")).strip()
+            description = str(entry.get("description", "")).strip()
+            if not name:
+                continue
+            normalized.append({
+                "id": f"proposal-{uuid.uuid4().hex[:8]}",
+                "name": name,
+                "description": description,
+                "timeline": str(entry.get("timeline", "")).strip(),
+                "milestones": [m for m in entry.get("milestones", []) if isinstance(m, str) and m.strip()],
+                "skills": [s for s in entry.get("skills", []) if isinstance(s, str) and s.strip()],
+                "topics": [t for t in entry.get("topics", []) if isinstance(t, str) and t.strip()],
+                "concepts": [c for c in entry.get("concepts", []) if isinstance(c, str) and c.strip()],
+            })
+        return normalized
+
+    async def request_project_suggestions(self, session_id: str, count: int = 3) -> dict:
+        """Generate project suggestions from chat history."""
+        self.create_session(session_id)
+        pending = self.db.get_pending_proposals(session_id)
+        if pending:
+            return {"status": "pending", "proposals": pending}
+        if self.db.is_session_locked(session_id):
+            return {"status": "busy"}
+        if BackgroundTaskStore.has_task(session_id):
+            return {"status": "busy"}
+
+        history = self.get_messages(session_id)
+        self.set_locked(session_id, True)
+        await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "proposal"})
+
+        task = asyncio.create_task(self._generate_project_suggestions(session_id, history, count))
+        BackgroundTaskStore.store(session_id, task)
+        return {"status": "queued"}
+
+    async def _generate_project_suggestions(self, session_id: str, history: list[dict], count: int):
+        """Generate project suggestions asynchronously."""
+        try:
+            prompt = get_project_suggestion_prompt(history, max_projects=count)
+            response = await asyncio.wait_for(self.llm.ainvoke([("human", prompt)]), timeout=LLM_TIMEOUT)
+            content = str(response.content if hasattr(response, "content") else response)
+            proposals = self._normalize_project_suggestions(self._parse_project_suggestions(content))
+
+            if not proposals:
+                proposals = [{
+                    "id": f"proposal-{uuid.uuid4().hex[:8]}",
+                    "name": "Learning Project",
+                    "description": "A focused learning project based on your goals.",
+                    "timeline": "2-4 weeks",
+                    "milestones": [],
+                    "skills": [],
+                    "topics": [],
+                    "concepts": [],
+                }]
+
+            self.db.set_pending_proposals(session_id, proposals)
+            await BackgroundTaskStore.notify(session_id, "proposals_updated", {"proposals": proposals})
         except asyncio.CancelledError:
             await BackgroundTaskStore.notify(session_id, "processing_cancelled", {})
             raise
         except Exception as e:
-            print(f"Error extracting summary for session {session_id}: {e}")
-        try:
-            if summary is None:
-                inferred_name = self._infer_project_name(history)
-                summary = self._build_fallback_summary(history, inferred_name)
-
-            project_name, _project_id = self._persist_project(session_id, summary, history)
-            msg = f"Your detailed project plan is ready: **{project_name}**. View it in the Projects tab."
-            ready_message = self.add_message(session_id, "assistant", msg)
-            await BackgroundTaskStore.notify(session_id, "message_added", ready_message)
-
-            if timeout_notice:
-                await BackgroundTaskStore.notify(session_id, "error", {
-                    "message": timeout_notice
-                })
-        except Exception as e:
-            print(f"Error saving project for session {session_id}: {e}")
-            await BackgroundTaskStore.notify(session_id, "error", {
-                "message": "Failed to save the project. Please try again."
-            })
+            await BackgroundTaskStore.notify(session_id, "error", {"message": f"Failed to suggest projects: {e}"})
         finally:
             self.set_locked(session_id, False)
-            await BackgroundTaskStore.notify(session_id, "processing_complete", {})
+            await BackgroundTaskStore.notify(session_id, "processing_complete", {"reason": "proposal"})
             if session_id in BackgroundTaskStore._tasks:
                 del BackgroundTaskStore._tasks[session_id]
-    
-    def _extract_summary_llm_with_invoke(self, history: list[dict]) -> tuple[bool, dict | None]:
-        """Wrapper to call _extract_summary_llm in thread pool."""
-        return self._extract_summary_llm(history)
-    
-    def _extract_summary_llm(self, history: list[dict]) -> tuple[bool, dict | None]:
-        """Extract summary using LLM."""
-        user_msgs = [m for m in history if m.get("role") == "user"]
-        if len(user_msgs) < 3:
-            return False, None
-        
-        last_assistant = None
-        for msg in reversed(history):
-            if msg.get("role") == "assistant":
-                last_assistant = msg.get("content", "")
-                break
-        
-        if not last_assistant or "accept" not in last_assistant.lower():
-            return False, None
-        
-        prompt = """You are a learning project planner. Extract a structured project summary from the conversation.
 
-Look for:
-1. A project the user has agreed to
-2. Their interests (list of 2+)
-3. Skills to develop (list of 2+)
-4. Topics to learn (list of 2+)
-5. Timeline if mentioned
-6. Milestones if mentioned
-
-Output ONLY valid JSON:
-{"user_profile": {"interests": [], "skill_level": "", "time_available": "", "learning_style": ""}, "agreed_project": {"name": "", "description": "", "timeline": "", "milestones": []}, "topics": [], "skills": [], "concepts": []}
-
-If you cannot find all required fields, output: NOT_READY
-
-Conversation:
-"""
-        
-        for msg in history[-10:]:
-            prompt += f"{msg.get('role', '')}: {msg.get('content', '')}\n"
-        prompt += "\nOutput JSON only:"
-        
-        try:
-            response = self.llm.invoke([("human", prompt)])
-            content = str(response.content if hasattr(response, 'content') else response)
-            
-            if "NOT_READY" in content.upper():
-                return False, None
-            
-            try:
-                data = json.loads(content)
-                return True, data
-            except json.JSONDecodeError:
-                import re
-                json_match = re.search(r'\{[^{}]+\}', content)
-                if json_match:
-                    try:
-                        data = json.loads(json_match.group())
-                        return True, data
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                return False, None
-        except Exception as e:
-            print(f"LLM summary extraction error: {e}")
-            return False, None
-    
-    def _extract_summary_fast(self, history: list[dict]) -> tuple[bool, dict]:
-        """Fast summary extraction without LLM."""
-        user_msgs = [m for m in history if m.get("role") == "user"]
-        if len(user_msgs) < 3:
-            return False, {}
-        
-        last_assistant = None
-        for msg in reversed(history):
-            if msg.get("role") == "assistant":
-                last_assistant = msg.get("content", "")
-                break
-        
-        if not last_assistant or "accept" not in last_assistant.lower():
-            return False, {}
-        
-        interests, skills, topics = set(), set(), set()
-        
-        for msg in history[-8:]:
-            content = msg.get("content", "").lower()
-            if "machine learning" in content or "ml" in content:
-                interests.add("machine learning")
-            if "python" in content:
-                topics.add("python")
-            if "deep learning" in content or "neural network" in content:
-                topics.add("deep learning")
-            if "computer vision" in content:
-                topics.add("computer vision")
-            if "nlp" in content or "natural language" in content:
-                topics.add("nlp")
-            if "data" in content and "science" in content:
-                interests.add("data science")
-            if "web" in content and "develop" in content:
-                interests.add("web development")
-        
-        if not interests and not topics:
-            return False, {}
-        
-        summary = {
-            "user_profile": {
-                "interests": list(interests)[:5],
-                "skill_level": "not specified",
-                "time_available": "not specified",
-                "learning_style": "not specified"
-            },
-            "agreed_project": {
-                "name": "Learning Project",
-                "description": last_assistant.split("?")[0] + "?",
-                "timeline": "2-4 weeks",
-                "milestones": ["Set up environment", "Learn fundamentals", "Build project"]
-            },
-            "topics": list(topics)[:10],
-            "skills": list(skills)[:10],
-            "concepts": []
-        }
-        return True, summary
-
-    def _infer_project_name(self, history: list[dict]) -> str:
-        acceptance_message = next((m for m in reversed(history) if m.get("role") == "user"), {})
-        acceptance_text = str(acceptance_message.get("content", "")).strip()
-        lower = acceptance_text.lower()
-
-        match = re.search(r"accept\s+(?:option\s+)?(\d+)", lower)
-        option_number = int(match.group(1)) if match else None
-
-        if "accept" in lower:
-            after = acceptance_text.split("accept", 1)[-1].strip(" :.-").strip()
-            if after and not option_number:
-                tokens = re.sub(r"[^a-z0-9\\s]", "", after.lower()).split()
-                if tokens and all(tok in {"the", "a", "an", "one", "this", "that", "first", "second", "third"} for tok in tokens):
-                    after = ""
-                if after:
-                    return after
-
-        last_assistant = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
-        if last_assistant:
-            content = str(last_assistant.get("content", ""))
-            if option_number:
-                for line in content.splitlines():
-                    option_match = re.match(r"^\s*(\d+)\.\s*\**(.+?)\**\s*$", line.strip())
-                    if option_match and int(option_match.group(1)) == option_number:
-                        return option_match.group(2).strip()
-
-            project_match = re.search(r"project\s*[:\-]\s*(.+)", content, flags=re.IGNORECASE)
-            if project_match:
-                return project_match.group(1).strip()
-
-            bold_match = re.search(r"\*\*(.+?)\*\*", content)
-            if bold_match:
-                return bold_match.group(1).strip()
-
-        return "Untitled Project"
-
-    def _build_fallback_summary(self, history: list[dict], project_name: str) -> dict:
+    def _build_summary_from_proposal(self, proposal: dict) -> dict:
         return {
-            "user_profile": {
-                "interests": [],
-                "skill_level": "not specified",
-                "time_available": "not specified",
-                "learning_style": "not specified",
-            },
+            "user_profile": {**DEFAULT_PROFILE},
             "agreed_project": {
-                "name": project_name,
-                "description": "",
-                "timeline": "",
-                "milestones": [],
+                "name": proposal.get("name", "Untitled Project"),
+                "description": proposal.get("description", ""),
+                "timeline": proposal.get("timeline", ""),
+                "milestones": proposal.get("milestones", []) or [],
             },
-            "topics": [],
-            "skills": [],
-            "concepts": [],
+            "topics": proposal.get("topics", []) or [],
+            "skills": proposal.get("skills", []) or [],
+            "concepts": proposal.get("concepts", []) or [],
         }
 
-    def _proposal_signature(self, history: list[dict]) -> str | None:
-        last_assistant = next(
-            (m for m in reversed(history) if m.get("role") == "assistant" and "accept" in str(m.get("content", "")).lower()),
-            None,
-        )
-        if not last_assistant:
-            return None
-        content = str(last_assistant.get("content", "")).strip()
-        if not content:
-            return None
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    async def accept_project_proposal(self, session_id: str, proposal_id: str) -> dict:
+        """Accept a pending proposal and create a project."""
+        proposals = self.db.get_pending_proposals(session_id)
+        proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
+        if not proposal:
+            raise ValueError("Proposal not found")
+
+        history = self.get_messages(session_id)
+        summary = self._build_summary_from_proposal(proposal)
+        project_name, project_id = self._persist_project(session_id, summary, history)
+        self.db.clear_pending_proposals(session_id)
+        self.set_locked(session_id, False)
+
+        message = f"Project saved: **{project_name}**. View it in the Projects tab."
+        assistant_message = self.add_message(session_id, "assistant", message)
+        return {"project_id": project_id, "project_name": project_name, "message": message, "assistant_message": assistant_message}
+
+    async def reject_project_proposals(self, session_id: str) -> None:
+        """Reject all pending proposals."""
+        self.db.clear_pending_proposals(session_id)
+        self.set_locked(session_id, False)
 
     def _persist_project(self, session_id: str, summary: dict, history: list[dict], project_id: str | None = None) -> tuple[str, str]:
         if "agreed_project" not in summary or not isinstance(summary.get("agreed_project"), dict):
@@ -616,14 +478,16 @@ Conversation:
                 "timeline": "",
                 "milestones": [],
             }
-        project_name = summary.get("agreed_project", {}).get("name") or self._infer_project_name(history)
+        project_name = summary.get("agreed_project", {}).get("name") or "Untitled Project"
         summary["agreed_project"]["name"] = project_name
+        summary["user_profile"] = summary.get("user_profile") if isinstance(summary.get("user_profile"), dict) else {**DEFAULT_PROFILE}
 
         project_id = project_id or f"{session_id}-{uuid.uuid4().hex[:8]}"
         summary["project_id"] = project_id
         summary["session_id"] = session_id
 
         self.db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+        self.db.upsert_project_profile_node(project_id, summary.get("user_profile", {}))
         self.db.upsert_project_nodes_from_summary(project_id, summary)
         project_info = summary.get("agreed_project", {}) if isinstance(summary.get("agreed_project"), dict) else {}
         user_goal = ""
@@ -631,6 +495,7 @@ Conversation:
             if msg.get("role") == "user" and msg.get("content"):
                 user_goal = str(msg.get("content"))
                 break
+
         async def _log_alignment():
             result = await evaluate_project_alignment(user_goal, project_info)
             if "error" in result:
@@ -668,8 +533,7 @@ Conversation:
                 "idx": idx,
             })
         self.db.save_project_chat_history(project_id, history_payload)
-        proposal_hash = self._proposal_signature(history)
-        self.db.update_chat_session_metadata(session_id, project_id, proposal_hash)
+        self.db.update_chat_session_metadata(session_id, project_id, None)
         return project_name, project_id
     
     async def event_stream(self, session_id: str) -> AsyncGenerator[str, None]:
@@ -682,11 +546,12 @@ Conversation:
             # Send initial messages (with error handling)
             try:
                 messages = self.get_messages(session_id)
-                yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id), 'error': None})}\n\n"
+                proposals = self.db.get_pending_proposals(session_id)
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id), 'proposals': proposals, 'error': None})}\n\n"
             except Exception as e:
                 print(f"[Chat] Error fetching initial messages: {e}")
                 # Still send initial_messages with error - don't fail the stream
-                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False, 'error': 'Database unavailable. Chat will continue without history.'})}\n\n"
+                yield f"event: initial_messages\ndata: {json.dumps({'messages': [], 'locked': False, 'proposals': [], 'error': 'Database unavailable. Chat will continue without history.'})}\n\n"
             
             last_heartbeat = asyncio.get_event_loop().time()
             while True:

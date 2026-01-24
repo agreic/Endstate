@@ -401,7 +401,10 @@ const isAssessmentJobActive = (lessonId: string) => {
   return projectJobs.value.some((job) => job.kind === "assessment" && job.meta?.lesson_id === lessonId);
 };
 
-const isDefaultProject = computed(() => selectedProject.value?.session_id === DEFAULT_PROJECT_ID);
+const isDefaultProject = computed(() => {
+  if (!selectedProject.value) return false;
+  return selectedProject.value.session_id === DEFAULT_PROJECT_ID || Boolean(selectedProject.value.is_default);
+});
 const capstoneHeaderClass = computed(() =>
   isCapstoneComplete.value ? "bg-gradient-to-r from-emerald-500 to-emerald-600" : "bg-gradient-to-r from-primary-500 to-primary-600",
 );

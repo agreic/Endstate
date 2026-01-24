@@ -12,10 +12,24 @@ const inputMessage = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
 const showError = ref(true);
 
-const { messages, connectionStatus, isSending, isLocked, processingMode, error, sendMessage, resetChat } = useChat();
+const {
+  messages,
+  connectionStatus,
+  isSending,
+  isLocked,
+  isChatBlocked,
+  pendingProposals,
+  processingMode,
+  error,
+  sendMessage,
+  resetChat,
+  requestProjectSuggestions,
+  acceptProposal,
+  rejectProposals,
+} = useChat();
 
 const isInputDisabled = computed(() => {
-  return isSending.value || isLocked.value;
+  return isSending.value || isChatBlocked.value;
 });
 
 const canSend = computed(() => {
@@ -61,6 +75,10 @@ const handleSend = async () => {
   await sendMessage(text);
 };
 
+const handleSuggestProjects = async () => {
+  await requestProjectSuggestions();
+};
+
 const dismissError = () => {
   showError.value = false;
 };
@@ -76,6 +94,33 @@ const dismissError = () => {
     </div>
 
     <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
+      <div v-if="pendingProposals.length" class="bg-white rounded-xl border border-surface-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <p class="text-xs uppercase text-surface-400">Suggested projects</p>
+            <p class="text-sm text-surface-700">Pick one to create a project, or reject all to keep chatting.</p>
+          </div>
+          <button
+            @click="rejectProposals"
+            class="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+          >
+            Reject All
+          </button>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <button
+            v-for="proposal in pendingProposals"
+            :key="proposal.id"
+            @click="acceptProposal(proposal.id)"
+            class="text-left p-3 rounded-lg border border-surface-200 bg-surface-50 hover:bg-surface-100 transition-colors"
+          >
+            <p class="text-sm font-semibold text-surface-800">{{ proposal.name }}</p>
+            <p class="text-xs text-surface-500 mt-1 line-clamp-2">{{ proposal.description }}</p>
+            <p v-if="proposal.timeline" class="text-[10px] text-surface-400 mt-2">Timeline: {{ proposal.timeline }}</p>
+          </button>
+        </div>
+      </div>
+
       <div
         v-for="(message, index) in messages"
         :key="index"
@@ -147,7 +192,7 @@ const dismissError = () => {
         >
           <div class="flex items-center gap-1.5">
             <span class="text-xs text-amber-600 mr-2">
-              {{ processingMode === 'summary' ? 'Creating project plan...' : 'Thinking...' }}
+              {{ processingMode === 'summary' ? 'Creating project plan...' : processingMode === 'proposal' ? 'Generating project suggestions...' : 'Thinking...' }}
             </span>
             <div class="flex gap-1">
               <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
@@ -163,9 +208,12 @@ const dismissError = () => {
       <div class="max-w-4xl mx-auto">
         <div class="flex items-center gap-2">
           <button
-            class="flex-shrink-0 p-2.5 rounded-lg border transition-colors flex items-center justify-center h-[44px] w-[44px] bg-surface-50 border-surface-200 text-surface-400 hover:border-surface-300"
+            @click="handleSuggestProjects"
+            :disabled="isInputDisabled"
+            class="flex-shrink-0 px-3 h-[44px] rounded-lg border transition-colors flex items-center gap-2 bg-surface-50 border-surface-200 text-surface-600 hover:border-surface-300 disabled:opacity-60"
           >
             <Globe :size="18" />
+            <span class="text-xs font-medium">Suggest Projects</span>
           </button>
 
           <div class="relative flex-1 h-[44px] overflow-hidden rounded-lg border border-surface-200 focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500">
@@ -191,7 +239,7 @@ const dismissError = () => {
         </div>
         <div class="flex items-center justify-between mt-2">
           <p class="text-[10px] text-surface-400">
-            {{ isLocked ? (processingMode === 'summary' ? 'Creating project plan... Please wait.' : 'Thinking... Please wait.') : 'Chat history stored on backend.' }}
+            {{ isLocked ? (processingMode === 'summary' ? 'Creating project plan... Please wait.' : processingMode === 'proposal' ? 'Generating project suggestions...' : 'Thinking... Please wait.') : (pendingProposals.length ? 'Select a project or reject all to continue chatting.' : 'Chat history stored on backend.') }}
           </p>
           <button
             @click="resetChat"

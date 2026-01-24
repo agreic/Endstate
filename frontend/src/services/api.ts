@@ -136,6 +136,17 @@ export interface ChatHistoryResponse {
   messages: ChatMessage[];
 }
 
+export interface ProjectProposal {
+  id: string;
+  name: string;
+  description: string;
+  timeline?: string;
+  milestones?: string[];
+  skills?: string[];
+  topics?: string[];
+  concepts?: string[];
+}
+
 export interface ProjectSummary {
   session_id: string;
   created_at: string;
@@ -340,6 +351,32 @@ export async function sendChatMessage(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function getChatProposals(sessionId: string): Promise<{ proposals: ProjectProposal[] }> {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/proposals`);
+}
+
+export async function suggestChatProjects(sessionId: string, count: number = 3): Promise<{ status: string; proposals?: ProjectProposal[] }> {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/proposals`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ count }),
+  });
+}
+
+export async function acceptChatProposal(sessionId: string, proposalId: string): Promise<{ project_id: string; project_name: string }> {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/proposals/${encodeURIComponent(proposalId)}/accept`, {
+    method: 'POST',
+  });
+}
+
+export async function rejectChatProposals(sessionId: string): Promise<{ status: string }> {
+  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/proposals/reject`, {
+    method: 'POST',
+  });
 }
 
 export async function extractFromText(text: string): Promise<{ message: string; documents_count: number }> {
