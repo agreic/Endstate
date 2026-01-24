@@ -890,7 +890,6 @@ def list_project_lessons(project_id: str):
             "title": row.get("title"),
             "explanation": explanation,
             "task": task,
-            "lesson_index": row.get("lesson_index"),
             "created_at": created_at,
             "archived": bool(row.get("archived")) if row.get("archived") is not None else False,
             "archived_at": archived_at,
@@ -1105,6 +1104,8 @@ def list_project_submissions(project_id: str):
     from neo4j.time import DateTime
 
     db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        return {"submissions": []}
     records = db.list_project_submissions(project_id)
     submissions = []
     for row in records:

@@ -157,12 +157,14 @@ const loadProjectExtras = async (projectId: string) => {
   assessmentsLoading.value = true;
   capstoneLoading.value = true;
   try {
-    const [lessonsResponse, assessmentsResponse, nodesResponse, submissionsResponse] = await Promise.all([
+    const [lessonsResponse, assessmentsResponse, nodesResponse] = await Promise.all([
       listProjectLessons(projectId),
       listProjectAssessments(projectId),
       listProjectNodes(projectId),
-      listProjectSubmissions(projectId),
     ]);
+    const submissionsResponse = projectId === DEFAULT_PROJECT_ID
+      ? { submissions: [] }
+      : await listProjectSubmissions(projectId);
     lessons.value = [...lessonsResponse.lessons].sort((a, b) => {
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
       const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -404,6 +406,8 @@ const capstoneHeaderClass = computed(() =>
   isCapstoneComplete.value ? "bg-gradient-to-r from-emerald-500 to-emerald-600" : "bg-gradient-to-r from-primary-500 to-primary-600",
 );
 const capstoneJobs = computed(() => projectJobs.value.filter((job) => job.kind === "capstone-eval"));
+const lessonJobs = computed(() => projectJobs.value.filter((job) => job.kind === "lesson"));
+const assessmentJobs = computed(() => projectJobs.value.filter((job) => job.kind === "assessment"));
 
 const archiveLesson = async (lessonId: string) => {
   if (!selectedProject.value) return;
@@ -827,7 +831,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+            <div v-if="!isDefaultProject" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
               <div class="flex items-center gap-2 mb-4">
                 <Brain :size="20" class="text-primary-500" />
                 <h4 class="font-semibold text-surface-800">Your Profile</h4>
@@ -957,7 +961,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
+            <div v-if="!isDefaultProject" class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
               <div class="flex items-center justify-between gap-2 mb-4">
                 <div class="flex items-center gap-2">
                   <Target :size="18" class="text-emerald-500" />
@@ -1073,6 +1077,17 @@ onUnmounted(() => {
                 <MessageSquare :size="18" class="text-primary-500" />
                 <h4 class="font-semibold text-surface-800">Lessons</h4>
               </div>
+              <div v-if="lessonJobs.length > 0" class="mb-3 space-y-2">
+                <div v-for="job in lessonJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
+                  <span>Generating lesson...</span>
+                  <button
+                    @click="cancelProjectJob(job.job_id)"
+                    class="text-xs px-2 py-1 rounded border border-surface-200 text-surface-600 hover:bg-surface-100"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
               <div v-if="lessonsLoading" class="text-sm text-surface-400">Loading lessons...</div>
               <div v-else-if="activeLessons.length === 0" class="text-sm text-surface-400">No lessons yet.</div>
               <div v-else class="space-y-3">
@@ -1164,14 +1179,10 @@ onUnmounted(() => {
               </div>
               <div v-if="assessmentsLoading" class="text-sm text-surface-400">Loading assessments...</div>
               <div v-else>
-                <div v-if="activeAssessments.length === 0 && projectJobs.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
-                <div v-if="projectJobs.length > 0" class="mt-3 space-y-2">
-                  <div v-for="job in projectJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
-                    <span v-if="job.kind === 'assessment'">Generating assessment for {{ lessonTitleById(job.meta?.lesson_id || '') }}...</span>
-                    <span v-else-if="job.kind === 'lesson'">Generating lesson...</span>
-                    <span v-else-if="job.kind === 'project-reinit'">Reinitializing project...</span>
-                    <span v-else-if="job.kind === 'capstone-eval'">Evaluating capstone submission...</span>
-                    <span v-else>Processing job...</span>
+                <div v-if="activeAssessments.length === 0 && assessmentJobs.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
+                <div v-if="assessmentJobs.length > 0" class="mt-3 space-y-2">
+                  <div v-for="job in assessmentJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
+                    <span>Generating assessment for {{ lessonTitleById(job.meta?.lesson_id || '') }}...</span>
                     <button
                       @click="cancelProjectJob(job.job_id)"
                       class="text-xs px-2 py-1 rounded border border-surface-200 text-surface-600 hover:bg-surface-100"
@@ -1272,7 +1283,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="selectedProject" class="mt-6">
+            <div v-if="selectedProject && !isDefaultProject" class="mt-6">
               <button
                 @click="toggleChatHistory"
                 class="w-full flex items-center justify-between p-4 bg-white rounded-xl border border-surface-200 hover:border-primary-300 transition-colors"

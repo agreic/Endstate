@@ -83,6 +83,7 @@ class TaskRegistry:
         project_id: str,
         kind: str | None = None,
         node_id: str | None = None,
+        active_only: bool = True,
     ) -> list[TaskInfo]:
         results = []
         for info in self._tasks.values():
@@ -91,6 +92,8 @@ class TaskRegistry:
             if kind and info.kind != kind:
                 continue
             if node_id and info.meta.get("node_id") != node_id:
+                continue
+            if active_only and info.status in {"completed", "failed", "canceled"}:
                 continue
             results.append(info)
         return results

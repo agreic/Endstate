@@ -52,12 +52,33 @@ const lessonJobIds = ref<string[]>([]);
 const lessonCanceling = ref(false);
 const lessonJobNodeId = ref<string | null>(null);
 const lessonQueuedCount = ref(0);
+let lessonPollTimer: number | null = null;
 const lessonQueuedText = computed(() => {
   if (lessonQueuedCount.value > 0) {
     return `Queued ${lessonQueuedCount.value} lesson(s). Check the Projects tab.`;
   }
   return "Lesson queued. Check the Projects tab.";
 });
+
+const clearLessonPoll = () => {
+  if (lessonPollTimer !== null) {
+    window.clearTimeout(lessonPollTimer);
+    lessonPollTimer = null;
+  }
+};
+
+const pollLessonJobs = () => {
+  clearLessonPoll();
+  if (!lessonJobNodeId.value) return;
+  lessonPollTimer = window.setTimeout(async () => {
+    await refreshLessonJobs(lessonJobNodeId.value || "");
+    if (lessonQueued.value) {
+      pollLessonJobs();
+    } else {
+      clearLessonPoll();
+    }
+  }, 3000);
+};
 
 const refreshLessonJobs = async (nodeId: string) => {
   const projectId = localStorage.getItem("endstate_active_project_id") || "";
@@ -72,9 +93,13 @@ const refreshLessonJobs = async (nodeId: string) => {
     lessonQueued.value = response.jobs.length > 0;
     lessonJobIds.value = response.jobs.map((job) => job.job_id);
     lessonJobNodeId.value = response.jobs.length > 0 ? nodeId : null;
+    if (!lessonQueued.value) {
+      clearLessonPoll();
+    }
   } catch (e) {
     lessonQueued.value = false;
     lessonQueuedCount.value = 0;
+    clearLessonPoll();
   }
 };
 
@@ -150,29 +175,33 @@ const getDisplayProperties = (node: GraphNode): Array<{ key: string; value: any 
 };
 
 const loadGraphData = async () => {
-  // Stop any existing simulation
-  if (simulation) {
-    simulation.stop();
-    simulation = null;
-  }
-  if (svgElement) {
-    svgElement.selectAll("*").remove();
-  }
-  
   isLoading.value = true;
   loadError.value = null;
-  selectedNode.value = null;
   
   try {
     const data = await fetchGraphData();
     
     if (data.total_nodes === 0) {
-      loadError.value = null;
+      if (graphData.value.nodes.length > 0) {
+        loadError.value = "No nodes returned. Keeping previous graph.";
+        isLoading.value = false;
+        return;
+      }
       graphData.value = { nodes: [], links: [] };
       graphStats.value = null;
       isLoading.value = false;
       return;
     }
+
+    // Stop any existing simulation only after a successful fetch
+    if (simulation) {
+      simulation.stop();
+      simulation = null;
+    }
+    if (svgElement) {
+      svgElement.selectAll("*").remove();
+    }
+    selectedNode.value = null;
     
     graphStats.value = {
       total_nodes: data.total_nodes,
@@ -281,6 +310,7 @@ const loadLesson = async () => {
   lessonJobIds.value = [];
   lessonJobNodeId.value = null;
   lessonQueuedCount.value = 0;
+  clearLessonPoll();
   try {
     const response = await generateNodeLessons(selectedNode.value.id);
     const jobs = response.jobs || [];
@@ -295,6 +325,9 @@ const loadLesson = async () => {
     skipped.forEach((entry) => {
       window.dispatchEvent(new CustomEvent("endstate:lesson-created", { detail: { projectId: entry.project_id } }));
     });
+    if (lessonQueued.value) {
+      pollLessonJobs();
+    }
   } catch (e) {
     lessonError.value = "Failed to generate lesson";
   } finally {
@@ -311,6 +344,7 @@ const cancelLessonJob = async () => {
     lessonJobIds.value = [];
     lessonJobNodeId.value = null;
     lessonQueuedCount.value = 0;
+    clearLessonPoll();
   } catch (e) {
     lessonError.value = "Failed to cancel lesson generation";
   } finally {
@@ -402,7 +436,7 @@ watch(searchQuery, () => {
 
 const showProperties = ref(false);
 
-watch(selectedNode, () => {
+watch(selectedNode, async () => {
   lessonError.value = null;
   lessonLoading.value = false;
   lessonQueued.value = false;
@@ -410,8 +444,12 @@ watch(selectedNode, () => {
   lessonJobNodeId.value = null;
   lessonQueuedCount.value = 0;
   showProperties.value = false;
+  clearLessonPoll();
   if (selectedNode.value) {
-    refreshLessonJobs(selectedNode.value.id);
+    await refreshLessonJobs(selectedNode.value.id);
+    if (lessonQueued.value) {
+      pollLessonJobs();
+    }
   }
 });
 
@@ -646,6 +684,7 @@ onUnmounted(() => {
   window.removeEventListener("resize", handleResize);
   if (simulation) simulation.stop();
   clearTimeout(resizeTimeout);
+  clearLessonPoll();
 });
 
 const getConnectionCount = (nodeId: string): number => {

@@ -134,6 +134,18 @@ class Neo4jClient:
             List of result dictionaries
         """
         return self.graph.query(cypher, params or {})
+
+    def label_exists(self, label: str) -> bool:
+        """Check whether a label exists in the database."""
+        result = self.query(
+            """
+            CALL db.labels() YIELD label
+            WHERE label = $label
+            RETURN count(label) as count
+            """,
+            {"label": label},
+        )
+        return bool(result and result[0].get("count", 0))
     
     def clean_graph(self) -> None:
         """Delete all nodes and relationships from the graph."""
@@ -992,6 +1004,17 @@ class Neo4jClient:
             """,
             {"project_id": project_id},
         )
+        if not result:
+            result = self.query(
+                """
+                MATCH (p:Project {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)-[:ABOUT]->(n)
+                WITH DISTINCT p, n
+                MERGE (p)-[:HAS_NODE]->(n)
+                RETURN n
+                ORDER BY n.name ASC
+                """,
+                {"project_id": project_id},
+            )
         return [_serialize_node(row["n"]) for row in result]
 
     def clear_project_nodes(self, project_id: str) -> None:
@@ -1151,9 +1174,11 @@ class Neo4jClient:
             CREATE (ps)-[:HAS_LESSON]->(l)
             CREATE (p)-[:HAS_LESSON]->(l)
             WITH l
-            OPTIONAL MATCH (n {id: $node_id})
+            OPTIONAL MATCH (n)
+            WHERE n.id = $node_id OR elementId(n) = $node_id
             FOREACH (_ IN CASE WHEN n IS NULL THEN [] ELSE [1] END |
                 MERGE (l)-[:ABOUT]->(n)
+                MERGE (p)-[:HAS_NODE]->(n)
             )
             """,
             {
@@ -1179,11 +1204,10 @@ class Neo4jClient:
 
     def list_project_lessons(self, project_id: str) -> list[dict]:
         """List lessons for a project."""
-        self.ensure_lesson_index()
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.lesson_index as lesson_index, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             """,
             {"project_id": project_id},
@@ -1192,11 +1216,10 @@ class Neo4jClient:
 
     def get_project_lesson_by_node(self, project_id: str, node_id: str) -> list[dict]:
         """Get latest lesson for a node in a project."""
-        self.ensure_lesson_index()
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.lesson_index as lesson_index, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
             ORDER BY l.created_at DESC
             LIMIT 1
             """,
@@ -1206,14 +1229,12 @@ class Neo4jClient:
 
     def list_project_lessons_for_node(self, project_id: str, node_id: str) -> list[dict]:
         """List lessons for a node in a project."""
-        self.ensure_lesson_index()
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
             RETURN l.id as id,
                    l.title as title,
                    l.explanation as explanation,
-                   COALESCE(l.lesson_index, 0) as lesson_index,
                    l.created_at as created_at
             ORDER BY l.created_at ASC
             """,
@@ -1343,6 +1364,8 @@ class Neo4jClient:
 
     def list_project_submissions(self, project_id: str) -> list[dict]:
         """List submissions for a project."""
+        if not self.label_exists("ProjectSubmission"):
+            return []
         result = self.query(
             """
             MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_SUBMISSION]->(s:ProjectSubmission)
@@ -1364,6 +1387,8 @@ class Neo4jClient:
 
     def get_project_submission_count(self, project_id: str) -> int:
         """Get submission count for a project."""
+        if not self.label_exists("ProjectSubmission"):
+            return 0
         result = self.query(
             """
             MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_SUBMISSION]->(s:ProjectSubmission)
@@ -1375,6 +1400,8 @@ class Neo4jClient:
 
     def get_submission(self, submission_id: str) -> list[dict]:
         """Fetch a submission by id."""
+        if not self.label_exists("ProjectSubmission"):
+            return []
         result = self.query(
             """
             MATCH (s:ProjectSubmission {id: $submission_id})
@@ -1472,6 +1499,8 @@ class Neo4jClient:
 
     def list_submission_evaluations(self, submission_id: str) -> list[dict]:
         """List evaluations for a submission."""
+        if not self.label_exists("ProjectEvaluation"):
+            return []
         result = self.query(
             """
             MATCH (s:ProjectSubmission {id: $submission_id})-[:HAS_EVALUATION]->(e:ProjectEvaluation)
