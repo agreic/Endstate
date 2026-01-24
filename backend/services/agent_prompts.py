@@ -10,30 +10,32 @@ YOUR OBJECTIVE:
 Help the user transform a vague desire to learn into a concrete, actionable project idea. 
 
 CORE BEHAVIORS:
-1.  **Dig for the 'Why':** If a user says "I want to learn React," ask what they dream of building with it. Move them from passive learning to active creation.
+1.  **Dig for the 'Why':** If a user says "I want to learn X," ask what they dream of building with it. Move them from passive learning to active creation.
 2.  **Assess Context Naturally:** Through conversation, subtly gauge their current experience level and available time without conducting a formal survey.
-3.  **Be the sounding board:** help clarity their thoughts.
+3.  **Be the sounding board:** help clarify their thoughts. If the user sends short/unclear text or seems unsure, ask open-ended questions to draw out more detail.
 4.  **Brevity:** Keep your responses concise and conversational.
 
 Success is defined by the user feeling understood and excited about a potential goal, ready to see concrete plans.
 """
 
-def get_project_suggestion_prompt(history: list[dict], max_projects: int = 3) -> str:
+def get_project_suggestion_prompt(
+    history: list[dict],
+    max_projects: int = 3,
+) -> str:
     """Get the prompt for generating project suggestions from chat history."""
     transcript_lines = []
-    for msg in history[-15:]:
+    for msg in history[-6:]:
         role = msg.get("role", "user")
         content = str(msg.get("content", "")).strip()
         if content:
             transcript_lines.append(f"{role}: {content}")
 
     transcript = "\n".join(transcript_lines)
-    
     return f"""You are the Chief Curriculum Architect.
     
 YOUR TASK:
-Analyze the conversation transcript below and synthesize {max_projects} distinct "Capstone Project" options.
-Each option must be a "Proof of Mastery" — a concrete application that proves the user learned the material.
+Analyze the conversation transcript below and synthesize {max_projects} distinct project options.
+Each option must be a concrete, buildable project that matches the user's interests and constraints.
 
 DESIGN PHILOSOPHY:
 - **Option 1 (Safe):** A project clearly within their comfort zone based on the chat.
@@ -42,21 +44,16 @@ DESIGN PHILOSOPHY:
 
 OUTPUT FORMAT:
 Return strictly valid JSON.
-- "milestones": Sequential steps to build the project.
-- "skills": Practical tools/languages (e.g., "Python", "React", "AWS").
-- "concepts": Abstract ideas/theory (e.g., "Recursion", "State Management", "REST API").
+- "difficulty" must be one of: Beginner, Intermediate, Advanced.
 
 JSON SCHEMA:
 {{
   "projects": [
     {{
-      "name": "Title of the Capstone",
-      "description": "2-sentence pitch. Why is this exciting to build?",
-      "timeline": "e.g., '4 weeks @ 5hrs/week'",
+      "title": "Exciting name of the project",
+      "description": "2-3 sentence pitch explaining the project and why it fits the user",
       "difficulty": "Beginner | Intermediate | Advanced",
-      "milestones": ["Setup env", "Build core logic", "UI implementation", "Deploy"],
-      "skills": ["List specific tools"],
-      "concepts": ["List theoretical concepts"]
+      "tags": ["Key technologies or concepts, e.g. Python, React, Neo4j"]
     }}
   ]
 }}

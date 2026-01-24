@@ -138,13 +138,10 @@ export interface ChatHistoryResponse {
 
 export interface ProjectProposal {
   id: string;
-  name: string;
+  title: string;
   description: string;
-  timeline?: string;
-  milestones?: string[];
-  skills?: string[];
-  topics?: string[];
-  concepts?: string[];
+  difficulty: string;
+  tags: string[];
 }
 
 export interface ProjectSummary {
@@ -364,6 +361,33 @@ export async function suggestChatProjects(sessionId: string, count: number = 3):
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ count }),
+  });
+}
+
+export async function suggestProjects(payload: { sessionId: string; history: { role: string; content: string }[]; count?: number }): Promise<{ projects: ProjectProposal[] }> {
+  return requestJson(`/api/suggest-projects`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      history: payload.history,
+      count: payload.count ?? 3,
+    }),
+  });
+}
+
+export async function acceptSuggestedProject(payload: { sessionId: string; option: ProjectProposal }): Promise<{ project_id: string; project_name: string }> {
+  return requestJson(`/api/suggest-projects/accept`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      option: payload.option,
+    }),
   });
 }
 

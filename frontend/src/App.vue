@@ -8,11 +8,13 @@ import Projects from './components/Projects.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import HelpModal from './components/HelpModal.vue'
 import { MessageSquare, Network, FolderOpen, Settings, HelpCircle } from 'lucide-vue-next'
+import { useChat } from './composables/useChat'
 
 const sidebarOpen = ref(true)
 const activeTab = ref<'dashboard' | 'chat' | 'graph' | 'projects'>('dashboard')
 const showSettings = ref(false)
 const showHelp = ref(false)
+const chat = useChat()
 
 // Apply saved theme on mount
 onMounted(() => {
@@ -130,7 +132,7 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
       
       <div class="flex-1 overflow-hidden">
         <Dashboard v-if="activeTab === 'dashboard'" @navigate="setActiveTab" />
-        <ChatBox v-if="activeTab === 'chat'" />
+        <ChatBox v-if="activeTab === 'chat'" :chat="chat" />
         <KnowledgeGraph v-if="activeTab === 'graph'" />
         <Projects v-if="activeTab === 'projects'" />
       </div>

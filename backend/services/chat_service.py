@@ -22,7 +22,6 @@ from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
 from backend.services.agent_prompts import get_chat_system_prompt, get_project_suggestion_prompt
 from backend.services.evaluation_service import evaluate_project_alignment, evaluate_kg_quality
-from backend.services.opik_client import log_metric
 
 
 LLM_TIMEOUT = config.llm.timeout_seconds  # seconds for LLM calls
@@ -164,8 +163,12 @@ class ChatService:
     def create_session(self, session_id: str) -> None:
         """Create a chat session if it doesn't exist."""
         self.db.query(
-            "MERGE (s:ChatSession {id: $session_id}) SET s.created_at = datetime()",
-            {"session_id": session_id}
+            """
+            MERGE (s:ChatSession {id: $session_id})
+            ON CREATE SET s.created_at = datetime(),
+                          s.pending_proposals = $empty_list
+            """,
+            {"session_id": session_id, "empty_list": "[]"},
         )
     
     def message_exists(self, session_id: str, request_id: str) -> bool:
@@ -265,6 +268,13 @@ class ChatService:
     def clear_pending_proposals(self, session_id: str) -> None:
         """Clear any pending proposals for a chat session."""
         self.db.clear_pending_proposals(session_id)
+
+    def clear_stale_lock(self, session_id: str) -> bool:
+        """Clear a stuck lock if no background task is running."""
+        if self.is_locked(session_id) and not BackgroundTaskStore.has_task(session_id):
+            self.set_locked(session_id, False)
+            return True
+        return False
     
     def delete_session(self, session_id: str) -> None:
         """Delete a session and all its messages."""
@@ -276,6 +286,7 @@ class ChatService:
     
     async def send_message(self, session_id: str, content: str, request_id: str) -> ChatResponse:
         """Send a message - idempotent by request_id."""
+        self.clear_stale_lock(session_id)
         if self.is_locked(session_id):
             return ChatResponse(success=False, is_processing=True)
         if self.has_pending_proposals(session_id):
@@ -366,24 +377,37 @@ class ChatService:
         for entry in raw:
             if not isinstance(entry, dict):
                 continue
-            name = str(entry.get("name", "")).strip()
+            title = str(entry.get("title", "")).strip()
             description = str(entry.get("description", "")).strip()
-            if not name:
+            if not title:
                 continue
+            raw_difficulty = str(entry.get("difficulty", "")).strip()
+            normalized_difficulty = raw_difficulty.title() if raw_difficulty else "Intermediate"
+            if normalized_difficulty not in {"Beginner", "Intermediate", "Advanced"}:
+                normalized_difficulty = "Intermediate"
+            tags = [t for t in entry.get("tags", []) if isinstance(t, str) and t.strip()]
             normalized.append({
                 "id": f"proposal-{uuid.uuid4().hex[:8]}",
-                "name": name,
+                "title": title,
                 "description": description,
-                "timeline": str(entry.get("timeline", "")).strip(),
-                "milestones": [m for m in entry.get("milestones", []) if isinstance(m, str) and m.strip()],
-                "skills": [s for s in entry.get("skills", []) if isinstance(s, str) and s.strip()],
-                "topics": [t for t in entry.get("topics", []) if isinstance(t, str) and t.strip()],
-                "concepts": [c for c in entry.get("concepts", []) if isinstance(c, str) and c.strip()],
+                "difficulty": normalized_difficulty,
+                "tags": tags,
             })
         return normalized
 
     async def request_project_suggestions(self, session_id: str, count: int = 3) -> dict:
         """Generate project suggestions from chat history."""
+        history = self._trim_history_for_suggestions(self.get_messages(session_id))
+        return await self.request_project_suggestions_from_history(session_id, history, count)
+
+    async def request_project_suggestions_from_history(
+        self,
+        session_id: str,
+        history: list[dict],
+        count: int = 3,
+    ) -> dict:
+        """Generate project suggestions from provided chat history."""
+        history = self._trim_history_for_suggestions(history)
         self.create_session(session_id)
         pending = self.db.get_pending_proposals(session_id)
         if pending:
@@ -393,7 +417,6 @@ class ChatService:
         if BackgroundTaskStore.has_task(session_id):
             return {"status": "busy"}
 
-        history = self.get_messages(session_id)
         self.set_locked(session_id, True)
         await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "proposal"})
 
@@ -404,22 +427,7 @@ class ChatService:
     async def _generate_project_suggestions(self, session_id: str, history: list[dict], count: int):
         """Generate project suggestions asynchronously."""
         try:
-            prompt = get_project_suggestion_prompt(history, max_projects=count)
-            response = await asyncio.wait_for(self.llm.ainvoke([("human", prompt)]), timeout=LLM_TIMEOUT)
-            content = str(response.content if hasattr(response, "content") else response)
-            proposals = self._normalize_project_suggestions(self._parse_project_suggestions(content))
-
-            if not proposals:
-                proposals = [{
-                    "id": f"proposal-{uuid.uuid4().hex[:8]}",
-                    "name": "Learning Project",
-                    "description": "A focused learning project based on your goals.",
-                    "timeline": "2-4 weeks",
-                    "milestones": [],
-                    "skills": [],
-                    "topics": [],
-                    "concepts": [],
-                }]
+            proposals = await self._create_project_suggestions(history, count)
 
             self.db.set_pending_proposals(session_id, proposals)
             await BackgroundTaskStore.notify(session_id, "proposals_updated", {"proposals": proposals})
@@ -434,18 +442,90 @@ class ChatService:
             if session_id in BackgroundTaskStore._tasks:
                 del BackgroundTaskStore._tasks[session_id]
 
+    async def _create_project_suggestions(self, history: list[dict], count: int) -> list[dict]:
+        prompt = get_project_suggestion_prompt(history, max_projects=count)
+        response = await asyncio.wait_for(self.llm.ainvoke([("human", prompt)]), timeout=LLM_TIMEOUT)
+        content = str(response.content if hasattr(response, "content") else response)
+        proposals = self._normalize_project_suggestions(self._parse_project_suggestions(content))
+
+        if not proposals:
+            proposals = [{
+                "id": f"proposal-{uuid.uuid4().hex[:8]}",
+                "title": "Learning Project",
+                "description": "A focused learning project based on your goals.",
+                "difficulty": "Beginner",
+                "tags": [],
+            }]
+        return proposals
+
+
+    async def generate_project_suggestions_from_history(
+        self,
+        session_id: str,
+        history: list[dict],
+        count: int = 3,
+        store: bool = True,
+    ) -> list[dict]:
+        """Generate project suggestions directly from provided history."""
+        history = self._trim_history_for_suggestions(history)
+        self.create_session(session_id)
+        self.set_locked(session_id, True)
+        if store:
+            await BackgroundTaskStore.notify(session_id, "processing_started", {"reason": "proposal"})
+
+        try:
+            proposals = await self._create_project_suggestions(history, count)
+            if store:
+                self.db.set_pending_proposals(session_id, proposals)
+                await BackgroundTaskStore.notify(session_id, "proposals_updated", {"proposals": proposals})
+            return proposals
+        finally:
+            self.set_locked(session_id, False)
+            if store:
+                await BackgroundTaskStore.notify(session_id, "processing_complete", {"reason": "proposal"})
+
+    def _trim_history_for_suggestions(self, history: list[dict]) -> list[dict]:
+        trimmed = history[-6:] if len(history) > 6 else list(history)
+        cleaned: list[dict] = []
+        for msg in trimmed:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", "")).strip()
+            if not content:
+                continue
+            if len(content) > 500:
+                content = content[:500].rstrip() + "…"
+            cleaned.append({"role": role, "content": content})
+        return cleaned
+
     def _build_summary_from_proposal(self, proposal: dict) -> dict:
+        name = proposal.get("title") or proposal.get("name") or "Untitled Project"
         return {
             "user_profile": {**DEFAULT_PROFILE},
             "agreed_project": {
-                "name": proposal.get("name", "Untitled Project"),
+                "name": name,
                 "description": proposal.get("description", ""),
-                "timeline": proposal.get("timeline", ""),
-                "milestones": proposal.get("milestones", []) or [],
+                "timeline": "",
+                "milestones": [],
+                "difficulty": proposal.get("difficulty", ""),
             },
-            "topics": proposal.get("topics", []) or [],
-            "skills": proposal.get("skills", []) or [],
-            "concepts": proposal.get("concepts", []) or [],
+            "topics": [],
+            "skills": proposal.get("tags", []) or [],
+            "concepts": [],
+        }
+
+    def _build_summary_from_option(self, option: dict) -> dict:
+        return {
+            "user_profile": {**DEFAULT_PROFILE},
+            "agreed_project": {
+                "name": option.get("title", "Untitled Project"),
+                "description": option.get("description", ""),
+                "timeline": "",
+                "milestones": [],
+                "difficulty": option.get("difficulty", ""),
+            },
+            "topics": [],
+            "skills": option.get("tags", []) or [],
+            "concepts": [],
         }
 
     async def accept_project_proposal(self, session_id: str, proposal_id: str) -> dict:
@@ -453,10 +533,24 @@ class ChatService:
         proposals = self.db.get_pending_proposals(session_id)
         proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
         if not proposal:
+            proposal = next((p for p in proposals if p.get("title") == proposal_id), None)
+        if not proposal:
             raise ValueError("Proposal not found")
 
         history = self.get_messages(session_id)
         summary = self._build_summary_from_proposal(proposal)
+        project_name, project_id = self._persist_project(session_id, summary, history)
+        self.db.clear_pending_proposals(session_id)
+        self.set_locked(session_id, False)
+
+        message = f"Project saved: **{project_name}**. View it in the Projects tab."
+        assistant_message = self.add_message(session_id, "assistant", message)
+        return {"project_id": project_id, "project_name": project_name, "message": message, "assistant_message": assistant_message}
+
+    async def create_project_from_option(self, session_id: str, option: dict) -> dict:
+        """Create a project directly from a selected project option."""
+        history = self.get_messages(session_id)
+        summary = self._build_summary_from_option(option)
         project_name, project_id = self._persist_project(session_id, summary, history)
         self.db.clear_pending_proposals(session_id)
         self.set_locked(session_id, False)
@@ -501,15 +595,12 @@ class ChatService:
             if "error" in result:
                 return
             prompt_version = str(result.get("prompt_version", "unknown"))
-            log_metric("project_alignment_score", float(result.get("score", 0.0)), session_id=project_id, tags=["alignment", prompt_version])
 
         async def _log_kg_quality():
             result = await evaluate_kg_quality(project_info, summary)
             if "error" in result:
                 return
             prompt_version = str(result.get("prompt_version", "unknown"))
-            log_metric("kg_coverage_score", float(result.get("coverage_score", 0.0)), session_id=project_id, tags=["kg", prompt_version])
-            log_metric("kg_redundancy_score", float(result.get("redundancy_score", 0.0)), session_id=project_id, tags=["kg", prompt_version])
 
         try:
             loop = asyncio.get_running_loop()
@@ -545,6 +636,7 @@ class ChatService:
         try:
             # Send initial messages (with error handling)
             try:
+                self.clear_stale_lock(session_id)
                 messages = self.get_messages(session_id)
                 proposals = self.db.get_pending_proposals(session_id)
                 yield f"event: initial_messages\ndata: {json.dumps({'messages': messages, 'locked': self.is_locked(session_id), 'proposals': proposals, 'error': None})}\n\n"

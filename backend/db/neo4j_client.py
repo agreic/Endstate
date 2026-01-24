@@ -618,8 +618,12 @@ class Neo4jClient:
     def create_chat_session(self, session_id: str) -> None:
         """Create a new chat session node."""
         self.query(
-            "MERGE (s:ChatSession {id: $session_id}) SET s.created_at = datetime()",
-            {"session_id": session_id}
+            """
+            MERGE (s:ChatSession {id: $session_id})
+            ON CREATE SET s.created_at = datetime(),
+                          s.pending_proposals = $empty_list
+            """,
+            {"session_id": session_id, "empty_list": "[]"},
         )
 
     def get_chat_session_metadata(self, session_id: str) -> dict:
@@ -651,7 +655,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (s:ChatSession {id: $session_id})
-            RETURN s.pending_proposals as pending_proposals
+            RETURN properties(s).pending_proposals as pending_proposals
             """,
             {"session_id": session_id},
         )
@@ -670,7 +674,7 @@ class Neo4jClient:
         """Set pending project proposals for a chat session."""
         self.query(
             """
-            MATCH (s:ChatSession {id: $session_id})
+            MERGE (s:ChatSession {id: $session_id})
             SET s.pending_proposals = $proposals,
                 s.pending_proposals_at = datetime(),
                 s.updated_at = datetime()
@@ -1418,11 +1422,11 @@ class Neo4jClient:
                    s.content as content,
                    s.attempt_number as attempt_number,
                    s.status as status,
-                   s.score as score,
-                   s.passed as passed,
-                   s.feedback as feedback,
-                   s.submitted_at as submitted_at,
-                   s.evaluated_at as evaluated_at
+                   properties(s).score as score,
+                   properties(s).passed as passed,
+                   properties(s).feedback as feedback,
+                   properties(s).submitted_at as submitted_at,
+                   properties(s).evaluated_at as evaluated_at
             ORDER BY s.submitted_at DESC
             """,
             {"project_id": project_id},
@@ -1454,11 +1458,11 @@ class Neo4jClient:
                    s.content as content,
                    s.attempt_number as attempt_number,
                    s.status as status,
-                   s.score as score,
-                   s.passed as passed,
-                   s.feedback as feedback,
-                   s.submitted_at as submitted_at,
-                   s.evaluated_at as evaluated_at
+                   properties(s).score as score,
+                   properties(s).passed as passed,
+                   properties(s).feedback as feedback,
+                   properties(s).submitted_at as submitted_at,
+                   properties(s).evaluated_at as evaluated_at
             """,
             {"submission_id": submission_id},
         )

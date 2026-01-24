@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { Send, Bot, User, Globe, RotateCcw, X } from "lucide-vue-next";
+import { Send, Bot, User, Sparkles, RotateCcw, X } from "lucide-vue-next";
 import { marked } from "marked";
-import { useChat } from "../composables/useChat";
+import type { ChatStore } from "../composables/useChat";
 
 const renderMarkdown = (content: string) => {
   return marked.parse(content);
 };
+
+const props = defineProps<{
+  chat: ChatStore;
+}>();
 
 const inputMessage = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -26,7 +30,7 @@ const {
   requestProjectSuggestions,
   acceptProposal,
   rejectProposals,
-} = useChat();
+} = props.chat;
 
 const isInputDisabled = computed(() => {
   return isSending.value || isChatBlocked.value;
@@ -93,31 +97,51 @@ const dismissError = () => {
       </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
-      <div v-if="pendingProposals.length" class="bg-white rounded-xl border border-surface-200 p-4 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <div>
-            <p class="text-xs uppercase text-surface-400">Suggested projects</p>
-            <p class="text-sm text-surface-700">Pick one to create a project, or reject all to keep chatting.</p>
+    <div class="flex-1 overflow-y-auto p-4 space-y-6 relative" ref="messagesContainer">
+      <div
+        v-if="pendingProposals.length"
+        class="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex items-start justify-center p-4"
+      >
+        <div class="w-full max-w-3xl bg-white rounded-2xl border border-surface-200 shadow-lg p-5">
+          <div class="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <p class="text-xs uppercase text-surface-400">Suggested Projects</p>
+              <p class="text-sm text-surface-700">Pick one to create a project, or reject all to keep chatting.</p>
+            </div>
           </div>
-          <button
-            @click="rejectProposals"
-            class="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
-          >
-            Reject All
-          </button>
-        </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <button
-            v-for="proposal in pendingProposals"
-            :key="proposal.id"
-            @click="acceptProposal(proposal.id)"
-            class="text-left p-3 rounded-lg border border-surface-200 bg-surface-50 hover:bg-surface-100 transition-colors"
-          >
-            <p class="text-sm font-semibold text-surface-800">{{ proposal.name }}</p>
-            <p class="text-xs text-surface-500 mt-1 line-clamp-2">{{ proposal.description }}</p>
-            <p v-if="proposal.timeline" class="text-[10px] text-surface-400 mt-2">Timeline: {{ proposal.timeline }}</p>
-          </button>
+          <div class="grid gap-3 md:grid-cols-3">
+            <button
+              v-for="(proposal, idx) in pendingProposals"
+              :key="proposal.title || idx"
+              @click="acceptProposal(proposal)"
+              class="text-left p-4 rounded-xl border border-surface-200 bg-surface-50 hover:bg-surface-100 transition-colors"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-sm font-semibold text-surface-800">{{ proposal.title }}</p>
+                <span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border border-surface-200 text-surface-500">
+                  {{ proposal.difficulty }}
+                </span>
+              </div>
+              <p class="text-xs text-surface-500 mt-2 line-clamp-3">{{ proposal.description }}</p>
+              <div v-if="proposal.tags?.length" class="flex flex-wrap gap-1 mt-3">
+                <span
+                  v-for="tag in proposal.tags"
+                  :key="tag"
+                  class="text-[10px] px-2 py-0.5 rounded-full bg-surface-100 text-surface-600 border border-surface-200"
+                >
+                  {{ tag }}
+                </span>
+              </div>
+            </button>
+          </div>
+          <div class="flex justify-end mt-4">
+            <button
+              @click="rejectProposals"
+              class="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+            >
+              Reject All
+            </button>
+          </div>
         </div>
       </div>
 
@@ -211,8 +235,9 @@ const dismissError = () => {
             @click="handleSuggestProjects"
             :disabled="isInputDisabled"
             class="flex-shrink-0 px-3 h-[44px] rounded-lg border transition-colors flex items-center gap-2 bg-surface-50 border-surface-200 text-surface-600 hover:border-surface-300 disabled:opacity-60"
+            title="Suggest Projects"
           >
-            <Globe :size="18" />
+            <Sparkles :size="18" />
             <span class="text-xs font-medium">Suggest Projects</span>
           </button>
 

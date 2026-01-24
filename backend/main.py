@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
@@ -23,7 +23,6 @@ from backend.services.evaluation_service import (
     derive_required_skills,
     evaluate_submission,
 )
-from backend.services.opik_client import log_metric
 from backend.services.task_registry import TaskRegistry
 from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 
@@ -44,6 +43,24 @@ class ExtractRequest(BaseModel):
 
 class ProjectSuggestionRequest(BaseModel):
     count: Optional[int] = 3
+
+
+class ProjectOption(BaseModel):
+    title: str = Field(description="Exciting name of the project")
+    description: str = Field(description="2-3 sentence pitch")
+    difficulty: str = Field(description="Beginner, Intermediate, or Advanced")
+    tags: list[str] = Field(description="Key technologies or concepts")
+
+
+class SuggestProjectsRequest(BaseModel):
+    session_id: Optional[str] = None
+    history: list[ChatMessage]
+    count: Optional[int] = 3
+
+
+class AcceptProjectOptionRequest(BaseModel):
+    session_id: str
+    option: ProjectOption
 
 
 class ChatResponse(BaseModel):
@@ -425,6 +442,7 @@ async def chat_event_stream(session_id: str):
 def get_chat_messages(session_id: str):
     """Get all messages for a chat session."""
     try:
+        chat_service.clear_stale_lock(session_id)
         messages = chat_service.get_messages(session_id)
         is_locked = chat_service.is_locked(session_id)
         proposals = chat_service.get_pending_proposals(session_id)
@@ -445,6 +463,31 @@ def get_chat_proposals(session_id: str):
 async def suggest_chat_projects(session_id: str, request: ProjectSuggestionRequest):
     """Generate project suggestions from chat history."""
     result = await chat_service.request_project_suggestions(session_id, count=request.count or 3)
+    return result
+
+
+@app.post("/api/suggest-projects")
+async def suggest_projects(request: SuggestProjectsRequest):
+    """Generate project suggestions from provided chat history."""
+    if not request.history:
+        raise HTTPException(status_code=400, detail="Chat history is required.")
+    session_id = request.session_id or f"ad-hoc-{uuid.uuid4().hex[:8]}"
+    history = [msg.model_dump() for msg in request.history]
+    result = await chat_service.request_project_suggestions_from_history(
+        session_id,
+        history,
+        count=request.count or 3,
+    )
+    if result.get("status") == "pending" and isinstance(result.get("proposals"), list):
+        return {"status": "pending", "projects": [ProjectOption(**project).model_dump() for project in result["proposals"]]}
+    return result
+
+
+@app.post("/api/suggest-projects/accept")
+async def accept_project_option(request: AcceptProjectOptionRequest):
+    """Accept a suggested project option and create a project."""
+    result = await chat_service.create_project_from_option(request.session_id, request.option.model_dump())
+    await BackgroundTaskStore.notify(request.session_id, "proposals_cleared", {"proposals": []})
     return result
 
 
@@ -1058,12 +1101,18 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
         try:
             result = await evaluate_submission(request.content, project_brief, required_skills, model_used)
             if "error" in result:
-                raise RuntimeError(result["error"])
+                db.update_submission_status(submission_id, "failed", feedback=str(result["error"]))
+                return {"submission_id": submission_id, "error": result["error"]}
+            raw_score = result.get("score")
+            try:
+                safe_score = float(raw_score) if raw_score is not None else 0.0
+            except (TypeError, ValueError):
+                safe_score = 0.0
             evaluation_id = f"eval-{uuid.uuid4().hex[:8]}"
             db.save_submission_evaluation(
                 submission_id,
                 evaluation_id,
-                float(result.get("score", 0.0)),
+                safe_score,
                 result.get("criteria", {}),
                 result.get("skill_evidence", {}),
                 result.get("overall_feedback", ""),
@@ -1079,18 +1128,6 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
             else:
                 coverage = 1.0
             prompt_version = str(result.get("prompt_version", "unknown"))
-            log_metric(
-                "capstone_score",
-                float(result.get("score", 0.0)),
-                session_id=submission_id,
-                tags=["capstone", project_id, prompt_version, model_used],
-            )
-            log_metric(
-                "skill_evidence_coverage",
-                coverage,
-                session_id=submission_id,
-                tags=["capstone", project_id, prompt_version, model_used],
-            )
             previous_score = None
             submissions = db.list_project_submissions(project_id)
             for submission in submissions:
@@ -1101,17 +1138,11 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
                     previous_score = float(score)
                     break
             if previous_score is not None:
-                improvement = float(result.get("score", 0.0)) - previous_score
-                log_metric(
-                    "learning_improvement",
-                    improvement,
-                    session_id=project_id,
-                    tags=["capstone", project_id, prompt_version, model_used],
-                )
+                improvement = safe_score - previous_score
             capstone = summary.get("capstone") if isinstance(summary.get("capstone"), dict) else {}
             capstone.update({
                 "last_submission_id": submission_id,
-                "last_score": float(result.get("score", 0.0)),
+                "last_score": safe_score,
                 "passed": bool(result.get("passed")),
                 "attempts": attempt_number,
                 "status": "completed" if result.get("passed") else "in_progress",
@@ -1293,11 +1324,6 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
         request.answer,
         archived=archive_assessment,
     )
-    try:
-        from backend.services.opik_client import log_metric
-        log_metric("assessment_pass_rate", 1.0 if status == "pass" else 0.0, session_id=assessment_id, tags=["assessment", project_id])
-    except Exception:
-        pass
     if archive_assessment:
         db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 

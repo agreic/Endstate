@@ -193,8 +193,12 @@ const scheduleJobPoll = (jobId: string, projectId: string) => {
     jobPollTimers.delete(jobId);
     try {
       const status = await getJobStatus(jobId);
+      const jobMeta = projectJobs.value.find((job) => job.job_id === jobId)?.meta;
       if (status.status === "completed" && status.result) {
         await loadProjectExtras(projectId);
+        if (jobMeta?.submission_id && capstoneDetails.value?.submission?.id === jobMeta.submission_id) {
+          await loadSubmissionDetails(jobMeta.submission_id);
+        }
         projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
@@ -776,11 +780,11 @@ onUnmounted(() => {
                       @click="handleReinitializeProject"
                       :disabled="isStarting || isDefaultProject"
                       class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-xs disabled:opacity-60"
-                      title="Reinitialize project"
+                      title="Generate additional knowledge graph nodes"
                     >
                       <Play :size="16" />
                       <span>
-                        {{ isDefaultProject ? 'Default' : (isStarting ? 'Reinitializing...' : 'Reinitialize') }}
+                        {{ isDefaultProject ? 'Default' : (isStarting ? 'Generating nodes...' : 'Generate nodes') }}
                       </span>
                     </button>
                     <button
@@ -1049,7 +1053,9 @@ onUnmounted(() => {
                 <div v-if="capstoneDetails">
                   <p class="text-xs text-surface-400 uppercase mb-2">Latest evaluation</p>
                   <div v-if="capstoneDetails.evaluations.length === 0" class="text-xs text-surface-400">
-                    Evaluation pending.
+                    <span v-if="capstoneDetails.submission.status === 'pending'">Evaluation pending.</span>
+                    <span v-else-if="capstoneDetails.submission.status === 'failed'">Evaluation failed. Please resubmit.</span>
+                    <span v-else>Evaluation details unavailable.</span>
                   </div>
                   <div v-else class="space-y-3">
                     <div v-for="evalItem in capstoneDetails.evaluations" :key="evalItem.id" class="p-3 rounded-lg bg-surface-50 border border-surface-100">

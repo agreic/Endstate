@@ -103,20 +103,43 @@ async def evaluate_submission(
         return {"error": f"Evaluation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content) or {}
-    score = float(parsed.get("score") or 0.0)
+    parsed = _extract_json_block(content)
+    parse_error = None
+    if not parsed:
+        parse_error = "Evaluation response was not valid JSON."
+        parsed = {}
+    raw_score = parsed.get("score")
+    score = 0.0
+    if raw_score is not None:
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            if isinstance(raw_score, str):
+                match = re.search(r"-?\d+(?:\.\d+)?", raw_score)
+                if match:
+                    try:
+                        score = float(match.group(0))
+                    except ValueError:
+                        score = 0.0
+            if score == 0.0:
+                parse_error = parse_error or "Evaluation score was not a number."
+
     criteria = parsed.get("criteria") if isinstance(parsed.get("criteria"), dict) else {}
     skill_evidence = _compute_skill_evidence(required_skills, parsed.get("skill_evidence") or {})
     passed = score >= RUBRIC["passing_score"] and _skills_passed(skill_evidence)
+    overall_feedback = str(parsed.get("overall_feedback") or "").strip()
+    if parse_error and not overall_feedback:
+        overall_feedback = "Evaluation failed to parse. Please resubmit."
     return {
         "score": score,
         "criteria": criteria,
         "skill_evidence": skill_evidence,
-        "overall_feedback": str(parsed.get("overall_feedback") or "").strip(),
+        "overall_feedback": overall_feedback,
         "suggestions": parsed.get("suggestions") if isinstance(parsed.get("suggestions"), list) else [],
         "passed": passed,
         "model_used": model_used,
         "prompt_version": get_prompt_version("capstone_evaluation"),
+        "parse_error": parse_error,
     }
 
 

@@ -429,22 +429,31 @@ export function useChat() {
     isLocked.value = true;
     processingMode.value = 'proposal';
     try {
-      const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/suggest-projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count }),
+        body: JSON.stringify({
+          session_id: sessionId.value,
+          history: messages.value.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          count,
+        }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${response.status}`);
       }
       const data = await response.json();
-      if (Array.isArray(data.proposals)) {
-        pendingProposals.value = data.proposals;
+      if (Array.isArray(data.projects)) {
+        pendingProposals.value = data.projects;
         isLocked.value = false;
         processingMode.value = null;
       } else if (data.status === 'queued') {
         pollProposals();
+      } else if (data.status === 'busy') {
+        throw new Error('Suggest projects is already running. Please wait.');
       }
     } catch (e: any) {
       error.value = e.message || 'Failed to suggest projects';
@@ -453,11 +462,16 @@ export function useChat() {
     }
   };
 
-  const acceptProposal = async (proposalId: string) => {
+  const acceptProposal = async (proposal: ProjectProposal) => {
     error.value = null;
     try {
-      const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/proposals/${proposalId}/accept`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/suggest-projects/accept`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId.value,
+          option: proposal,
+        }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -519,3 +533,5 @@ export function useChat() {
     loadMessages: fetchMessages,
   };
 }
+
+export type ChatStore = ReturnType<typeof useChat>;
