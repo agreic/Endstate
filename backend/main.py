@@ -1332,14 +1332,27 @@ async def start_project(project_id: str):
         project_name = summary.get("agreed_project", {}).get("name") or row.get("name", "Untitled")
         db.upsert_project_summary(project_id, project_name, json.dumps(summary))
         db.upsert_project_profile_node(project_id, summary.get("user_profile", {}))
-        summary_counts = db.upsert_project_nodes_from_summary(project_id, summary)
-
-        db.clear_project_nodes(project_id)
+        db.upsert_project_nodes_from_summary(project_id, summary)
 
         text = build_project_extraction_text(summary, history)
         service = KnowledgeGraphService(schema=SkillGraphSchema)
         documents = await service.aextract(text)
         normalized = service.normalize_documents(documents)
+
+        node_count = sum(len(doc.nodes) for doc in normalized)
+        rel_count = sum(len(doc.relationships) for doc in normalized)
+        if node_count == 0 and rel_count == 0:
+            return {
+                "message": "Project reinitialized (no new nodes extracted)",
+                "project_id": project_id,
+                "user_profile": summary.get("user_profile"),
+                "nodes_added": 0,
+                "relationships_added": 0,
+                "project_status": summary.get("project_status"),
+                "started_at": summary.get("started_at"),
+            }
+
+        db.clear_project_nodes(project_id)
         service.add_documents(normalized, normalize=False)
 
         graph_counts = db.get_project_graph_counts(project_id)
