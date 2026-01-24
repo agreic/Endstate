@@ -6,9 +6,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 from typing import Any, Awaitable
 from uuid import uuid4
 
+
+LOGGER = logging.getLogger("endstate.task_registry")
 
 @dataclass
 class TaskInfo:
@@ -41,6 +44,7 @@ class TaskRegistry:
         now = datetime.now(timezone.utc)
 
         task = asyncio.create_task(coro)
+        LOGGER.warning("[TaskRegistry] started job=%s kind=%s project=%s meta=%s", job_id, kind, project_id, meta or {})
         info = TaskInfo(
             job_id=job_id,
             project_id=project_id,
@@ -59,12 +63,15 @@ class TaskRegistry:
 
     def _handle_completion(self, job_id: str, task: asyncio.Task) -> None:
         if task.cancelled():
+            LOGGER.warning("[TaskRegistry] canceled job=%s", job_id)
             self._update(job_id, status="canceled")
             return
         exc = task.exception()
         if exc:
+            LOGGER.warning("[TaskRegistry] failed job=%s error=%s", job_id, exc)
             self._update(job_id, status="failed", error=str(exc))
             return
+        LOGGER.warning("[TaskRegistry] completed job=%s", job_id)
         self._update(job_id, status="completed", result=task.result())
 
     def _update(self, job_id: str, **kwargs: Any) -> None:

@@ -1099,6 +1099,7 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
 
     async def _task():
         try:
+            print(f"[CapstoneEval] task started submission_id={submission_id} project_id={project_id} skills={len(required_skills)}")
             result = await evaluate_submission(request.content, project_brief, required_skills, model_used)
             if "error" in result:
                 db.update_submission_status(submission_id, "failed", feedback=str(result["error"]))
@@ -1135,8 +1136,11 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
                     continue
                 score = submission.get("score")
                 if score is not None:
-                    previous_score = float(score)
-                    break
+                    try:
+                        previous_score = float(score)
+                        break
+                    except (TypeError, ValueError):
+                        continue
             if previous_score is not None:
                 improvement = safe_score - previous_score
             capstone = summary.get("capstone") if isinstance(summary.get("capstone"), dict) else {}
@@ -1161,6 +1165,7 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
             )
             return {"submission_id": submission_id, "evaluation_id": evaluation_id, **result}
         except Exception as exc:
+            print(f"[CapstoneEval] task failed submission_id={submission_id} error={repr(exc)}")
             db.update_submission_status(submission_id, "failed", feedback=str(exc))
             raise
 
@@ -1226,7 +1231,21 @@ def get_submission(submission_id: str):
         eval_at = entry.get("evaluated_at")
         if isinstance(eval_at, DateTime):
             eval_at = eval_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        rubric = entry.get("rubric")
+        skill_evidence = entry.get("skill_evidence")
+        if isinstance(rubric, str):
+            try:
+                rubric = json.loads(rubric)
+            except Exception:
+                rubric = {}
+        if isinstance(skill_evidence, str):
+            try:
+                skill_evidence = json.loads(skill_evidence)
+            except Exception:
+                skill_evidence = {}
         formatted_evals.append({**entry, "evaluated_at": eval_at})
+        formatted_evals[-1]["rubric"] = rubric
+        formatted_evals[-1]["skill_evidence"] = skill_evidence
 
     return {
         "submission": {

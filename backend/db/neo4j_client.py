@@ -1482,6 +1482,8 @@ class Neo4jClient:
         prompt_version: str,
     ) -> None:
         """Persist evaluation results and update submission."""
+        rubric_payload = json.dumps(rubric) if isinstance(rubric, dict) else json.dumps({})
+        skill_evidence_payload = json.dumps(skill_evidence) if isinstance(skill_evidence, dict) else json.dumps({})
         self.query(
             """
             MATCH (s:ProjectSubmission {id: $submission_id})
@@ -1515,8 +1517,8 @@ class Neo4jClient:
                 "submission_id": submission_id,
                 "evaluation_id": evaluation_id,
                 "score": score,
-                "rubric": rubric,
-                "skill_evidence": skill_evidence,
+                "rubric": rubric_payload,
+                "skill_evidence": skill_evidence_payload,
                 "overall_feedback": overall_feedback,
                 "suggestions": suggestions,
                 "passed": passed,

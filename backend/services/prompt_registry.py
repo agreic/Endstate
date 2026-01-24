@@ -17,17 +17,17 @@ PROMPTS: Dict[str, dict] = {
             "SUBMISSION:\n{submission}\n\n"
             "Evaluate using this rubric:\n{rubric}\n\n"
             "Output JSON with keys:\n"
-            "{\n"
+            "{{\n"
             '  "score": 0.0-1.0,\n'
-            '  "criteria": {\n'
-            '    "skill_application": {"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []},\n'
-            '    "conceptual_understanding": {"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []},\n'
-            '    "completeness": {"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []}\n'
-            "  },\n"
-            '  "skill_evidence": {"Skill Name": "Where/how demonstrated OR Missing - reason"},\n'
+            '  "criteria": {{\n'
+            '    "skill_application": {{"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []}},\n'
+            '    "conceptual_understanding": {{"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []}},\n'
+            '    "completeness": {{"score": 0.0-1.0, "strengths": [], "weaknesses": [], "suggestions": []}}\n'
+            "  }},\n"
+            '  "skill_evidence": {{"Skill Name": "Where/how demonstrated OR Missing - reason"}},\n'
             '  "overall_feedback": "Encouraging, specific improvement guidance",\n'
             '  "suggestions": ["Specific improvement suggestions"]\n'
-            "}\n"
+            "}}\n"
         ),
     },
     "project_alignment": {

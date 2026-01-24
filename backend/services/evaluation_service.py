@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 from typing import Any
 
@@ -15,6 +17,7 @@ from backend.services.prompt_registry import get_prompt_template, get_prompt_ver
 
 
 EVALUATION_TIMEOUT = config.llm.timeout_seconds
+LOGGER = logging.getLogger("endstate.capstone_eval")
 
 RUBRIC = {
     "criteria": [
@@ -49,6 +52,20 @@ def _extract_json_block(content: str) -> dict | None:
     except Exception:
         return None
     return None
+
+
+async def _repair_json(llm, content: str) -> dict | None:
+    prompt = (
+        "Fix the JSON below. Return ONLY valid JSON with no extra text.\n\n"
+        f"{content}"
+    )
+    try:
+        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=min(30, EVALUATION_TIMEOUT))
+    except Exception as exc:
+        LOGGER.warning("[CapstoneEval] JSON repair failed: %s", exc)
+        return None
+    repaired = str(response.content if hasattr(response, "content") else response)
+    return _extract_json_block(repaired)
 
 
 def _normalize_skill(name: str) -> str:
@@ -90,24 +107,43 @@ async def evaluate_submission(
     required_skills: list[str],
     model_used: str,
 ) -> dict[str, Any]:
-    llm = get_llm()
+    try:
+        llm = get_llm()
+    except Exception as exc:
+        LOGGER.error("[CapstoneEval] LLM init failed: %s", exc)
+        return {"error": f"Evaluation failed: {exc}"}
+
+    def _escape_braces(value: str) -> str:
+        return value.replace("{", "{{").replace("}", "}}")
 
     skill_list = "\n".join(f"- {skill}" for skill in required_skills) if required_skills else "- None provided"
     rubric_text = json.dumps(RUBRIC, indent=2)
     template = get_prompt_template("capstone_evaluation")
-    prompt = template.format(project_brief=project_brief, skills=skill_list, submission=submission, rubric=rubric_text)
+    prompt = template.format(
+        project_brief=_escape_braces(project_brief),
+        skills=_escape_braces(skill_list),
+        submission=_escape_braces(submission),
+        rubric=_escape_braces(rubric_text),
+    )
 
+    debug_enabled = os.getenv("ENDSTATE_EVAL_DEBUG", "").lower() in {"1", "true", "yes"}
+    LOGGER.warning("[CapstoneEval] start provider=%s prompt_chars=%s skills=%s", model_used, len(prompt), len(required_skills))
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=EVALUATION_TIMEOUT)
     except Exception as e:
+        LOGGER.warning("[CapstoneEval] error=%s", e)
         return {"error": f"Evaluation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
     parsed = _extract_json_block(content)
     parse_error = None
     if not parsed:
-        parse_error = "Evaluation response was not valid JSON."
-        parsed = {}
+        repaired = await _repair_json(llm, content)
+        if repaired:
+            parsed = repaired
+        else:
+            parse_error = "Evaluation response was not valid JSON."
+            parsed = {}
     raw_score = parsed.get("score")
     score = 0.0
     if raw_score is not None:
@@ -130,6 +166,11 @@ async def evaluate_submission(
     overall_feedback = str(parsed.get("overall_feedback") or "").strip()
     if parse_error and not overall_feedback:
         overall_feedback = "Evaluation failed to parse. Please resubmit."
+    snippet = content[:500].replace("\n", " ")
+    if debug_enabled:
+        LOGGER.info("[CapstoneEval] response_snippet=%s", snippet)
+    if parse_error:
+        LOGGER.warning("[CapstoneEval] parse_error=%s snippet=%s", parse_error, snippet)
     return {
         "score": score,
         "criteria": criteria,
