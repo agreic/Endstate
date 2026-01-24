@@ -1021,27 +1021,37 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
             if "error" in result:
                 raise RuntimeError(result["error"])
             evaluation_id = f"eval-{uuid.uuid4().hex[:8]}"
-        db.save_submission_evaluation(
-            submission_id,
-            evaluation_id,
-            float(result.get("score", 0.0)),
-            result.get("criteria", {}),
-            result.get("skill_evidence", {}),
-            result.get("overall_feedback", ""),
-            result.get("suggestions", []),
-            bool(result.get("passed")),
-            model_used,
-            str(result.get("prompt_version", "")),
-        )
+            db.save_submission_evaluation(
+                submission_id,
+                evaluation_id,
+                float(result.get("score", 0.0)),
+                result.get("criteria", {}),
+                result.get("skill_evidence", {}),
+                result.get("overall_feedback", ""),
+                result.get("suggestions", []),
+                bool(result.get("passed")),
+                model_used,
+                str(result.get("prompt_version", "")),
+            )
             skill_evidence = result.get("skill_evidence", {}) if isinstance(result.get("skill_evidence"), dict) else {}
             if required_skills:
                 covered = sum(1 for value in skill_evidence.values() if value and "missing" not in str(value).lower())
                 coverage = covered / max(len(required_skills), 1)
             else:
                 coverage = 1.0
-        prompt_version = str(result.get("prompt_version", "unknown"))
-        log_metric("capstone_score", float(result.get("score", 0.0)), session_id=submission_id, tags=["capstone", project_id, prompt_version, model_used])
-        log_metric("skill_evidence_coverage", coverage, session_id=submission_id, tags=["capstone", project_id, prompt_version, model_used])
+            prompt_version = str(result.get("prompt_version", "unknown"))
+            log_metric(
+                "capstone_score",
+                float(result.get("score", 0.0)),
+                session_id=submission_id,
+                tags=["capstone", project_id, prompt_version, model_used],
+            )
+            log_metric(
+                "skill_evidence_coverage",
+                coverage,
+                session_id=submission_id,
+                tags=["capstone", project_id, prompt_version, model_used],
+            )
             previous_score = None
             submissions = db.list_project_submissions(project_id)
             for submission in submissions:
@@ -1053,7 +1063,12 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
                     break
             if previous_score is not None:
                 improvement = float(result.get("score", 0.0)) - previous_score
-            log_metric("learning_improvement", improvement, session_id=project_id, tags=["capstone", project_id, prompt_version, model_used])
+                log_metric(
+                    "learning_improvement",
+                    improvement,
+                    session_id=project_id,
+                    tags=["capstone", project_id, prompt_version, model_used],
+                )
             capstone = summary.get("capstone") if isinstance(summary.get("capstone"), dict) else {}
             capstone.update({
                 "last_submission_id": submission_id,
