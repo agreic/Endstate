@@ -5,25 +5,24 @@ Knowledge-graph powered learning platform with AI-guided project creation and it
 ## The Endstate Loop
 
 ```
-Goal → AI Project Proposal → Skills → Lessons → Capstone → Evaluation → Complete
+Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons → Assessments → Capstone → Evaluation → Complete
 ```
 
 ## Key Features
 
-### 1. Conversational Project Creation
-- Chat with AI to define learning goals
-- AI generates structured project proposals
-- Accept proposal to create learning project
+### 1. Conversational Project Discovery
+- Chat with the Socratic interviewer to clarify goals
+- Click “Suggest Projects” to generate 3 concrete options
+- Select a proposal card to create a project (no “I accept” typing)
 
 ### 2. Skill-Graph Learning Path
 - Visual knowledge graph of skills and concepts
 - Dependencies between skills shown
-- Progress tracking through lessons
+- Lessons and assessments linked to projects
 
 ### 3. Iterative Capstone Evaluation
 - Text-based submissions (flexible, LLM-evaluatable)
-- Rubric-based LLM evaluation
-- Skill-to-evidence mapping
+- Rubric-based LLM evaluation with skill-to-evidence mapping
 - Constructive feedback for improvement
 - Unlimited resubmissions until complete
 
@@ -66,8 +65,8 @@ endstate/
 
 - Real-time updates via Server-Sent Events (SSE)
 - Idempotent message sending prevents duplicates
-- Processing state prevents concurrent requests
-- Chat history persisted as JSON alongside project
+- Project suggestions are requested explicitly and returned as cards
+- Chat history stored in Neo4j alongside the project
 
 ## Knowledge Graph
 
@@ -78,8 +77,7 @@ endstate/
 
 ## Capstone Evaluation
 
-- User clicks "I'm Ready" when prepared
-- Submits text solution explaining skill application
+- Submit a text solution explaining skill application
 - LLM evaluates against rubric (skill application, understanding, completeness)
 - Feedback delivered with suggestions for improvement
 - Resubmit and iterate until complete (score ≥ 0.7 + all skills evidenced)
@@ -124,6 +122,8 @@ docker compose up -d --build --force-recreate
 | `/api/chat/{id}/messages` | POST | Send message |
 | `/api/chat/{id}/messages` | GET | Get message history |
 | `/api/chat/{id}/reset` | POST | Reset session |
+| `/api/suggest-projects` | POST | Generate project options from chat history |
+| `/api/suggest-projects/accept` | POST | Accept a project option |
 
 ### Knowledge Graph
 

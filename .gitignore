@@ -218,6 +218,8 @@ node_modules/                    # All node_modules (regenerate with npm install
 # Notebooks used for testing
 notebooks/*
 notebooks/*.ipynb
+alexdoc-donotdelete/
+frontend/alexdoc-donotdelete/*
 
 # Mac
 .DS_Store

@@ -16,7 +16,7 @@ Open http://localhost:3000
 
 - **Collapsible Sidebar** - Smooth animations, responsive design. Click sidebar items to navigate.
 - **Tab System** - Switch between Chat and Knowledge Graph views (header tabs or sidebar)
-- **Chat Interface** - AI-powered chat via backend LLM integration with web search support
+- **Chat Interface** - Socratic interviewer plus “Suggest Projects” proposals
 - **Interactive Knowledge Graph** - D3.js force-directed graph with:
   - Data loaded from Neo4j database
   - Drag nodes to reposition
@@ -33,8 +33,8 @@ Open http://localhost:3000
 ### Chat
 - Type message and press Enter to send
 - Shift+Enter for new line
-- Toggle web search with the globe icon
-- Responses powered by backend LLM integration
+- Click “Suggest Projects” to generate proposal cards
+- Select a proposal to create a project or reject to keep chatting
 
 ### Knowledge Graph
 - Data loaded from Neo4j database via backend API

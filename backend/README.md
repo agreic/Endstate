@@ -18,7 +18,7 @@ backend/
 │   ├── __init__.py
 │   ├── chat_service.py   # Chat with SSE real-time updates
 │   ├── evaluation_service.py  # Rubric-based capstone evaluator
-│   └── summary_cache.py  # Project + chat storage
+│   └── lesson_service.py # Lesson generation
 └── main.py               # FastAPI application
 ```
 
@@ -32,7 +32,7 @@ Handles persistent chat conversations with real-time SSE updates.
 - Idempotent message sending via `X-Request-ID` header
 - Processing state prevents concurrent requests
 - Background task management for async operations
-- Chat history archived as JSON alongside projects
+- Explicit project suggestions via `/api/suggest-projects`
 
 **SSE Events:**
 - `initial_messages` - Message history and status
@@ -54,8 +54,7 @@ Rubric-based capstone evaluation using the same LLM as chat.
 - Score ≥ 0.7 AND all required skills evidenced
 
 ### Summary Cache
-
-Stores project summaries and chat archives as JSON files in `~/.endstate/summaries/`.
+Project summaries and chat history are stored in Neo4j.
 
 ## API Endpoints
 
@@ -67,6 +66,8 @@ Stores project summaries and chat archives as JSON files in `~/.endstate/summari
 | `/api/chat/{id}/messages` | POST | Send message |
 | `/api/chat/{id}/messages` | GET | Get message history |
 | `/api/chat/{id}/reset` | POST | Reset session |
+| `/api/suggest-projects` | POST | Generate project options from chat history |
+| `/api/suggest-projects/accept` | POST | Accept a project option |
 
 ### Knowledge Graph
 

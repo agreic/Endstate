@@ -6,6 +6,8 @@
 
 The Agentic Learning Architect: Transforming vague goals into executable skill graphs and adaptive projects.
 
+> **Note (Jan 2026):** This is a vision doc. The current implementation uses a two‑stage flow (Socratic interviewer → explicit “Suggest Projects” action) and does not include Opik tracing.
+
 ### **The Problem**
 
 Most New Year's resolutions to "learn a new skill" fail for three critical reasons that current educational platforms fail to address:
@@ -28,30 +30,30 @@ Users start with a vague goal (e.g., "I want to build AI agents"). Endstate empl
 
 3. **Teach & Adapt:** The Lesson Agent dynamically generates micro-lessons for each node in the graph—short, focused content chunks that combine conceptual explanation with immediate practice. The Evaluator Agent continuously monitors user performance. If a user fails to demonstrate mastery of a prerequisite concept, the system detects this friction point and inserts remedial nodes into the learning path, restructuring the graph in real-time.
 
-### **How It Works (Agent Architecture)**
+### **How It Works (Current Flow)**
 
-Endstate uses **LangGraph** to orchestrate a deterministic flow between specialized agents, with clear state boundaries and well-defined communication protocols:
+Endstate uses a two‑stage flow with clear responsibilities:
 
-* **🧠 Synthesizer Agent:** This agent serves as the entry point and goal clarifier. It conducts a structured interview to extract the user's true objective—moving beyond surface-level wishes to uncover the underlying capability they want to possess. It outputs a detailed Capability Statement that includes: the target deliverable, success criteria, assumed prior knowledge, and estimated timeline. This agent negotiates the "Capstone Project" with the user to ensure learning is outcome-based and measurable.
+* **🧠 Interviewer (Chat):** Socratic dialogue to clarify the user’s goal and constraints.
 
-* **🕸️ Skill Graph Agent:** Given a Capability Statement, this agent decomposes the target into atomic skill nodes and their dependency relationships. It generates a Neo4j Knowledge Graph where edges represent prerequisite relationships (e.g., "understanding_functions" → "depends_on" → "understanding_variables"). The graph is validated for cycles, completeness gaps, and topological ordering before being presented to the user. This agent strictly maps dependencies so the learning path respects the natural knowledge hierarchy.
+* **🧠 Architect (Suggest Projects):** Generates 3 project options based on the chat transcript. The user explicitly picks one.
 
-* **🎓 Lesson Generator:** A creative agent that spawns multi-modal content on demand for currently active nodes in the graph. For each skill node, it generates: a conceptual explanation with analogies, a interactive quiz with auto-grading, and a hands-on code task that demonstrates the concept. Content is generated fresh each time, allowing for personalized examples (e.g., using the user's domain of interest in code samples). This agent ensures no two learning experiences are exactly alike while maintaining pedagogical quality.
+* **🎓 Lesson Generator:** Creates focused lessons for KG nodes (no tasks inside lessons).
 
-* **⚖️ The Evaluator (Judge):** This agent monitors user performance across all interactions—quiz responses, code task outputs, and conversational demonstrations. It maintains a "mastery score" for each node and implements adaptive thresholds. If error rates spike beyond a configured tolerance, or if the user explicitly requests help, the Evaluator pauses graph traversal and inserts remedial nodes. Critically, it also identifies when users are ready to advance, allowing accelerated progression through mastered material. It decides when to "slow down" for fundamentals versus "skip ahead" to new challenges.
+* **⚖️ Evaluator:** Rubric‑based capstone evaluation with iterative feedback.
 
 ### **Tech Stack**
 
-* **Orchestration:** LangGraph (Python) for stateful multi-agent orchestration with checkpointing, human-in-the-loop breakpoints, and deterministic state transitions.
+* **Orchestration:** FastAPI backend + async task registry.
 * **LLMs:** Hybrid approach using **Gemini 1.5 Flash** for high-volume reasoning, planning, and graph generation tasks where latency matters, combined with **Llama 3** (local/quantized) for content generation where cost efficiency and privacy are priorities.
 * **Database:** **Neo4j** for storing the Skill Graph, managing dependency traversals, and enabling graph algorithms for pathfinding and prerequisite resolution.
 * **Frontend:** Vue 3 + TypeScript + Tailwind CSS for visualizing the interactive Learning Graph with D3.js integration for force-directed graph rendering.
-* **Observability:** **Opik** for comprehensive tracing, evaluation logging, and agent trajectory analysis.
+* **Observability:** Standard logging.
 * **Deployment:** Docker containers with FastAPI backend and Vercel frontend deployment.
 
 ### **Integration with Opik (Observability)**
 
-We are competing for the **Best Use of Opik** prize by integrating it deeply into the core logic loop—not as an afterthought, but as a fundamental component of our agent architecture:
+Opik integration is currently disabled. This section is retained as a future direction.
 
 1. **Graph Validity Metrics:** We log the "Hallucination Rate" of the Skill Graph Agent by validating generated dependencies against a ground-truth dataset of verified skill relationships. Each edge in the generated graph is scored for plausibility, and patterns of low-confidence edges are flagged for review. This allows us to measure and improve the reliability of our graph generation over time.
 

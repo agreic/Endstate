@@ -195,3 +195,7 @@ docs(readme): update installation instructions
 - Use environment-specific config files (dev, staging, prod)
 - Never hardcode configuration values
 - Document all configuration options
+
+## Project Workflow Notes (Current)
+- Chat is a Socratic interviewer; project creation happens via explicit “Suggest Projects.”
+- No Opik integration is enabled in the current codebase.
