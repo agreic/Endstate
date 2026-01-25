@@ -881,7 +881,7 @@ class Neo4jClient:
             """
             MATCH (p:Project {id: $project_id})
             MERGE (u:UserProfile {id: $profile_id})
-            ON CREATE SET u.created_at = datetime()
+            ON CREATE SET u.created_at = datetime(), u.session_id = p.session_id
             SET u.interests = $interests,
                 u.skill_level = $skill_level,
                 u.time_available = $time_available,
@@ -934,10 +934,11 @@ class Neo4jClient:
                 MATCH (p:Project {{id: $project_id}})
                 UNWIND $items as item
                 MERGE (n:{label} {{name: item.name}})
-                ON CREATE SET n.created_at = datetime()
+                ON CREATE SET n.created_at = datetime(), n.session_id = p.session_id
                 SET n.name = item.name,
                     n.id = COALESCE(n.id, item.id),
-                    n.updated_at = datetime()
+                    n.updated_at = datetime(),
+                    n.session_id = p.session_id
                 MERGE (p)-[:HAS_NODE]->(n)
                 MERGE (p)-[:{rel_type}]->(n)
                 """,

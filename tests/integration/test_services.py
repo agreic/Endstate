@@ -23,7 +23,7 @@ def is_neo4j_available() -> bool:
 
 def is_llm_available() -> bool:
     """Check if the configured LLM provider is available."""
-    provider = os.getenv("LLM_PROVIDER", "gemini")
+    provider = os.getenv("LLM_PROVIDER", "ollama")
     if provider == "gemini":
         return bool(os.getenv("GOOGLE_API_KEY"))
     
@@ -47,7 +47,7 @@ def test_config():
             database="neo4j",
         ),
         llm=LLMConfig(
-            provider=os.getenv("LLM_PROVIDER", "gemini"),
+            provider=os.getenv("LLM_PROVIDER", "ollama"),
             ollama=OllamaConfig(
                 base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
                 model=os.getenv("OLLAMA_MODEL", "llama3.2"),

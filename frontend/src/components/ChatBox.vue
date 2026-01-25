@@ -97,12 +97,13 @@ const dismissError = () => {
       </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-4 space-y-6 relative" ref="messagesContainer">
+    <div class="flex-1 relative min-h-0">
+      <!-- Project Proposals Overlay -->
       <div
         v-if="pendingProposals.length"
-        class="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex items-start justify-center p-4"
+        class="absolute inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
       >
-        <div class="w-full max-w-3xl bg-white rounded-2xl border border-surface-200 shadow-lg p-5">
+        <div class="w-full max-w-3xl bg-white rounded-2xl border border-surface-200 shadow-lg p-5 mt-4 mb-4">
           <div class="flex items-start justify-between gap-4 mb-4">
             <div>
               <p class="text-xs uppercase text-surface-400">Suggested Projects</p>
@@ -145,83 +146,86 @@ const dismissError = () => {
         </div>
       </div>
 
-      <div
-        v-for="(message, index) in messages"
-        :key="index"
-        class="flex gap-3"
-        :class="message.role === 'user' ? 'flex-row-reverse' : ''"
-      >
+      <!-- Messages Area -->
+      <div class="absolute inset-0 overflow-y-auto p-4 space-y-6" ref="messagesContainer">
         <div
-          class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm"
-          :class="
-            message.role === 'user'
-              ? 'bg-primary-600'
-              : 'bg-gradient-to-br from-primary-400 to-primary-600'
-          "
+          v-for="(message, index) in messages"
+          :key="index"
+          class="flex gap-3"
+          :class="message.role === 'user' ? 'flex-row-reverse' : ''"
         >
-          <User v-if="message.role === 'user'" :size="16" class="text-white" />
-          <Bot v-else :size="16" class="text-white" />
-        </div>
-
-        <div class="max-w-[85%] lg:max-w-[70%]">
           <div
-            class="rounded-2xl px-4 py-3 shadow-sm"
+            class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm"
             :class="
               message.role === 'user'
-                ? 'bg-primary-600 text-white'
-                : 'bg-white text-surface-800'
+                ? 'bg-primary-600'
+                : 'bg-gradient-to-br from-primary-400 to-primary-600'
             "
           >
+            <User v-if="message.role === 'user'" :size="16" class="text-white" />
+            <Bot v-else :size="16" class="text-white" />
+          </div>
+
+          <div class="max-w-[85%] lg:max-w-[70%]">
             <div
-              class="text-sm leading-relaxed markdown-container"
-              v-html="renderMarkdown(message.content)"
-            ></div>
+              class="rounded-2xl px-4 py-3 shadow-sm"
+              :class="
+                message.role === 'user'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-white text-surface-800'
+              "
+            >
+              <div
+                class="text-sm leading-relaxed markdown-container"
+                v-html="renderMarkdown(message.content)"
+              ></div>
+            </div>
+            <p
+              class="text-[10px] text-surface-400 mt-1 px-2"
+              :class="message.role === 'user' ? 'text-right' : ''"
+            >
+              {{ formatTime(message.timestamp) }}
+            </p>
           </div>
-          <p
-            class="text-[10px] text-surface-400 mt-1 px-2"
-            :class="message.role === 'user' ? 'text-right' : ''"
+        </div>
+
+        <div v-if="connectionStatus === 'connecting'" class="flex gap-3">
+          <div
+            class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0"
           >
-            {{ formatTime(message.timestamp) }}
-          </p>
-        </div>
-      </div>
-
-      <div v-if="connectionStatus === 'connecting'" class="flex gap-3">
-        <div
-          class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0"
-        >
-          <Bot :size="16" class="text-white" />
-        </div>
-        <div
-          class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-surface-100"
-        >
-          <div class="flex items-center gap-1.5">
-            <span class="text-xs text-surface-400 mr-2">Connecting...</span>
+            <Bot :size="16" class="text-white" />
+          </div>
+          <div
+            class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-surface-100"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs text-surface-400 mr-2">Connecting...</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div v-if="connectionStatus === 'ready' && messages.length === 0" class="text-center text-surface-400 text-sm py-6">
-        Start a conversation to see your chat history here.
-      </div>
-
-      <div v-if="isLocked" class="flex gap-3">
-        <div
-          class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0"
-        >
-          <Bot :size="16" class="text-white" />
+        <div v-if="connectionStatus === 'ready' && messages.length === 0" class="text-center text-surface-400 text-sm py-6">
+          Start a conversation to see your chat history here.
         </div>
-        <div
-          class="bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200"
-        >
-          <div class="flex items-center gap-1.5">
-            <span class="text-xs text-amber-600 mr-2">
-              {{ processingMode === 'summary' ? 'Creating project plan...' : processingMode === 'proposal' ? 'Generating project suggestions...' : 'Thinking...' }}
-            </span>
-            <div class="flex gap-1">
-              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-              <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+
+        <div v-if="isLocked" class="flex gap-3">
+          <div
+            class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0"
+          >
+            <Bot :size="16" class="text-white" />
+          </div>
+          <div
+            class="bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs text-amber-600 mr-2">
+                {{ processingMode === 'summary' ? 'Creating project plan...' : processingMode === 'proposal' ? 'Generating project suggestions...' : 'Thinking...' }}
+              </span>
+              <div class="flex gap-1">
+                <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+              </div>
             </div>
           </div>
         </div>

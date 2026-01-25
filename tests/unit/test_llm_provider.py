@@ -99,6 +99,30 @@ class TestGetLLM:
         llm = get_llm(provider="OLLAMA")
         assert llm == mock_llm
 
+    @patch("backend.llm.provider._get_gemini_llm")
+    @patch("backend.llm.provider._get_ollama_llm")
+    def test_provider_respects_env_config(self, mock_get_ollama, mock_get_gemini):
+        """
+        Test that get_llm uses the provider configured in global config
+        when no arguments are passed.
+        """
+        # Test Case 1: Config is Ollama
+        with patch("backend.llm.provider.config.llm") as mock_conf:
+            mock_conf.provider = LLMProvider.OLLAMA
+            get_llm()
+            mock_get_ollama.assert_called_once()
+            mock_get_gemini.assert_not_called()
+        
+        mock_get_ollama.reset_mock()
+        mock_get_gemini.reset_mock()
+
+        # Test Case 2: Config is Gemini
+        with patch("backend.llm.provider.config.llm") as mock_conf:
+            mock_conf.provider = LLMProvider.GEMINI
+            get_llm()
+            mock_get_gemini.assert_called_once()
+            mock_get_ollama.assert_not_called()
+
     def test_unsupported_provider(self):
         """Test error on unsupported provider."""
         with pytest.raises(ValueError):

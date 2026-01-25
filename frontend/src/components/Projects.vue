@@ -665,11 +665,13 @@ onMounted(() => {
   loadProjects();
   window.addEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
   window.addEventListener("endstate:lesson-queued", handleLessonEvent as EventListener);
+  window.addEventListener("endstate:project-created", loadProjects as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener("endstate:lesson-created", handleLessonEvent as EventListener);
   window.removeEventListener("endstate:lesson-queued", handleLessonEvent as EventListener);
+  window.removeEventListener("endstate:project-created", loadProjects as EventListener);
   clearJobTimers();
   if (reinitPollTimer) window.clearTimeout(reinitPollTimer);
 });

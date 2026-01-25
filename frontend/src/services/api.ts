@@ -415,7 +415,7 @@ export async function suggestProjects(payload: { sessionId: string; history: { r
 }
 
 export async function acceptSuggestedProject(payload: { sessionId: string; option: ProjectProposal }): Promise<{ project_id: string; project_name: string }> {
-  return requestJson(`/api/suggest-projects/accept`, {
+  const response = await requestJson<{ project_id: string; project_name: string }>(`/api/suggest-projects/accept`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -425,12 +425,16 @@ export async function acceptSuggestedProject(payload: { sessionId: string; optio
       option: payload.option,
     }),
   });
+  window.dispatchEvent(new CustomEvent('endstate:project-created'));
+  return response;
 }
 
 export async function acceptChatProposal(sessionId: string, proposalId: string): Promise<{ project_id: string; project_name: string }> {
-  return requestJson(`/api/chat/${encodeURIComponent(sessionId)}/proposals/${encodeURIComponent(proposalId)}/accept`, {
+  const response = await requestJson<{ project_id: string; project_name: string }>(`/api/chat/${encodeURIComponent(sessionId)}/proposals/${encodeURIComponent(proposalId)}/accept`, {
     method: 'POST',
   });
+  window.dispatchEvent(new CustomEvent('endstate:project-created'));
+  return response;
 }
 
 export async function rejectChatProposals(sessionId: string): Promise<{ status: string }> {

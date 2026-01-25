@@ -579,7 +579,7 @@ class ChatService:
         summary["project_id"] = project_id
         summary["session_id"] = session_id
 
-        self.db.upsert_project_summary(project_id, project_name, json.dumps(summary))
+        self.db.upsert_project_summary(project_id, project_name, json.dumps(summary), session_id=session_id)
         self.db.upsert_project_profile_node(project_id, summary.get("user_profile", {}))
         self.db.upsert_project_nodes_from_summary(project_id, summary)
         project_info = summary.get("agreed_project", {}) if isinstance(summary.get("agreed_project"), dict) else {}

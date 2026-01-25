@@ -53,5 +53,17 @@ This guide explains how to deploy Endstate to the cloud for a live demo using a 
 
 ---
 
-> [!TIP]
 > This "Bring Your Own Key" architecture ensures that the live demo is completely free for the maintainer while keeping user data perfectly isolated.
+
+## 6. Data Persistence & Cleanup
+
+While data is isolated by session ID, it persists in the database. For online deployments, you should periodically clean up old sessions to avoid database bloat.
+
+A cleanup script is provided: `scripts/cleanup_sessions.py`.
+
+**To run periodically on Render:**
+1.  Add a **Cron Job** in your Render dashboard (available on paid plans, or configure a separate scheduler).
+2.  Command: `python scripts/cleanup_sessions.py --hours 24`
+
+This will remove all data associated with sessions older than 24 hours.
+
