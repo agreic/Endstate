@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play, Zap } from "lucide-vue-next";
 import { marked } from "marked";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, submitCapstone, listProjectSubmissions, getSubmission, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode, type ProjectSubmission, type SubmissionEvaluation } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, submitCapstone, listProjectSubmissions, getSubmission, triggerRemediation, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode, type ProjectSubmission, type SubmissionEvaluation, type RemediationResult } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -37,6 +37,10 @@ const showAssessmentPanel = ref(false);
 const assessments = ref<ProjectAssessment[]>([]);
 const assessmentAnswers = ref<Record<string, string>>({});
 const assessmentError = ref<string | null>(null);
+const submittingAssessmentIds = ref<Set<string>>(new Set());
+const remediationAvailable = ref<Set<string>>(new Set());
+const remediationLoading = ref<Set<string>>(new Set());
+const remediationResults = ref<Record<string, RemediationResult>>({});
 const lessonsLoading = ref(false);
 const assessmentsLoading = ref(false);
 const projectJobs = ref<Array<{ job_id: string; kind: string; status: string; meta?: Record<string, any> }>>([]);
@@ -346,12 +350,18 @@ const generateAssessment = async (lessonId: string) => {
 
 const submitAssessment = async (assessmentId: string) => {
   if (!selectedProject.value) return;
+  if (submittingAssessmentIds.value.has(assessmentId)) return; // Prevent double submission
+  
   assessmentError.value = null;
   const answer = assessmentAnswers.value[assessmentId] || "";
   if (!answer.trim()) {
     assessmentError.value = "Answer cannot be empty";
     return;
   }
+  
+  // Add to submitting set
+  submittingAssessmentIds.value = new Set([...submittingAssessmentIds.value, assessmentId]);
+  
   try {
     const response = await submitProjectAssessment(selectedProject.value.session_id, assessmentId, answer);
     assessments.value = assessments.value.map((assessment) =>
@@ -359,6 +369,12 @@ const submitAssessment = async (assessmentId: string) => {
         ? { ...assessment, status: response.result, feedback: response.feedback, archived: response.result === "pass" }
         : assessment,
     );
+    
+    // Track remediation availability for failed assessments
+    if (response.result === "fail" && response.remediation_available) {
+      remediationAvailable.value = new Set([...remediationAvailable.value, assessmentId]);
+    }
+    
     if (response.result === "pass") {
       const passedAssessment = assessments.value.find((assessment) => assessment.id === assessmentId);
       if (passedAssessment) {
@@ -373,6 +389,40 @@ const submitAssessment = async (assessmentId: string) => {
     }
   } catch (e) {
     assessmentError.value = e instanceof Error ? e.message : "Failed to submit assessment";
+  } finally {
+    // Remove from submitting set
+    const newSet = new Set(submittingAssessmentIds.value);
+    newSet.delete(assessmentId);
+    submittingAssessmentIds.value = newSet;
+  }
+};
+
+const requestRemediation = async (assessmentId: string) => {
+  if (!selectedProject.value) return;
+  if (remediationLoading.value.has(assessmentId)) return;
+  
+  assessmentError.value = null;
+  remediationLoading.value = new Set([...remediationLoading.value, assessmentId]);
+  
+  try {
+    const result = await triggerRemediation(selectedProject.value.session_id, assessmentId);
+    remediationResults.value = { ...remediationResults.value, [assessmentId]: result };
+    
+    // Remove from available set since we've triggered it
+    const newAvailable = new Set(remediationAvailable.value);
+    newAvailable.delete(assessmentId);
+    remediationAvailable.value = newAvailable;
+    
+    // Refresh lessons to show the new remediation lesson
+    if (result.action === "node_created" && result.remediation_node_id) {
+      await loadProjectExtras(selectedProject.value.session_id);
+    }
+  } catch (e) {
+    assessmentError.value = e instanceof Error ? e.message : "Failed to generate remediation";
+  } finally {
+    const newLoading = new Set(remediationLoading.value);
+    newLoading.delete(assessmentId);
+    remediationLoading.value = newLoading;
   }
 };
 
@@ -1231,9 +1281,48 @@ onUnmounted(() => {
                         </div>
                         <button
                           @click="submitAssessment(assessment.id)"
-                          class="text-xs px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                          :disabled="submittingAssessmentIds.has(assessment.id)"
+                          class="text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                          :class="submittingAssessmentIds.has(assessment.id) 
+                            ? 'bg-surface-200 text-surface-500 cursor-wait' 
+                            : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'"
                         >
-                          Submit answer
+                          <span v-if="submittingAssessmentIds.has(assessment.id)" class="animate-spin rounded-full h-3 w-3 border-b-2 border-surface-500"></span>
+                          {{ submittingAssessmentIds.has(assessment.id) ? 'Evaluating...' : 'Submit answer' }}
+                        </button>
+                      </div>
+                      
+                      <!-- Remediation Section for Failed Assessments -->
+                      <div v-if="assessment.status === 'fail'" class="mt-3 pt-3 border-t border-surface-200">
+                        <div v-if="remediationResults[assessment.id]" class="bg-amber-50 rounded-lg p-3">
+                          <p class="text-xs font-medium text-amber-800 mb-2">
+                            <Zap :size="14" class="inline mr-1" />
+                            Remediation Generated
+                          </p>
+                          <div v-if="remediationResults[assessment.id].diagnosis" class="text-xs text-amber-700 mb-2">
+                            <p><strong>Diagnosis:</strong> {{ remediationResults[assessment.id].diagnosis?.diagnosis }}</p>
+                            <p v-if="remediationResults[assessment.id].diagnosis?.missing_concepts?.length" class="mt-1">
+                              <strong>Missing concepts:</strong> {{ remediationResults[assessment.id].diagnosis?.missing_concepts?.join(', ') }}
+                            </p>
+                          </div>
+                          <div v-if="remediationResults[assessment.id].remediation_content" class="text-xs text-amber-700">
+                            <p class="font-medium">{{ remediationResults[assessment.id].remediation_content?.name }}</p>
+                            <p class="mt-1">{{ remediationResults[assessment.id].remediation_content?.description }}</p>
+                          </div>
+                          <p class="text-xs text-amber-600 mt-2">A remediation lesson has been added to your lessons.</p>
+                        </div>
+                        <button
+                          v-else-if="remediationAvailable.has(assessment.id) || assessment.status === 'fail'"
+                          @click="requestRemediation(assessment.id)"
+                          :disabled="remediationLoading.has(assessment.id)"
+                          class="w-full text-xs px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                          :class="remediationLoading.has(assessment.id)
+                            ? 'bg-amber-100 text-amber-500 cursor-wait'
+                            : 'bg-amber-100 text-amber-700 hover:bg-amber-200'"
+                        >
+                          <span v-if="remediationLoading.has(assessment.id)" class="animate-spin rounded-full h-3 w-3 border-b-2 border-amber-500"></span>
+                          <Zap v-else :size="14" />
+                          {{ remediationLoading.has(assessment.id) ? 'Generating remediation...' : 'Get remediation lesson' }}
                         </button>
                       </div>
                     </div>

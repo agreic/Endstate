@@ -16,9 +16,9 @@ class TestNeo4jClientInit:
         """Test initialization with default config."""
         with patch("backend.db.neo4j_client.config") as mock_config:
             mock_config.neo4j = Neo4jConfig(
-                uri="bolt://localhost:7687",
-                username="neo4j",
-                password="password",
+                _uri="bolt://localhost:7687",
+                _username="neo4j",
+                _password="password",
                 database="neo4j",
             )
 
@@ -31,9 +31,9 @@ class TestNeo4jClientInit:
     def test_custom_config_initialization(self):
         """Test initialization with custom config."""
         custom_config = Neo4jConfig(
-            uri="bolt://custom:7687",
-            username="admin",
-            password="secret",
+            _uri="bolt://custom:7687",
+            _username="admin",
+            _password="secret",
             database="testdb",
         )
 

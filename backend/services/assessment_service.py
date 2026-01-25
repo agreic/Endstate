@@ -64,6 +64,10 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment generation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment generation failed: {e}"}
 
@@ -86,6 +90,10 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment evaluation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment evaluation failed: {e}"}
 

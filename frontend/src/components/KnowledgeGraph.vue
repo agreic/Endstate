@@ -918,7 +918,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
         
         <div class="mt-3 pt-3 border-t border-surface-100">
           <span class="text-xs text-surface-400">
-            Connected to {{ getConnectionCount(selectedNode.id) }} nodes
+            {{ getConnectionCount(selectedNode.id) }} relationship{{ getConnectionCount(selectedNode.id) === 1 ? '' : 's' }} in graph
           </span>
         </div>
       </div>
