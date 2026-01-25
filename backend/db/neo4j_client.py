@@ -133,8 +133,13 @@ class Neo4jClient:
         # Inject session_id into params
         if "session_id" not in params:
             params["session_id"] = session_id
+        
+        # DEBUG LOGGING
+        print(f"[Neo4jClient] EXEC Cypher: {cypher[:50]}... | Params Session: {params.get('session_id')}")
             
-        return self.graph.query(cypher, params)
+        result = self.graph.query(cypher, params)
+        print(f"[Neo4jClient] Result Count: {len(result)}")
+        return result
 
     def label_exists(self, label: str) -> bool:
         """Check whether a label exists in the database."""

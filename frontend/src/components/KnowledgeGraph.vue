@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, addSampleData as addSampleDataApi, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, type ApiNode, type ApiRelationship } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -234,6 +234,7 @@ const loadGraphData = async () => {
     }, 100);
     
   } catch (error) {
+    console.error("[Graph] Load error:", error);
     loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
     isLoading.value = false;
   }
@@ -242,18 +243,7 @@ const loadGraphData = async () => {
 const addSampleData = async () => {
   isAddingSample.value = true;
   try {
-    const sampleText = `
-      Machine Learning is a subset of AI that enables systems to learn from data.
-      Deep Learning uses neural networks with multiple layers.
-      Python is a programming language popular for AI development.
-      TensorFlow is an open source ML framework by Google.
-      PyTorch is an open source ML framework by Meta.
-      Computer Vision enables computers to see and understand images.
-      Natural Language Processing processes human language by computers.
-      Neural Networks are computing systems inspired by biological brains.
-      Large Language Models like GPT are transformer-based models.
-    `;
-    await extractFromText(sampleText);
+    await addSampleDataApi(); // Renamed in import below
     await loadGraphData();
   } catch (error) {
     loadError.value = "Failed to add sample data";

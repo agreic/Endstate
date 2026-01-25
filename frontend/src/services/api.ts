@@ -1,5 +1,5 @@
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
+const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 120000;
 
 function getSessionId(): string {
   let sessionId = localStorage.getItem('endstate_session_id');
@@ -443,13 +443,9 @@ export async function rejectChatProposals(sessionId: string): Promise<{ status: 
   });
 }
 
-export async function extractFromText(text: string): Promise<{ message: string; documents_count: number }> {
+export async function addSampleData(): Promise<{ message: string; total_nodes: number; total_relationships: number }> {
   return requestJson('/api/extract/sample', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ text }),
   });
 }
 

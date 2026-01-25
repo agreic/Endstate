@@ -14,6 +14,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OLLAMA = "ollama"
     GEMINI = "gemini"
+    MOCK = "mock"
 
 
 def get_llm(
@@ -25,7 +26,7 @@ def get_llm(
     Get an LLM instance based on provider.
     
     Args:
-        provider: LLM provider ("ollama" or "gemini"). Uses config default if not specified.
+        provider: LLM provider ("ollama", "gemini", or "mock"). Uses config default if not specified.
         llm_config: Optional config override. Uses global config if not provided.
         **kwargs: Additional arguments passed to the LLM constructor.
         
@@ -45,6 +46,9 @@ def get_llm(
         return _get_ollama_llm(llm_config, **kwargs)
     elif provider == LLMProvider.GEMINI:
         return _get_gemini_llm(llm_config, **kwargs)
+    elif provider == LLMProvider.MOCK:
+        from backend.llm.mock_provider import MockLLM
+        return MockLLM()
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 

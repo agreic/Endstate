@@ -161,6 +161,10 @@ async def extract_config_headers(request: Request, call_next):
         tokens.append(X_GEMINI_API_KEY.set(gemini_key))
     if session_id:
         tokens.append(X_SESSION_ID.set(session_id))
+    
+    # Log session context
+    active_session = X_SESSION_ID.get()
+    print(f"[Middleware] Path: {request.url.path} | Header X-Session-ID: {session_id} | Active Context: {active_session}")
 
     try:
         response = await call_next(request)
@@ -257,7 +261,7 @@ def get_relationships(limit: int = 100):
 
 
 @app.post("/api/extract/sample")
-def add_sample_data():
+async def add_sample_data():
     """
     Add sample skill graph data to Neo4j.
     This creates proper nodes with correct types, bypassing LLM extraction.
@@ -266,6 +270,12 @@ def add_sample_data():
     from backend.config import Neo4jConfig
     
     config = Neo4jConfig()
+    sid = config.session_id
+    if not sid or sid == "local-dev":
+         # Fallback logic or just logging. 
+         # We want to allow local-dev but ensure it's intentional.
+         pass
+
     client = Neo4jClient(config)
     
     try:
@@ -292,9 +302,10 @@ def add_sample_data():
                     name: $name,
                     description: $description,
                     difficulty: 'intermediate',
-                    importance: 'core'
+                    importance: 'core',
+                    session_id: $session_id
                 })
-            """, {"id": skill_id, "name": name, "description": description})
+            """, {"id": skill_id, "name": name, "description": description, "session_id": sid})
         
         # Create relationships
         relationships = [
@@ -313,10 +324,10 @@ def add_sample_data():
         
         for source_id, rel_type, target_id in relationships:
             client.query(f"""
-                MATCH (s:Skill {{id: $source_id}})
-                MATCH (t:Skill {{id: $target_id}})
-                CREATE (s)-[:{rel_type} {{strength: 0.9}}]->(t)
-            """, {"source_id": source_id, "target_id": target_id})
+                MATCH (s:Skill {{id: $source_id, session_id: $session_id}})
+                MATCH (t:Skill {{id: $target_id, session_id: $session_id}})
+                CREATE (s)-[:{rel_type} {{strength: 0.9, session_id: $session_id}}]->(t)
+            """, {"source_id": source_id, "target_id": target_id, "session_id": sid})
         
         # Get stats
         stats = client.get_graph_stats()
@@ -326,6 +337,7 @@ def add_sample_data():
             "total_nodes": stats.get("total_nodes", 0),
             "total_relationships": stats.get("total_relationships", 0),
         }
+
     finally:
         pass  # Don't close - let connection pool manage lifecycle
 

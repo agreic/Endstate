@@ -30,7 +30,9 @@ class Neo4jConfig:
 
     @property
     def session_id(self) -> str:
-        return X_SESSION_ID.get()
+        val = X_SESSION_ID.get()
+        print(f"[Config] Accessing session_id: {val}") 
+        return val
 
 
 @dataclass
@@ -54,7 +56,7 @@ class GeminiConfig:
 @dataclass
 class LLMConfig:
     """LLM provider configuration."""
-    provider: Literal["ollama", "gemini"] = field(
+    provider: Literal["ollama", "gemini", "mock"] = field(
         default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama")
     )
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
