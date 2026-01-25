@@ -18,16 +18,46 @@ except Exception:  # pragma: no cover
 def _project_name() -> str:
     return os.getenv("OPIK_PROJECT", "endstate-demo")
 
-
-def log_metric(name: str, value: float, session_id: str | None = None, tags: list[str] | None = None) -> None:
+def log_metric(
+    name: str,
+    value: float,
+    session_id: str | None = None,
+    tags: list[str] | None = None,
+) -> None:
+    """
+    Best-effort metric logging.
+    Different Opik SDK versions expose different APIs.
+    This must never crash the app.
+    """
     if opik is None:
         return
+
     payload: dict[str, Any] = {"name": name, "value": value}
     if session_id:
         payload["session_id"] = session_id
     if tags:
         payload["tags"] = tags
-    opik.log_metric(**payload)
+
+    try:
+        fn = getattr(opik, "log_metric", None)
+        if callable(fn):
+            fn(**payload)
+            return
+
+        # fallback: attach metrics to current trace if possible
+        current = getattr(opik, "current_trace", None)
+        if callable(current):
+            t = current()
+            if t is not None:
+                metrics = getattr(t, "metrics", None)
+                if isinstance(metrics, dict):
+                    metrics[name] = value
+                    return
+                setattr(t, "metrics", {name: value})
+                return
+    except Exception:
+        return
+
 
 
 @contextmanager
