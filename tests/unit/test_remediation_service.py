@@ -68,6 +68,6 @@ async def test_generate_remediation_content_returns_valid_structure():
         original_node=original_node,
     )
     
-    assert "name" in result
+    assert "title" in result
     assert "description" in result
     assert "explanation" in result

@@ -725,6 +725,11 @@ const getDisplayLabels = (labels?: string[]): string[] => {
   if (!labels) return [];
   return labels.filter((label) => label !== "__Entity__");
 };
+
+const isProjectNode = computed(() => {
+  if (!selectedNode.value) return false;
+  return selectedNode.value.labels?.includes("Project") || selectedNode.value.labels?.includes("ProjectSummary");
+});
 </script>
 
 <template>
@@ -881,7 +886,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
+        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0 && !isProjectNode" class="mb-3">
           <button
             @click="showProperties = !showProperties"
             class="flex items-center gap-2 text-xs text-surface-500 font-medium"
@@ -896,7 +901,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div class="mt-3">
+        <div class="mt-3" v-if="!isProjectNode">
           <button
             @click="loadLesson"
             :disabled="lessonLoading"
@@ -917,6 +922,12 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           >
             {{ lessonCanceling ? 'Canceling...' : 'Cancel lesson generation' }}
           </button>
+        </div>
+        
+        <div v-if="isProjectNode" class="p-3 bg-surface-50 rounded-xl border border-surface-100">
+          <p class="text-xs text-surface-500 leading-relaxed">
+            This is your project node. It represents the target goal of your learning journey.
+          </p>
         </div>
         
         <div class="mt-3 pt-3 border-t border-surface-100">

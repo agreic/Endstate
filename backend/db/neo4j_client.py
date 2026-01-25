@@ -1799,7 +1799,7 @@ class Neo4jClient:
         self,
         project_id: str,
         node_id: str,
-        name: str,
+        title: str,
         description: str,
         explanation: str,
         diagnosis: str,
@@ -1808,12 +1808,12 @@ class Neo4jClient:
         triggered_by_assessment: str,
     ) -> dict:
         """
-        Create a remediation concept node and insert it before the target node.
+        Create a remediation lesson node and link to the project.
 
         Args:
             project_id: Project this remediation belongs to
             node_id: ID for the new remediation node
-            name: Short title for the remediation concept
+            title: Short title for the remediation lesson
             description: Description of what this remediation covers
             explanation: Focused lesson content
             diagnosis: Original diagnosis text
@@ -1828,9 +1828,9 @@ class Neo4jClient:
             """
             MATCH (ps:ProjectSummary {id: $project_id})
             MATCH (p:Project {id: $project_id})
-            CREATE (r:RemediationConcept {
+            CREATE (r:ProjectLesson {
                 id: $node_id,
-                name: $name,
+                title: $title,
                 description: $description,
                 explanation: $explanation,
                 diagnosis: $diagnosis,
@@ -1838,16 +1838,18 @@ class Neo4jClient:
                 before_node_id: $before_node_id,
                 triggered_by_assessment: $triggered_by_assessment,
                 node_type: 'remediation',
+                is_remediation: true,
                 created_at: datetime(),
+                archived: false,
                 version: 1
             })
-            CREATE (p)-[:HAS_REMEDIATION {version: 1, created_at: datetime()}]->(r)
-            CREATE (ps)-[:HAS_REMEDIATION]->(r)
+            CREATE (p)-[:HAS_LESSON {version: 1, created_at: datetime()}]->(r)
+            CREATE (ps)-[:HAS_LESSON]->(r)
             """,
             {
                 "project_id": project_id,
                 "node_id": node_id,
-                "name": name,
+                "title": title,
                 "description": description,
                 "explanation": explanation,
                 "diagnosis": diagnosis,
@@ -1859,7 +1861,7 @@ class Neo4jClient:
 
         self.query(
             """
-            MATCH (r:RemediationConcept {id: $remediation_id})
+            MATCH (r:ProjectLesson {id: $remediation_id})
             MATCH (target)
             WHERE target.id = $before_node_id OR elementId(target) = $before_node_id
             MERGE (r)-[:PREREQUISITE_FOR {version: 1, created_at: datetime()}]->(target)
@@ -1872,7 +1874,7 @@ class Neo4jClient:
 
         return {
             "id": node_id,
-            "name": name,
+            "title": title,
             "before_node_id": before_node_id,
             "created": True,
         }
@@ -1902,14 +1904,14 @@ class Neo4jClient:
         return result
 
     def list_remediation_nodes(self, project_id: str) -> list[dict]:
-        """List all remediation nodes for a project."""
-        if not self.label_exists("RemediationConcept"):
-            return []
+        """List all remediation nodes for a project (legacy and new)."""
+        # Supports old RemediationConcept and new ProjectLesson with is_remediation=true
         result = self.query(
             """
-            MATCH (p:Project {id: $project_id})-[:HAS_REMEDIATION]->(r:RemediationConcept)
+            MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_REMEDIATION|HAS_LESSON]->(r)
+            WHERE (r:RemediationConcept) OR (r:ProjectLesson AND r.is_remediation = true)
             RETURN r.id as id,
-                   r.name as name,
+                   COALESCE(r.title, r.name) as name,
                    r.description as description,
                    r.explanation as explanation,
                    r.diagnosis as diagnosis,
@@ -1921,6 +1923,7 @@ class Neo4jClient:
             """,
             {"project_id": project_id},
         )
+        return result
         return result
 
     def track_remediation_event(
@@ -1977,14 +1980,14 @@ class Neo4jClient:
         return result[0] if result else None
 
     def get_remediation_node(self, node_id: str) -> Optional[dict]:
-        """Get a remediation node by ID."""
-        if not self.label_exists("RemediationConcept"):
-            return None
+        """Get a remediation node by ID (legacy or new)."""
         result = self.query(
             """
-            MATCH (r:RemediationConcept {id: $node_id})
+            MATCH (r)
+            WHERE (r:RemediationConcept AND r.id = $node_id) 
+               OR (r:ProjectLesson AND r.is_remediation = true AND r.id = $node_id)
             RETURN r.id as id,
-                   r.name as name,
+                   COALESCE(r.title, r.name) as name,
                    r.description as description,
                    r.explanation as explanation,
                    r.diagnosis as diagnosis,

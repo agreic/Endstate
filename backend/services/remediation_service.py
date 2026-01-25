@@ -140,7 +140,7 @@ async def generate_remediation_content(
         
     Returns:
         Dictionary with remediation node properties:
-            - name: Short title for the remediation concept
+            - title: Short title for the remediation concept
             - description: Description of what this remediation covers
             - explanation: Focused lesson content
     """
@@ -159,9 +159,9 @@ async def generate_remediation_content(
     
     prompt = (
         "Create a focused remediation lesson for a learner who struggled with a concept.\n"
-        "Return JSON with keys: name, description, explanation.\n\n"
+        "Return JSON with keys: title, description, explanation.\n\n"
         "Requirements:\n"
-        "- name: Short title (2-5 words) for this remediation topic\n"
+        "- title: Short title (2-5 words) for this remediation topic\n"
         "- description: 1-2 sentence description of what this covers\n"
         "- explanation: 3-5 paragraph focused explanation covering the gap\n\n"
         f"Original topic the learner struggled with: {original_name}\n"
@@ -182,7 +182,7 @@ async def generate_remediation_content(
         logger.error(f"Remediation content generation failed: {e}")
         return {
             "error": f"Content generation failed: {e}",
-            "name": f"Review: {primary_concept}",
+            "title": f"Review: {primary_concept}",
             "description": f"Reinforcement of {primary_concept} before continuing.",
             "explanation": f"Please review the fundamentals of {primary_concept}.",
         }
@@ -192,13 +192,13 @@ async def generate_remediation_content(
     
     if not parsed:
         return {
-            "name": f"Review: {primary_concept}",
+            "title": f"Review: {primary_concept}",
             "description": f"Reinforcement of {primary_concept}.",
             "explanation": content.strip()[:1000],
         }
     
     return {
-        "name": str(parsed.get("name", f"Review: {primary_concept}")).strip(),
+        "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
         "description": str(parsed.get("description", "")).strip(),
         "explanation": str(parsed.get("explanation", "")).strip(),
     }
@@ -231,7 +231,7 @@ def create_remediation_node(
     result = db.create_remediation_node(
         project_id=project_id,
         node_id=node_id,
-        name=remediation_content.get("name", "Remediation"),
+        title=remediation_content.get("title", remediation_content.get("name", "Remediation")),
         description=remediation_content.get("description", ""),
         explanation=remediation_content.get("explanation", ""),
         diagnosis=diagnosis.get("diagnosis", ""),
