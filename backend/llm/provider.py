@@ -14,6 +14,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OLLAMA = "ollama"
     GEMINI = "gemini"
+    OPENROUTER = "openrouter"
 
 
 def get_llm(
@@ -45,6 +46,8 @@ def get_llm(
         return _get_ollama_llm(llm_config, **kwargs)
     elif provider == LLMProvider.GEMINI:
         return _get_gemini_llm(llm_config, **kwargs)
+    elif provider == LLMProvider.OPENROUTER:
+        return _get_openrouter_llm(llm_config, **kwargs)
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
@@ -93,6 +96,33 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
         **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout"]},
     )
 
+def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
+    """
+    OpenRouter uses an OpenAI compatible API.
+    We use LangChain ChatOpenAI with a custom base_url.
+    """
+    import os
+    from langchain_openai import ChatOpenAI
+
+    api_key = kwargs.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OpenRouter API key not found. Set OPENAI_API_KEY (recommended) or OPENROUTER_API_KEY."
+        )
+
+    base_url = kwargs.get("base_url") or os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1"
+    model = kwargs.get("model") or os.getenv("OPENAI_MODEL") or "xiaomi/mimo-v2-flash:free"
+    temperature = kwargs.get("temperature", 0.2)
+
+    timeout = kwargs.get("timeout_seconds", llm_config.timeout_seconds)
+
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
+        timeout=timeout,
+    )
 
 def test_llm(llm: BaseChatModel) -> tuple[bool, str]:
     """
