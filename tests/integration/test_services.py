@@ -21,8 +21,12 @@ def is_neo4j_available() -> bool:
         return False
 
 
-def is_ollama_available() -> bool:
-    """Check if Ollama is available for testing."""
+def is_llm_available() -> bool:
+    """Check if the configured LLM provider is available."""
+    provider = os.getenv("LLM_PROVIDER", "gemini")
+    if provider == "gemini":
+        return bool(os.getenv("GOOGLE_API_KEY"))
+    
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     try:
         import requests
@@ -43,12 +47,13 @@ def test_config():
             database="neo4j",
         ),
         llm=LLMConfig(
-            provider="ollama",
+            provider=os.getenv("LLM_PROVIDER", "gemini"),
             ollama=OllamaConfig(
                 base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
                 model=os.getenv("OLLAMA_MODEL", "llama3.2"),
                 temperature=0.0,
             ),
+            # GeminiConfig handles its own API key from environment
         ),
     )
 
@@ -85,11 +90,11 @@ class TestNeo4jClientIntegration:
     def test_create_and_query_nodes(self, neo4j_client):
         """Test creating and querying nodes."""
         neo4j_client.query("""
-            CREATE (s:Skill {id: 'test-skill-1', name: 'Python'})
+            CREATE (s:Skill {id: 'test-skill-1', name: 'Python', session_id: $session_id})
             RETURN s
         """)
 
-        result = neo4j_client.query("MATCH (s:Skill) WHERE s.id = 'test-skill-1' RETURN s")
+        result = neo4j_client.query("MATCH (s:Skill) WHERE s.id = 'test-skill-1' AND s.session_id = $session_id RETURN s")
 
         assert len(result) == 1
         assert result[0]["s"]["name"] == "Python"
@@ -97,13 +102,14 @@ class TestNeo4jClientIntegration:
     def test_create_relationships(self, neo4j_client):
         """Test creating relationships."""
         neo4j_client.query("""
-            CREATE (s1:Skill {id: 'skill-1', name: 'Python'})
-            CREATE (s2:Skill {id: 'skill-2', name: 'Data Types'})
-            CREATE (s1)-[:REQUIRES {strength: 0.8}]->(s2)
+            CREATE (s1:Skill {id: 'skill-1', name: 'Python', session_id: $session_id})
+            CREATE (s2:Skill {id: 'skill-2', name: 'Data Types', session_id: $session_id})
+            CREATE (s1)-[:REQUIRES {strength: 0.8, session_id: $session_id}]->(s2)
         """)
 
         result = neo4j_client.query("""
             MATCH (s1:Skill)-[r:REQUIRES]->(s2:Skill)
+            WHERE s1.session_id = $session_id AND s2.session_id = $session_id AND r.session_id = $session_id
             RETURN s1.name as source, r.strength as strength, s2.name as target
         """)
 
@@ -116,7 +122,7 @@ class TestNeo4jClientIntegration:
         """Test getting node counts."""
         neo4j_client.query("""
             UNWIND range(1, 5) as i
-            CREATE (:Skill {id: 'count-test-' + i})
+            CREATE (:Skill {id: 'count-test-' + i, session_id: $session_id})
         """)
 
         count = neo4j_client.get_node_count("Skill")
@@ -126,22 +132,22 @@ class TestNeo4jClientIntegration:
     def test_merge_nodes_simple(self, neo4j_client):
         """Test simple node merging."""
         neo4j_client.query("""
-            CREATE (s1:Skill {id: 'merge-test', name: 'Python'})
-            CREATE (s2:Skill {id: 'merge-test', name: 'Python Updated'})
+            CREATE (s1:Skill {id: 'merge-test', name: 'Python', session_id: $session_id})
+            CREATE (s2:Skill {id: 'merge-test', name: 'Python Updated', session_id: $session_id})
         """)
 
         deleted = neo4j_client.merge_nodes_simple("Skill", match_property="id")
 
         assert deleted == 1
 
-        result = neo4j_client.query("MATCH (s:Skill) RETURN s")
+        result = neo4j_client.query("MATCH (s:Skill) WHERE s.session_id = $session_id RETURN s")
         assert len(result) == 1
 
     def test_clean_by_label(self, neo4j_client):
         """Test cleaning nodes by label."""
         neo4j_client.query("""
-            CREATE (:Skill {id: 'to-delete'})
-            CREATE (:Concept {id: 'to-keep'})
+            CREATE (:Skill {id: 'to-delete', session_id: $session_id})
+            CREATE (:Concept {id: 'to-keep', session_id: $session_id})
         """)
 
         deleted = neo4j_client.clean_by_label("Skill")
@@ -157,9 +163,9 @@ class TestNeo4jClientIntegration:
     def test_get_graph_stats(self, neo4j_client):
         """Test getting graph statistics."""
         neo4j_client.query("""
-            CREATE (s1:Skill {id: 'stat-1'})
-            CREATE (s2:Skill {id: 'stat-2'})
-            CREATE (s1)-[:REQUIRES]->(s2)
+            CREATE (s1:Skill {id: 'stat-1', session_id: $session_id})
+            CREATE (s2:Skill {id: 'stat-2', session_id: $session_id})
+            CREATE (s1)-[:REQUIRES {session_id: $session_id}]->(s2)
         """)
 
         stats = neo4j_client.get_graph_stats()
@@ -171,8 +177,8 @@ class TestNeo4jClientIntegration:
 
 
 @pytest.mark.skipif(
-    not is_neo4j_available() or not is_ollama_available(),
-    reason="Neo4j and Ollama required - start with: docker-compose up -d neo4j ollama",
+    not is_neo4j_available() or not is_llm_available(),
+    reason="Neo4j and a configured LLM provider (Ollama or Gemini) are required.",
 )
 class TestKnowledgeGraphServiceIntegration:
     """Integration tests for knowledge graph service."""
@@ -211,7 +217,7 @@ class TestKnowledgeGraphServiceIntegration:
         """Test merging duplicate nodes."""
         knowledge_graph_service.query("""
             UNWIND range(1, 3) as i
-            CREATE (s:Skill {id: 'duplicate-test', name: 'Python ' + i})
+            CREATE (s:Skill {id: 'duplicate-test', name: 'Python ' + i, session_id: $session_id})
         """)
 
         merged = knowledge_graph_service.merge_duplicates("Skill", match_property="id")
@@ -224,11 +230,11 @@ class TestKnowledgeGraphServiceIntegration:
     def test_custom_cypher_query(self, knowledge_graph_service):
         """Test custom Cypher queries."""
         knowledge_graph_service.query("""
-            CREATE (s:Skill {id: 'query-test', name: 'Test Skill', difficulty: 'beginner'})
+            CREATE (s:Skill {id: 'query-test', name: 'Test Skill', difficulty: 'beginner', session_id: $session_id})
         """)
 
         result = knowledge_graph_service.query(
-            "MATCH (s:Skill) WHERE s.id = $id RETURN s",
+            "MATCH (s:Skill) WHERE s.id = $id AND s.session_id = $session_id RETURN s",
             {"id": "query-test"},
         )
 
@@ -238,9 +244,9 @@ class TestKnowledgeGraphServiceIntegration:
     def test_get_nodes_and_relationships(self, knowledge_graph_service):
         """Test getting nodes and relationships."""
         knowledge_graph_service.query("""
-            CREATE (s1:Skill {id: 'get-test-1'})
-            CREATE (s2:Skill {id: 'get-test-2'})
-            CREATE (s1)-[:REQUIRES]->(s2)
+            CREATE (s1:Skill {id: 'get-test-1', session_id: $session_id})
+            CREATE (s2:Skill {id: 'get-test-2', session_id: $session_id})
+            CREATE (s1)-[:REQUIRES {session_id: $session_id}]->(s2)
         """)
 
         nodes = knowledge_graph_service.get_nodes("Skill")
@@ -251,24 +257,24 @@ class TestKnowledgeGraphServiceIntegration:
 
 
 @pytest.mark.skipif(
-    not is_ollama_available(),
-    reason="Ollama not available - start with: docker-compose up -d ollama",
+    not is_llm_available(),
+    reason="Configured LLM provider not available.",
 )
-class TestOllamaIntegration:
-    """Integration tests for Ollama LLM."""
+class TestLLMIntegration:
+    """Integration tests for the configured LLM."""
 
-    def test_ollama_connection(self, test_config):
-        """Test Ollama connection."""
+    def test_llm_connection(self, test_config):
+        """Test LLM connection."""
         from backend.llm.provider import get_llm, test_llm
 
-        llm = get_llm(provider="ollama", llm_config=test_config.llm)
+        llm = get_llm(llm_config=test_config.llm)
         success, message = test_llm(llm)
 
         assert success is True
         assert len(message) > 0
 
-    def test_ollama_extraction(self, knowledge_graph_service):
-        """Test knowledge extraction with Ollama."""
+    def test_llm_extraction(self, knowledge_graph_service):
+        """Test knowledge extraction with configured LLM."""
         text = "Machine learning is a subset of artificial intelligence."
 
         documents = knowledge_graph_service.extract(text)

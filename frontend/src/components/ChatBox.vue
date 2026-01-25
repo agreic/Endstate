@@ -56,7 +56,7 @@ const scrollToBottom = () => {
   }
 };
 
-watch(messages, () => {
+watch([messages, isLocked, isSending], () => {
   setTimeout(scrollToBottom, 50);
 }, { deep: true });
 

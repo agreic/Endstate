@@ -1,20 +1,25 @@
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
 
+function getSessionId(): string {
+  let sessionId = localStorage.getItem('endstate_session_id');
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem('endstate_session_id', sessionId);
+  }
+  return sessionId;
+}
+
 function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
   const geminiKey = localStorage.getItem('endstate_gemini_api_key');
-  const neo4jUri = localStorage.getItem('endstate_neo4j_uri');
-  const neo4jUser = localStorage.getItem('endstate_neo4j_user');
-  const neo4jPass = localStorage.getItem('endstate_neo4j_password');
+  const sessionId = getSessionId();
 
   if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
-  if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;
-  if (neo4jUser) headers['X-Neo4j-User'] = neo4jUser;
-  if (neo4jPass) headers['X-Neo4j-Password'] = neo4jPass;
+  if (sessionId) headers['X-Session-ID'] = sessionId;
 
   return headers;
 }
@@ -172,6 +177,7 @@ export interface ProjectProposal {
 
 export interface ProjectSummary {
   session_id: string;
+  is_default?: boolean;
   created_at: string;
   updated_at: string;
   project_status?: string;

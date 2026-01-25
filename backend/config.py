@@ -17,33 +17,20 @@ import contextvars
 
 # Context variables for request-scoped overrides
 X_GEMINI_API_KEY = contextvars.ContextVar("x_gemini_api_key", default="")
-X_NEO4J_URI = contextvars.ContextVar("x_neo4j_uri", default="")
-X_NEO4J_USERNAME = contextvars.ContextVar("x_neo4j_username", default="")
-X_NEO4J_PASSWORD = contextvars.ContextVar("x_neo4j_password", default="")
+X_SESSION_ID = contextvars.ContextVar("x_session_id", default="local-dev")
 
 
 @dataclass
 class Neo4jConfig:
     """Neo4j database configuration."""
-    _uri: str = field(default_factory=lambda: os.getenv("NEO4J_URI", "bolt://localhost:7687"))
-    _username: str = field(default_factory=lambda: os.getenv("NEO4J_USERNAME", "neo4j"))
-    _password: str = field(default_factory=lambda: os.getenv("NEO4J_PASSWORD", "password123"))
+    uri: str = field(default_factory=lambda: os.getenv("NEO4J_URI", "bolt://localhost:7687"))
+    username: str = field(default_factory=lambda: os.getenv("NEO4J_USERNAME", "neo4j"))
+    password: str = field(default_factory=lambda: os.getenv("NEO4J_PASSWORD", "password123"))
     database: str = field(default_factory=lambda: os.getenv("NEO4J_DATABASE", "neo4j"))
 
     @property
-    def uri(self) -> str:
-        override = X_NEO4J_URI.get()
-        return override if override else self._uri
-
-    @property
-    def username(self) -> str:
-        override = X_NEO4J_USERNAME.get()
-        return override if override else self._username
-
-    @property
-    def password(self) -> str:
-        override = X_NEO4J_PASSWORD.get()
-        return override if override else self._password
+    def session_id(self) -> str:
+        return X_SESSION_ID.get()
 
 
 @dataclass
@@ -59,14 +46,9 @@ class OllamaConfig:
 @dataclass
 class GeminiConfig:
     """Google Gemini API configuration."""
-    _api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""))
+    api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""))
     model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
     temperature: float = 0.0
-
-    @property
-    def api_key(self) -> str:
-        override = X_GEMINI_API_KEY.get()
-        return override if override else self._api_key
 
 
 @dataclass

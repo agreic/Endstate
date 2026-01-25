@@ -216,7 +216,7 @@ class TestGetGeminiLLM:
         result = _get_gemini_llm(llm_config, api_key="param_key")
 
         call_kwargs = mock_chat_genai.call_args[1]
-        assert os.environ.get("GOOGLE_API_KEY") == "param_key"
+        assert call_kwargs["google_api_key"] == "param_key"
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
     def test_gemini_without_api_key_raises_error(self, mock_chat_genai):

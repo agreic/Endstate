@@ -154,7 +154,7 @@ class TestNeo4jClientQuery:
 
         mock_graph.query.assert_called_once_with(
             "MATCH (n) WHERE n.id = $id RETURN n",
-            {"id": 1},
+            {"id": 1, "session_id": "local-dev"},
         )
         assert result == [{"id": 1, "name": "test"}]
 
@@ -172,7 +172,7 @@ class TestNeo4jClientQuery:
 
         mock_graph.query.assert_called_once_with(
             "MATCH (n) RETURN count(n) as count",
-            {},
+            {"session_id": "local-dev"},
         )
 
 
@@ -189,7 +189,7 @@ class TestNeo4jClientCleanGraph:
 
         client.clean_graph()
 
-        mock_query.assert_called_once_with("MATCH (n) DETACH DELETE n")
+        mock_query.assert_called_once_with("MATCH (n) WHERE n.session_id = $session_id DETACH DELETE n")
 
 
 class TestNeo4jClientCleanByLabel:
@@ -206,7 +206,7 @@ class TestNeo4jClientCleanByLabel:
         deleted = client.clean_by_label("Skill")
 
         mock_query.assert_called_once_with(
-            "MATCH (n:Skill) DETACH DELETE n RETURN count(n) as deleted"
+            "MATCH (n:Skill) WHERE n.session_id = $session_id DETACH DELETE n RETURN count(n) as deleted"
         )
         assert deleted == 5
 
@@ -247,7 +247,12 @@ class TestNeo4jClientAddGraphDocuments:
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)
 
-        documents = [{"nodes": [], "relationships": []}]
+        mock_node = MagicMock()
+        mock_node.properties = {}
+        mock_doc = MagicMock()
+        mock_doc.nodes = [mock_node]
+        mock_doc.relationships = []
+        documents = [mock_doc]
         client.add_graph_documents(documents, include_source=False, base_entity_label=True)
 
         mock_graph.add_graph_documents.assert_called_once_with(
@@ -374,7 +379,7 @@ class TestNeo4jClientGetNodeCount:
 
         count = client.get_node_count()
 
-        mock_query.assert_called_once_with("MATCH (n) RETURN count(n) as count")
+        mock_query.assert_called_once_with("MATCH (n) WHERE n.session_id = $session_id RETURN count(n) as count")
         assert count == 100
 
     @patch.object(Neo4jClient, "query")
@@ -388,7 +393,7 @@ class TestNeo4jClientGetNodeCount:
         count = client.get_node_count("Skill")
 
         mock_query.assert_called_once_with(
-            "MATCH (n:Skill) RETURN count(n) as count"
+            "MATCH (n:Skill) WHERE n.session_id = $session_id RETURN count(n) as count"
         )
         assert count == 25
 
@@ -419,7 +424,7 @@ class TestNeo4jClientGetRelationshipCount:
         count = client.get_relationship_count()
 
         mock_query.assert_called_once_with(
-            "MATCH ()-[r]->() RETURN count(r) as count"
+            "MATCH (n)-[r]->(m) WHERE n.session_id = $session_id AND m.session_id = $session_id RETURN count(r) as count"
         )
         assert count == 50
 
@@ -434,7 +439,7 @@ class TestNeo4jClientGetRelationshipCount:
         count = client.get_relationship_count("REQUIRES")
 
         mock_query.assert_called_once_with(
-            "MATCH ()-[r:REQUIRES]->() RETURN count(r) as count"
+            "MATCH (n)-[r:REQUIRES]->(m) WHERE n.session_id = $session_id AND m.session_id = $session_id RETURN count(r) as count"
         )
         assert count == 10
 
@@ -499,7 +504,7 @@ class TestNeo4jClientGetAllNodes:
 
         nodes = client.get_all_nodes()
 
-        mock_query.assert_called_once_with("MATCH (n) RETURN n LIMIT 100")
+        mock_query.assert_called_once_with("MATCH (n) WHERE n.session_id = $session_id RETURN n LIMIT 100")
         assert len(nodes) == 2
 
     @patch.object(Neo4jClient, "query")
@@ -512,7 +517,7 @@ class TestNeo4jClientGetAllNodes:
 
         nodes = client.get_all_nodes("Skill")
 
-        mock_query.assert_called_once_with("MATCH (n:Skill) RETURN n LIMIT 100")
+        mock_query.assert_called_once_with("MATCH (n:Skill) WHERE n.session_id = $session_id RETURN n LIMIT 100")
         assert len(nodes) == 1
 
     @patch.object(Neo4jClient, "query")
@@ -525,7 +530,7 @@ class TestNeo4jClientGetAllNodes:
 
         client.get_all_nodes(limit=50)
 
-        mock_query.assert_called_once_with("MATCH (n) RETURN n LIMIT 50")
+        mock_query.assert_called_once_with("MATCH (n) WHERE n.session_id = $session_id RETURN n LIMIT 50")
 
 
 class TestNeo4jClientGetAllRelationships:

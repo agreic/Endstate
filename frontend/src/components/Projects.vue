@@ -56,7 +56,6 @@ const activeLessons = computed(() => lessons.value.filter((lesson) => !lesson.ar
 const archivedLessons = computed(() => lessons.value.filter((lesson) => lesson.archived));
 const activeAssessments = computed(() => assessments.value.filter((assessment) => !assessment.archived));
 const archivedAssessments = computed(() => assessments.value.filter((assessment) => assessment.archived));
-const latestSubmission = computed(() => capstoneSubmissions.value[0] || null);
 const isCapstoneComplete = computed(() => Boolean(selectedProject.value?.capstone?.passed));
 
 const SKILL_LEVELS = ["Beginner", "Intermediate", "Experienced", "Advanced"];

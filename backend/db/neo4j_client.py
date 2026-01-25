@@ -85,50 +85,28 @@ class Neo4jClient:
         self._config = neo4j_config or config.neo4j
         self._graph: Optional[Neo4jGraph] = None
         self._driver = None
-        self._last_uri: Optional[str] = None
-        self._last_user: Optional[str] = None
     
     @property
     def graph(self) -> Neo4jGraph:
         """Get or create LangChain Neo4jGraph instance."""
-        current_uri = self._config.uri
-        current_user = self._config.username
-        
-        if self._graph is not None and (current_uri != self._last_uri or current_user != self._last_user):
-            self._graph = None
-
         if self._graph is None:
             self._graph = Neo4jGraph(
-                url=current_uri,
-                username=current_user,
+                url=self._config.uri,
+                username=self._config.username,
                 password=self._config.password,
                 database=self._config.database,
                 refresh_schema=False,
             )
-            self._last_uri = current_uri
-            self._last_user = current_user
         return self._graph
     
     @property
     def driver(self):
         """Get or create Neo4j driver for direct queries."""
-        current_uri = self._config.uri
-        current_user = self._config.username
-        
-        if self._driver is not None and (current_uri != self._last_uri or current_user != self._last_user):
-            try:
-                self._driver.close()
-            except Exception:
-                pass
-            self._driver = None
-
         if self._driver is None:
             self._driver = GraphDatabase.driver(
-                current_uri,
-                auth=(current_user, self._config.password),
+                self._config.uri,
+                auth=(self._config.username, self._config.password),
             )
-            self._last_uri = current_uri
-            self._last_user = current_user
         return self._driver
     
     def test_connection(self) -> bool:
@@ -146,16 +124,17 @@ class Neo4jClient:
     
     def query(self, cypher: str, params: Optional[dict] = None) -> list[dict]:
         """
-        Execute a Cypher query.
-        
-        Args:
-            cypher: Cypher query string
-            params: Optional query parameters
-            
-        Returns:
-            List of result dictionaries
+        Execute a Cypher query with session_id injection.
         """
-        return self.graph.query(cypher, params or {})
+        params = params or {}
+        # Get session_id from config (which gets it from X_SESSION_ID context var)
+        session_id = self._config.session_id
+        
+        # Inject session_id into params
+        if "session_id" not in params:
+            params["session_id"] = session_id
+            
+        return self.graph.query(cypher, params)
 
     def label_exists(self, label: str) -> bool:
         """Check whether a label exists in the database."""
@@ -170,21 +149,15 @@ class Neo4jClient:
         return bool(result and result[0].get("count", 0))
     
     def clean_graph(self) -> None:
-        """Delete all nodes and relationships from the graph."""
-        self.query("MATCH (n) DETACH DELETE n")
+        """Delete all nodes and relationships belonging to current session."""
+        self.query("MATCH (n) WHERE n.session_id = $session_id DETACH DELETE n")
     
     def clean_by_label(self, label: str) -> int:
         """
-        Delete all nodes with a specific label.
-        
-        Args:
-            label: Node label to delete
-            
-        Returns:
-            Number of nodes deleted
+        Delete all nodes with a specific label in current session.
         """
         result = self.query(
-            f"MATCH (n:{label}) DETACH DELETE n RETURN count(n) as deleted"
+            f"MATCH (n:{label}) WHERE n.session_id = $session_id DETACH DELETE n RETURN count(n) as deleted"
         )
         return result[0]["deleted"] if result else 0
     
@@ -195,13 +168,20 @@ class Neo4jClient:
         base_entity_label: bool = True,
     ) -> None:
         """
-        Add graph documents to the database.
-        
+        Add graph documents to the database, tagged with session_id.
+
         Args:
             documents: List of GraphDocument objects from LLM extraction
             include_source: Whether to include source document nodes
             base_entity_label: Whether to add __Entity__ label to all nodes
         """
+        session_id = self._config.session_id
+        for doc in documents:
+            for node in doc.nodes:
+                node.properties["session_id"] = session_id
+            for rel in doc.relationships:
+                rel.properties["session_id"] = session_id
+
         self.graph.add_graph_documents(
             documents,
             include_source=include_source,
@@ -224,9 +204,10 @@ class Neo4jClient:
         Returns:
             Number of nodes merged
         """
-        # Find duplicates and merge them
+        # Find duplicates and merge them within the same session
         result = self.query(f"""
             MATCH (n:{label})
+            WHERE n.session_id = $session_id
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
             WHERE prop IS NOT NULL AND SIZE(nodes) > 1
             CALL {{
@@ -273,6 +254,7 @@ class Neo4jClient:
         """
         duplicates = self.query(f"""
             MATCH (n:{label})
+            WHERE n.session_id = $session_id
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
             WHERE prop IS NOT NULL AND SIZE(nodes) > 1
             RETURN elementId(HEAD(nodes)) as keep_id,
@@ -346,51 +328,31 @@ class Neo4jClient:
         return merged_count
     
     def get_node_count(self, label: Optional[str] = None) -> int:
-        """
-        Get count of nodes.
-        
-        Args:
-            label: Optional label to filter by
-            
-        Returns:
-            Number of nodes
-        """
+        """Get count of nodes in current session."""
         if label:
-            result = self.query(f"MATCH (n:{label}) RETURN count(n) as count")
+            result = self.query(f"MATCH (n:{label}) WHERE n.session_id = $session_id RETURN count(n) as count")
         else:
-            result = self.query("MATCH (n) RETURN count(n) as count")
+            result = self.query("MATCH (n) WHERE n.session_id = $session_id RETURN count(n) as count")
         return result[0]["count"] if result else 0
     
     def get_relationship_count(self, rel_type: Optional[str] = None) -> int:
-        """
-        Get count of relationships.
-        
-        Args:
-            rel_type: Optional relationship type to filter by
-            
-        Returns:
-            Number of relationships
-        """
+        """Get count of relationships in current session."""
         if rel_type:
-            result = self.query(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count")
+            result = self.query(f"MATCH (n)-[r:{rel_type}]->(m) WHERE n.session_id = $session_id AND m.session_id = $session_id RETURN count(r) as count")
         else:
-            result = self.query("MATCH ()-[r]->() RETURN count(r) as count")
+            result = self.query("MATCH (n)-[r]->(m) WHERE n.session_id = $session_id AND m.session_id = $session_id RETURN count(r) as count")
         return result[0]["count"] if result else 0
     
     def get_graph_stats(self) -> dict:
-        """
-        Get statistics about the current graph.
-        
-        Returns:
-            Dictionary with node counts by label and relationship counts by type
-        """
+        """Get statistics about the current graph in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         # Get node labels and counts
         node_stats = self.query(
             """
             CALL db.labels() YIELD label
-            CALL (label) {
-                MATCH (n) WHERE label IN labels(n)
+            CALL {
+                WITH label
+                MATCH (n) WHERE label IN labels(n) AND n.session_id = $session_id
                 RETURN count(n) as count
             }
             RETURN label, count
@@ -401,11 +363,14 @@ class Neo4jClient:
         rel_stats = self.query(
             """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL (relationshipType) {
+            CALL {
+                WITH relationshipType
                 MATCH (n)-[r]->(m)
                 WHERE type(r) = relationshipType
-                  AND any(label IN labels(n) WHERE label IN $labels)
-                  AND any(label IN labels(m) WHERE label IN $labels)
+                  AND n.session_id = $session_id
+                  AND m.session_id = $session_id
+                  AND any(lbl IN labels(n) WHERE lbl IN $labels)
+                  AND any(lbl IN labels(m) WHERE lbl IN $labels)
                   AND NOT (n:Project AND COALESCE(n.is_default, false))
                   AND NOT (m:Project AND COALESCE(m.is_default, false))
                 RETURN count(r) as count
@@ -423,39 +388,22 @@ class Neo4jClient:
         }
     
     def get_all_nodes(self, label: Optional[str] = None, limit: int = 100) -> list[dict]:
-        """
-        Get all nodes, optionally filtered by label.
-
-        Args:
-            label: Optional label to filter by
-            limit: Maximum number of nodes to return
-
-        Returns:
-            List of node dictionaries with id, labels, and properties
-        """
+        """Get all nodes in current session."""
         if label:
-            query = f"MATCH (n:{label}) RETURN n LIMIT {limit}"
+            query = f"MATCH (n:{label}) WHERE n.session_id = $session_id RETURN n LIMIT {limit}"
         else:
-            query = f"MATCH (n) RETURN n LIMIT {limit}"
+            query = f"MATCH (n) WHERE n.session_id = $session_id RETURN n LIMIT {limit}"
 
         result = self.query(query)
         return [_serialize_node(row["n"]) for row in result]
 
     def get_knowledge_graph_nodes(self, limit: int = 100) -> list[dict]:
-        """
-        Get nodes for the knowledge graph (excluding chat nodes).
-
-        Args:
-            limit: Maximum number of nodes to return
-
-        Returns:
-            List of node dictionaries
-        """
+        """Get nodes for the knowledge graph in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         project_result = self.query(
             """
             MATCH (n:Project)
-            WHERE NOT COALESCE(n.is_default, false)
+            WHERE NOT COALESCE(n.is_default, false) AND n.session_id = $session_id
             RETURN labels(n) as labels,
                    properties(n) as properties,
                    elementId(n) as element_id,
@@ -467,6 +415,7 @@ class Neo4jClient:
             """
             MATCH (n)
             WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND n.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN labels(n) as labels,
                    properties(n) as properties,
@@ -489,19 +438,13 @@ class Neo4jClient:
         return nodes
 
     def get_knowledge_graph_relationships(self, limit: int = 100) -> list[dict]:
-        """
-        Get relationships for the knowledge graph (excluding chat relationships).
-
-        Args:
-            limit: Maximum number of relationships to return
-
-        Returns:
-            List of relationship dictionaries
-        """
+        """Get relationships for the knowledge graph in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         query = """
             MATCH (n)-[r]->(m)
-            WHERE any(label IN labels(n) WHERE label IN $labels)
+            WHERE n.session_id = $session_id
+              AND m.session_id = $session_id
+              AND any(label IN labels(n) WHERE label IN $labels)
               AND any(label IN labels(m) WHERE label IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
               AND NOT (m:Project AND COALESCE(m.is_default, false))
@@ -515,19 +458,15 @@ class Neo4jClient:
         return result
 
     def get_knowledge_graph_stats(self) -> dict:
-        """
-        Get statistics for the knowledge graph (excluding chat nodes).
-
-        Returns:
-            Dictionary with node counts by label and relationship counts by type
-        """
+        """Get statistics for the knowledge graph in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         node_stats = self.query(
             """
             UNWIND $labels as label
-            CALL (label) {
+            CALL (label, $session_id) {
                 MATCH (n)
                 WHERE label IN labels(n)
+                  AND n.session_id = $session_id
                   AND NOT (n:Project AND COALESCE(n.is_default, false))
                 RETURN count(n) as count
             }
@@ -539,8 +478,11 @@ class Neo4jClient:
         rel_stats = self.query(
             """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL (relationshipType) {
-                MATCH ()-[r]->() WHERE type(r) = relationshipType
+            CALL (relationshipType, $session_id) {
+                MATCH (n)-[r]->(m) 
+                WHERE type(r) = relationshipType
+                  AND n.session_id = $session_id
+                  AND m.session_id = $session_id
                 RETURN count(r) as count
             }
             RETURN relationshipType, count
@@ -555,12 +497,13 @@ class Neo4jClient:
         }
 
     def get_knowledge_graph_node_count(self) -> int:
-        """Get count of knowledge graph nodes (excluding chat nodes)."""
+        """Get count of knowledge graph nodes in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         result = self.query(
             """
             MATCH (n)
             WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND n.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN count(n) as count
             """,
@@ -569,13 +512,15 @@ class Neo4jClient:
         return result[0]["count"] if result else 0
 
     def get_knowledge_graph_relationship_count(self) -> int:
-        """Get count of knowledge graph relationships (excluding chat relationships)."""
+        """Get count of knowledge graph relationships in current session."""
         allowed_labels = ["Skill", "Concept", "Topic", "Project"]
         result = self.query(
             """
             MATCH (n)-[r]->(m)
             WHERE any(label IN labels(n) WHERE label IN $labels)
               AND any(label IN labels(m) WHERE label IN $labels)
+              AND n.session_id = $session_id
+              AND m.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
               AND NOT (m:Project AND COALESCE(m.is_default, false))
             RETURN count(r) as count
@@ -649,27 +594,30 @@ class Neo4jClient:
         )
 
     def get_chat_session_metadata(self, session_id: str) -> dict:
-        """Get chat session metadata."""
+        """Get chat session metadata in current session."""
         result = self.query(
-            """
-            MATCH (s:ChatSession {id: $session_id})
-            RETURN s.last_project_id as last_project_id,
-                   s.last_proposal_hash as last_proposal_hash
-            """,
-            {"session_id": session_id},
+            "MATCH (s:ChatSession {id: $session_id_val, session_id: $session_id}) RETURN s.project_id as project_id, s.is_processing as is_processing",
+            {"session_id_val": session_id}
         )
         return result[0] if result else {}
-
-    def update_chat_session_metadata(self, session_id: str, project_id: str, proposal_hash: str | None) -> None:
-        """Update chat session metadata after project creation."""
+    
+    def update_chat_session_metadata(self, session_id: str, project_id: Optional[str] = None, is_processing: Optional[bool] = None) -> None:
+        """Update chat session metadata in current session."""
+        set_clauses = []
+        params = {"session_id_val": session_id}
+        if project_id is not None:
+            set_clauses.append("s.project_id = $project_id")
+            params["project_id"] = project_id
+        if is_processing is not None:
+            set_clauses.append("s.is_processing = $is_processing")
+            params["is_processing"] = is_processing
+        
+        if not set_clauses:
+            return
+            
         self.query(
-            """
-            MATCH (s:ChatSession {id: $session_id})
-            SET s.last_project_id = $project_id,
-                s.last_proposal_hash = $proposal_hash,
-                s.updated_at = datetime()
-            """,
-            {"session_id": session_id, "project_id": project_id, "proposal_hash": proposal_hash},
+            f"MATCH (s:ChatSession {{id: $session_id_val, session_id: $session_id}}) SET {', '.join(set_clauses)}",
+            params
         )
 
     def get_pending_proposals(self, session_id: str) -> list[dict]:
@@ -753,7 +701,7 @@ class Neo4jClient:
         """Get all chat sessions."""
         result = self.query(
             """
-            MATCH (s:ChatSession)
+            MATCH (s:ChatSession {id: $session_id})
             OPTIONAL MATCH (s)-[:HAS_MESSAGE]->(m:ChatMessage)
             WITH s, count(m) as message_count
             RETURN s.id as id, s.created_at as created_at, message_count
@@ -779,15 +727,8 @@ class Neo4jClient:
             {"session_id": session_id}
         )
 
-    def set_session_locked(self, session_id: str, locked: bool) -> None:
-        """Set the locked state of a chat session."""
-        self.query(
-            "MATCH (s:ChatSession {id: $session_id}) SET s.is_processing = $locked",
-            {"session_id": session_id, "locked": locked}
-        )
-
     def is_session_locked(self, session_id: str) -> bool:
-        """Check if a chat session is locked (processing)."""
+        """Check if chat session is processing."""
         result = self.query(
             "MATCH (s:ChatSession {id: $session_id}) RETURN COALESCE(s.is_processing, false) as locked",
             {"session_id": session_id}
@@ -800,41 +741,47 @@ class Neo4jClient:
         project_name: str,
         summary_json: str,
         is_default: bool = False,
+        session_id: str | None = None,
     ) -> None:
         """Create or update a project summary and its KG project node."""
+        actual_session_id = session_id or self._config.session_id
         self.query(
             """
-            MERGE (ps:ProjectSummary {id: $project_id})
+            MERGE (ps:ProjectSummary {id: $project_id, session_id: $session_id})
             ON CREATE SET ps.created_at = datetime()
-            SET ps.project_name = $project_name,
+            SET ps.project_name = $name,
                 ps.summary_json = $summary_json,
                 ps.updated_at = datetime(),
                 ps.is_default = $is_default
-            MERGE (p:Project {id: $project_id})
+            MERGE (p:Project {id: $project_id, session_id: $session_id})
             ON CREATE SET p.created_at = datetime()
-            SET p.name = $project_name,
+            SET p.name = $name,
                 p.is_default = $is_default,
                 p.updated_at = datetime()
             MERGE (ps)-[:SUMMARY_FOR]->(p)
             """,
             {
+                "session_id": actual_session_id,
                 "project_id": project_id,
-                "project_name": project_name,
+                "name": project_name,
                 "summary_json": summary_json,
                 "is_default": is_default,
             },
         )
 
-    def rename_project_summary(self, project_id: str, project_name: str, summary_json: str) -> None:
+    def rename_project_summary(self, project_id: str, project_name: str, summary_json: str, session_id: str | None = None) -> None:
         """Rename an existing project summary and its KG project node."""
+        actual_session_id = session_id or self._config.session_id
         self.query(
             """
             MATCH (ps:ProjectSummary {id: $project_id})
+            WHERE ps.session_id = $session_id
             SET ps.project_name = $project_name,
                 ps.summary_json = $summary_json,
                 ps.updated_at = datetime()
             WITH ps
             MATCH (p:Project {id: $project_id})
+            WHERE p.session_id = $session_id
             SET p.name = $project_name,
                 p.updated_at = datetime()
             """,
@@ -895,8 +842,9 @@ class Neo4jClient:
             },
         )
 
-    def ensure_default_project(self) -> None:
+    def ensure_default_project(self, session_id: str | None = None) -> None:
         """Ensure the default 'All' project exists."""
+        actual_session_id = session_id or self._config.session_id
         summary_json = json.dumps({
             "agreed_project": {
                 "name": DEFAULT_PROJECT_NAME,
@@ -912,14 +860,15 @@ class Neo4jClient:
             },
             "is_default": True,
         })
-        self.upsert_project_summary(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, summary_json, is_default=True)
+        self.upsert_project_summary(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, summary_json, is_default=True, session_id=actual_session_id)
 
     def ensure_project_nodes(self) -> None:
         """Ensure every project summary has a KG project node."""
         self.query(
             """
             MATCH (ps:ProjectSummary)
-            MERGE (p:Project {id: ps.id})
+            WHERE ps.session_id = $session_id
+            MERGE (p:Project {id: ps.id, session_id: $session_id})
             ON CREATE SET p.created_at = datetime()
             SET p.name = ps.project_name,
                 p.updated_at = datetime(),
@@ -1121,16 +1070,18 @@ class Neo4jClient:
         )
         return result
 
-    def list_project_summaries(self, limit: int = 10) -> list[dict]:
+    def list_project_summaries(self, limit: int = 10, session_id: str | None = None) -> list[dict]:
         """List recent project summaries."""
+        actual_session_id = session_id or self._config.session_id
         result = self.query(
             """
             MATCH (p:ProjectSummary)
+            WHERE p.session_id = $session_id
             RETURN p.id as id, p.project_name as name, p.created_at as created_at, p.updated_at as updated_at, p.summary_json as summary_json
             ORDER BY p.created_at DESC
             LIMIT $limit
             """,
-            {"limit": limit},
+            {"session_id": actual_session_id, "limit": limit},
         )
         return result
 
@@ -1139,6 +1090,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})
+            WHERE p.session_id = $session_id
             RETURN p.id as id, p.project_name as name, p.created_at as created_at, p.updated_at as updated_at, p.summary_json as summary_json
             """,
             {"project_id": project_id},
@@ -1150,10 +1102,12 @@ class Neo4jClient:
         self.query(
             """
             MATCH (ps:ProjectSummary {id: $project_id})
+            WHERE ps.session_id = $session_id
             OPTIONAL MATCH (ps)-[:HAS_PROJECT_MESSAGE]->(m:ProjectMessage)
             OPTIONAL MATCH (ps)-[:HAS_LESSON]->(l:ProjectLesson)
             OPTIONAL MATCH (ps)-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
             OPTIONAL MATCH (ps)-[:SUMMARY_FOR]->(p:Project)
+            WHERE p.session_id = $session_id
             OPTIONAL MATCH (p)-[:HAS_PROFILE]->(u:UserProfile)
             DETACH DELETE ps, m, l, a, u, p
             """,
@@ -1734,7 +1688,9 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (n)-[r]-(connected)
-            WHERE n.id = $node_id OR elementId(n) = $node_id
+            WHERE (n.id = $node_id OR elementId(n) = $node_id)
+              AND n.session_id = $session_id
+              AND connected.session_id = $session_id
             RETURN COALESCE(connected.id, elementId(connected)) as id, labels(connected) as labels, type(r) as rel_type
             """,
             {"node_id": node_id}
