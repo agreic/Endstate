@@ -9,7 +9,9 @@ from langchain_experimental.graph_transformers import LLMGraphTransformer
 
 from ..schemas.base import GraphSchema
 from ..schemas.skill_graph import SkillGraphSchema
+from ..config import config
 from .provider import get_llm
+from langchain_neo4j.graphs.graph_document import GraphDocument, Node, Relationship
 
 
 class GraphTransformer:
@@ -112,6 +114,8 @@ class GraphTransformer:
         Returns:
             List of GraphDocument objects.
         """
+        if config.llm.provider == "mock":
+            return self._mock_documents(text)
         documents = [Document(page_content=text)]
         return self.convert_to_graph_documents(documents)
     
@@ -125,6 +129,8 @@ class GraphTransformer:
         Returns:
             List of GraphDocument objects.
         """
+        if config.llm.provider == "mock":
+            return self._mock_documents(text)
         documents = [Document(page_content=text)]
         return await self.aconvert_to_graph_documents(documents)
     
@@ -138,6 +144,11 @@ class GraphTransformer:
         Returns:
             List of GraphDocument objects from all texts.
         """
+        if config.llm.provider == "mock":
+            results = []
+            for text in texts:
+                results.extend(self._mock_documents(text))
+            return results
         documents = [Document(page_content=text) for text in texts]
         return self.convert_to_graph_documents(documents)
     
@@ -151,8 +162,24 @@ class GraphTransformer:
         Returns:
             List of GraphDocument objects from all texts.
         """
+        if config.llm.provider == "mock":
+            results = []
+            for text in texts:
+                results.extend(self._mock_documents(text))
+            return results
         documents = [Document(page_content=text) for text in texts]
         return await self.aconvert_to_graph_documents(documents)
+
+    def _mock_documents(self, text: str) -> list:
+        tokens = [t.strip(".,:;!?") for t in text.split() if t.isalpha()]
+        primary = tokens[0] if tokens else "Mock Skill"
+        secondary = tokens[1] if len(tokens) > 1 else "Mock Concept"
+        primary_name = primary.strip() or "Mock Skill"
+        secondary_name = secondary.strip() or "Mock Concept"
+        node_a = Node(id=primary_name, type="Skill", properties={"name": primary_name})
+        node_b = Node(id=secondary_name, type="Concept", properties={"name": secondary_name})
+        rel = Relationship(source=node_a, target=node_b, type="DEPENDS_ON", properties={})
+        return [GraphDocument(nodes=[node_a, node_b], relationships=[rel], source=Document(page_content=text))]
     
     def reset(self) -> None:
         """Reset the transformer (e.g., after schema change)."""

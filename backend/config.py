@@ -72,7 +72,7 @@ class GeminiConfig:
 @dataclass
 class LLMConfig:
     """LLM provider configuration."""
-    provider: Literal["ollama", "gemini"] = field(
+    provider: Literal["ollama", "gemini", "mock"] = field(
         default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama")
     )
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
