@@ -71,26 +71,22 @@ def _get_ollama_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
 def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     """Get Gemini LLM instance."""
     from langchain_google_genai import ChatGoogleGenerativeAI
-    import os
     
     gemini_config = llm_config.gemini
     
     # Check for API key
-    api_key = kwargs.get("api_key") or gemini_config.api_key or os.getenv("GOOGLE_API_KEY")
+    api_key = kwargs.get("api_key") or gemini_config.api_key
     if not api_key:
         raise ValueError(
-            "Gemini API key not found. Set GOOGLE_API_KEY environment variable "
-            "or pass api_key parameter."
+            "Gemini API key not found. Set GOOGLE_API_KEY environment variable, "
+            "provide it in the request headers, or pass api_key parameter."
         )
-    
-    # Set the API key in environment if not already set
-    if "GOOGLE_API_KEY" not in os.environ:
-        os.environ["GOOGLE_API_KEY"] = api_key
     
     return ChatGoogleGenerativeAI(
         model=kwargs.get("model", gemini_config.model),
         temperature=kwargs.get("temperature", gemini_config.temperature),
-        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout"]},
+        google_api_key=api_key,
+        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "google_api_key"]},
     )
 
 

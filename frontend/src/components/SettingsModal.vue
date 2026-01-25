@@ -21,6 +21,11 @@ const themes: { value: Theme; label: string; icon: any }[] = [
   { value: 'system', label: 'System', icon: Monitor },
 ];
 
+const geminiApiKey = ref('');
+const neo4jUri = ref('');
+const neo4jUser = ref('');
+const neo4jPassword = ref('');
+
 const setTheme = (theme: Theme) => {
   currentTheme.value = theme;
   applyTheme(theme);
@@ -40,30 +45,47 @@ const applyTheme = (theme: Theme) => {
   }
 };
 
+const saveConfig = () => {
+  localStorage.setItem('endstate_gemini_api_key', geminiApiKey.value);
+  localStorage.setItem('endstate_neo4j_uri', neo4jUri.value);
+  localStorage.setItem('endstate_neo4j_user', neo4jUser.value);
+  localStorage.setItem('endstate_neo4j_password', neo4jPassword.value);
+  emit('close');
+};
+
 const handleBackdropClick = (e: MouseEvent) => {
   if (e.target === e.currentTarget) {
     emit('close');
   }
 };
 
+const loadConfig = () => {
+  geminiApiKey.value = localStorage.getItem('endstate_gemini_api_key') || '';
+  neo4jUri.value = localStorage.getItem('endstate_neo4j_uri') || '';
+  neo4jUser.value = localStorage.getItem('endstate_neo4j_user') || '';
+  neo4jPassword.value = localStorage.getItem('endstate_neo4j_password') || '';
+};
+
 watch(() => props.isOpen, (open) => {
   if (open) {
-    const saved = localStorage.getItem('endstate-theme') as Theme | null;
-    if (saved) {
-      currentTheme.value = saved;
-      applyTheme(saved);
+    const savedTheme = localStorage.getItem('endstate-theme') as Theme | null;
+    if (savedTheme) {
+      currentTheme.value = savedTheme;
+      applyTheme(savedTheme);
     }
+    loadConfig();
   }
 });
 
 onMounted(() => {
-  const saved = localStorage.getItem('endstate-theme') as Theme | null;
-  if (saved) {
-    currentTheme.value = saved;
-    applyTheme(saved);
+  const savedTheme = localStorage.getItem('endstate-theme') as Theme | null;
+  if (savedTheme) {
+    currentTheme.value = savedTheme;
+    applyTheme(savedTheme);
   } else {
     applyTheme('system');
   }
+  loadConfig();
 });
 </script>
 
@@ -112,10 +134,72 @@ onMounted(() => {
               </button>
             </div>
           </div>
+
+          <div class="space-y-4 pt-4 border-t dark:border-surface-700">
+            <h3 class="text-sm font-medium text-surface-900 dark:text-white">Cloud Configuration</h3>
+            
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Google Gemini API Key</label>
+                <input 
+                  v-model="geminiApiKey"
+                  type="password"
+                  placeholder="Paste your API key here..."
+                  class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Neo4j URI</label>
+                <input 
+                  v-model="neo4jUri"
+                  type="text"
+                  placeholder="neo4j+s://xxxx.databases.neo4j.io"
+                  class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
+                />
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Neo4j Username</label>
+                  <input 
+                    v-model="neo4jUser"
+                    type="text"
+                    placeholder="neo4j"
+                    class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Neo4j Password</label>
+                  <input 
+                    v-model="neo4jPassword"
+                    type="password"
+                    placeholder="password"
+                    class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
           
-          <div class="pt-4 border-t dark:border-surface-700">
-            <p class="text-xs text-surface-500 dark:text-surface-400">
-              Theme preference is saved locally and will persist across sessions.
+          <div class="pt-4 flex gap-3">
+            <button 
+              @click="saveConfig"
+              class="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              Save Changes
+            </button>
+            <button 
+              @click="emit('close')"
+              class="px-4 py-2 bg-surface-100 dark:bg-surface-700 hover:bg-surface-200 dark:hover:bg-surface-600 text-surface-700 dark:text-surface-200 rounded-lg text-sm font-medium transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div class="pt-2">
+            <p class="text-[10px] leading-relaxed text-surface-500 dark:text-surface-400">
+              Credentials are stored safely in your browser and sent only to the backend. This allows you to use your own free tiers for live demos.
             </p>
           </div>
         </div>
