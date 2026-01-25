@@ -210,12 +210,11 @@ class Neo4jClient:
             WHERE n.session_id = $session_id
             WITH n.{match_property} AS prop, COLLECT(n) AS nodes
             WHERE prop IS NOT NULL AND SIZE(nodes) > 1
-            CALL {{
-                WITH nodes
+            CALL (nodes) {{
                 WITH HEAD(nodes) AS keep, TAIL(nodes) AS duplicates
                 UNWIND duplicates AS dup
                 // Transfer relationships
-                CALL {{
+                CALL (keep, dup) {{
                     WITH keep, dup
                     MATCH (dup)-[r]->()
                     WITH keep, dup, COLLECT(r) as rels
@@ -224,7 +223,7 @@ class Neo4jClient:
                     CALL apoc.create.relationship(keep, type, PROPERTIES(r), end) YIELD rel
                     RETURN count(*) as created
                 }}
-                CALL {{
+                CALL (keep, dup) {{
                     WITH keep, dup
                     MATCH ()-[r]->(dup)
                     WITH keep, dup, COLLECT(r) as rels
@@ -350,8 +349,7 @@ class Neo4jClient:
         node_stats = self.query(
             """
             CALL db.labels() YIELD label
-            CALL {
-                WITH label
+            CALL (label) {
                 MATCH (n) WHERE label IN labels(n) AND n.session_id = $session_id
                 RETURN count(n) as count
             }
@@ -363,8 +361,7 @@ class Neo4jClient:
         rel_stats = self.query(
             """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL {
-                WITH relationshipType
+            CALL (relationshipType) {
                 MATCH (n)-[r]->(m)
                 WHERE type(r) = relationshipType
                   AND n.session_id = $session_id
@@ -414,7 +411,7 @@ class Neo4jClient:
         other_result = self.query(
             """
             MATCH (n)
-            WHERE any(label IN labels(n) WHERE label IN $labels)
+            WHERE any(lbl IN labels(n) WHERE lbl IN $labels)
               AND n.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN labels(n) as labels,
@@ -444,8 +441,8 @@ class Neo4jClient:
             MATCH (n)-[r]->(m)
             WHERE n.session_id = $session_id
               AND m.session_id = $session_id
-              AND any(label IN labels(n) WHERE label IN $labels)
-              AND any(label IN labels(m) WHERE label IN $labels)
+              AND any(lbl IN labels(n) WHERE lbl IN $labels)
+              AND any(lbl IN labels(m) WHERE lbl IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
               AND NOT (m:Project AND COALESCE(m.is_default, false))
             RETURN COALESCE(n.id, elementId(n)) as source,
@@ -463,7 +460,7 @@ class Neo4jClient:
         node_stats = self.query(
             """
             UNWIND $labels as label
-            CALL (label, $session_id) {
+            CALL (label) {
                 MATCH (n)
                 WHERE label IN labels(n)
                   AND n.session_id = $session_id
@@ -478,7 +475,7 @@ class Neo4jClient:
         rel_stats = self.query(
             """
             CALL db.relationshipTypes() YIELD relationshipType
-            CALL (relationshipType, $session_id) {
+            CALL (relationshipType) {
                 MATCH (n)-[r]->(m) 
                 WHERE type(r) = relationshipType
                   AND n.session_id = $session_id
@@ -502,7 +499,7 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (n)
-            WHERE any(label IN labels(n) WHERE label IN $labels)
+            WHERE any(lbl IN labels(n) WHERE lbl IN $labels)
               AND n.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
             RETURN count(n) as count
@@ -517,8 +514,8 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (n)-[r]->(m)
-            WHERE any(label IN labels(n) WHERE label IN $labels)
-              AND any(label IN labels(m) WHERE label IN $labels)
+            WHERE any(lbl IN labels(n) WHERE lbl IN $labels)
+              AND any(lbl IN labels(m) WHERE lbl IN $labels)
               AND n.session_id = $session_id
               AND m.session_id = $session_id
               AND NOT (n:Project AND COALESCE(n.is_default, false))
