@@ -167,7 +167,7 @@ async def generate_remediation_content(
         "Requirements:\n"
         "- title: Short title (2-5 words) for this remediation topic\n"
         "- description: 1-2 sentence description of what this covers\n"
-        "- explanation: 3-5 paragraph focused explanation covering the gap\n\n"
+        "- explanation: DETAILED technical explanation (minimum 200 words) covering the concept in depth. Use examples.\n\n"
         f"Original topic the learner struggled with: {original_name}\n"
         f"Diagnosed gap: {diagnosis_text}\n"
         f"Missing concept to address: {primary_concept}\n"
@@ -175,45 +175,44 @@ async def generate_remediation_content(
         f"Learning style: {learning_style or 'balanced'}\n"
     )
     
-    try:
-        response = await asyncio.wait_for(
-            llm.ainvoke([("human", prompt)]),
-            timeout=REMEDIATION_TIMEOUT
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Remediation content generation failed: {e}")
-        return {
-            "error": f"Content generation failed: {e}",
-            "title": f"Review: {primary_concept}",
-            "description": f"Reinforcement of {primary_concept} before continuing.",
-            "explanation": f"Please review the fundamentals of {primary_concept}.",
-        }
+    max_retries = 2
+    last_error = None
     
-    content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content)
-    
-    if not parsed:
-        return {
-            "title": f"Review: {primary_concept}",
-            "description": f"Reinforcement of {primary_concept}.",
-            "explanation": content.strip()[:1000],
-        }
-    
-    explanation = str(parsed.get("explanation", "")).strip()
-    if not explanation or len(explanation) < 50:
-        return {
-            "error": "LLM returned insufficient remediation content.",
-            "title": str(parsed.get("title", f"Review: {primary_concept}")).strip(),
-            "description": str(parsed.get("description", "")).strip(),
-            "explanation": f"Please review the fundamentals of {primary_concept} before continuing.",
-        }
-
+    for attempt in range(max_retries):
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke([("human", prompt)]),
+                timeout=REMEDIATION_TIMEOUT
+            )
+            
+            content = str(response.content if hasattr(response, "content") else response)
+            parsed = _extract_json_block(content)
+            
+            if parsed:
+                explanation = str(parsed.get("explanation", "")).strip()
+                # Check for minimum length to avoid "empty" lessons
+                if explanation and len(explanation) >= 100:
+                    return {
+                        "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
+                        "description": str(parsed.get("description", "")).strip(),
+                        "explanation": explanation,
+                    }
+            
+            # If we're here, it was too short or failed to parse
+            logger.warning(f"Remediation generation attempt {attempt + 1} produced insufficient content.")
+            
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Remediation content generation failed attempt {attempt + 1}: {e}")
+            last_error = e
+            
+    # If all retries failed
     return {
-        "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
-        "description": str(parsed.get("description", "")).strip(),
-        "explanation": explanation,
+        "error": "LLM failed to generate sufficient remediation content after retries.",
+        "title": f"Review: {primary_concept}",
+        "description": f"Reinforcement of {primary_concept}.",
+        "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
     }
 
 
