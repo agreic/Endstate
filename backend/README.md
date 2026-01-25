@@ -91,7 +91,7 @@ Create a `.env` file:
 
 ```bash
 # LLM Provider
-LLM_PROVIDER=gemini  # or "ollama"
+LLM_PROVIDER=ollama  # or "gemini"
 
 # Gemini API
 GOOGLE_API_KEY=your_api_key

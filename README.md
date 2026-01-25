@@ -150,3 +150,12 @@ docker compose up -d --build --force-recreate
 - LLM (Ollama or Gemini)
 
 ### See `pyproject.toml` and `frontend/package.json` for full dependency lists.
+
+## Maintenance
+
+To prevent database bloat from abandoned sessions, a cleanup script is provided:
+
+```bash
+# Delete sessions older than 24 hours
+python scripts/cleanup_sessions.py --hours 24
+```
