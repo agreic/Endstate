@@ -22,6 +22,7 @@ from backend.db.neo4j_client import Neo4jClient
 from backend.llm.provider import get_llm
 from backend.services.agent_prompts import get_chat_system_prompt, get_project_suggestion_prompt
 from backend.services.evaluation_service import evaluate_project_alignment, evaluate_kg_quality
+from backend.services.opik_client import trace, span, log_metric
 
 
 LLM_TIMEOUT = config.llm.timeout_seconds  # seconds for LLM calls
@@ -317,18 +318,48 @@ class ChatService:
             for msg in history:
                 messages_list.append(("human" if msg["role"] == "user" else "ai", msg["content"]))
             
-            start_time = time.monotonic()
-            try:
-                response = await asyncio.wait_for(
-                    self.llm.ainvoke(messages_list),
-                    timeout=LLM_TIMEOUT,
+            model = os.getenv("OPENAI_MODEL", "")
+            provider = os.getenv("LLM_PROVIDER", "openrouter")
+
+            with trace(
+                "endstate.chat",
+                input={
+                    "workflow": "chat",
+                    "session_id": session_id,
+                    "prompt_name": "chat",
+                    "prompt_version": "v1",
+                    "model": model,
+                    "provider": provider,
+                    "messages": messages_list,
+                },
+                tags=[
+                    "workflow:chat",
+                    f"model:{model}",
+                    f"provider:{provider}",
+                ],
+            ) as t:
+                with span("llm.call"):
+                    response = await self.llm.ainvoke(messages_list)
+
+                # 👇 THIS IS THE IMPORTANT PART
+                t.output = {
+                    "response": (
+                        response.content
+                        if hasattr(response, "content")
+                        else str(response)
+                    )
+                }
+
+                start_time = time.perf_counter()
+
+
+                log_metric(
+                    "llm.latency_ms",
+                    int((time.perf_counter() - start_time) * 1000),
                 )
-            except asyncio.TimeoutError:
-                self._cancelled_requests.add(request_id)
-                await BackgroundTaskStore.notify(session_id, "error", {
-                    "message": "Request timed out. The AI is taking too long to respond. Please try again."
-                })
-                raise
+                log_metric("llm.success", 1)
+
+
             
             response_text = str(response.content if hasattr(response, 'content') else response)
             if LOG_CHAT_TIMINGS:
@@ -357,18 +388,24 @@ class ChatService:
         try:
             data = json.loads(content)
             if isinstance(data, dict):
-                return data.get("projects") if isinstance(data.get("projects"), list) else []
+                projects = data.get("projects")
+                if isinstance(projects, list):
+                    return projects
         except Exception:
             pass
+
         try:
             import re
             match = re.search(r"\{.*\}", content, flags=re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
                 if isinstance(data, dict):
-                    return data.get("projects") if isinstance(data.get("projects"), list) else []
+                    projects = data.get("projects")
+                    if isinstance(projects, list):
+                        return projects
         except Exception:
-            return []
+            pass
+
         return []
 
     def _normalize_project_suggestions(self, raw: list[dict]) -> list[dict]:

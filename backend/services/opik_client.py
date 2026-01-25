@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 
 try:
-    import opik
+    import opik # type: ignore
 except Exception:  # pragma: no cover
     opik = None
 
