@@ -170,6 +170,18 @@ class Neo4jClient:
             {"label": label},
         )
         return bool(result and result[0].get("count", 0))
+
+    def relationship_type_exists(self, rel_type: str) -> bool:
+        """Check whether a relationship type exists in the database."""
+        result = self.query(
+            """
+            CALL db.relationshipTypes() YIELD relationshipType
+            WHERE relationshipType = $rel_type
+            RETURN count(relationshipType) as count
+            """,
+            {"rel_type": rel_type},
+        )
+        return bool(result and result[0].get("count", 0))
     
     def clean_graph(self) -> None:
         """Delete all nodes and relationships from the graph."""
@@ -917,7 +929,7 @@ class Neo4jClient:
         self.upsert_project_summary(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, summary_json, is_default=True)
 
     def ensure_project_nodes(self) -> None:
-        """Ensure every project summary has a KG project node."""
+        """Ensure every project summary has a KG project node and prune redundant relationships."""
         self.query(
             """
             MATCH (ps:ProjectSummary)
@@ -929,6 +941,22 @@ class Neo4jClient:
             MERGE (ps)-[:SUMMARY_FOR]->(p)
             """
         )
+        # Prune redundant HAS_NODE if more specific links exist to avoid double counting
+        if self.relationship_type_exists("HAS_NODE"):
+            rel_types = []
+            for rel in ["HAS_SKILL", "HAS_CONCEPT", "HAS_TOPIC", "HAS_MILESTONE"]:
+                if self.relationship_type_exists(rel):
+                    rel_types.append(rel)
+            
+            if rel_types:
+                rel_pattern = "|".join(f":{r}" for r in rel_types)
+                self.query(
+                    f"""
+                    MATCH (p:Project)-[r:HAS_NODE]->(n)
+                    WHERE (p)-[{rel_pattern}]->(n)
+                    DELETE r
+                    """
+                )
 
     def upsert_project_profile_node(self, project_id: str, profile: dict) -> None:
         """Create or update a project profile node and link to project."""
@@ -1060,7 +1088,6 @@ class Neo4jClient:
                 MATCH (p:Project {{id: $project_id}})
                 UNWIND $names as node_name
                 MATCH (n:{label} {{name: node_name}})
-                MERGE (p)-[:HAS_NODE]->(n)
                 MERGE (p)-[:{rel_type}]->(n)
                 """,
                 {"project_id": project_id, "names": list(names)},
@@ -1068,26 +1095,47 @@ class Neo4jClient:
 
     def list_project_nodes(self, project_id: str) -> list[dict]:
         """List KG nodes connected to a project."""
-        result = self.query(
-            """
-            MATCH (p:Project {id: $project_id})-[:HAS_NODE]->(n)
-            RETURN n
-            ORDER BY n.name ASC
-            """,
-            {"project_id": project_id},
-        )
-        if not result:
+        # Check which relationship types exist to avoid Neo4j warnings
+        rel_types = []
+        for rel in ["HAS_SKILL", "HAS_CONCEPT", "HAS_TOPIC", "HAS_MILESTONE", "HAS_NODE"]:
+            if self.relationship_type_exists(rel):
+                rel_types.append(rel)
+        
+        if not rel_types:
+            # Check lessons as fallback
             result = self.query(
                 """
                 MATCH (p:Project {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)-[:ABOUT]->(n)
                 WITH DISTINCT p, n
-                MERGE (p)-[:HAS_NODE]->(n)
                 RETURN n
                 ORDER BY n.name ASC
                 """,
                 {"project_id": project_id},
             )
-        return [_serialize_node(row["n"]) for row in result]
+        else:
+            rel_pattern = "|".join(f":{r}" for r in rel_types)
+            result = self.query(
+                f"""
+                MATCH (p:Project {{id: $project_id}})-[{rel_pattern}]->(n)
+                RETURN n
+                ORDER BY n.name ASC
+                """,
+                {"project_id": project_id},
+            )
+            
+            if not result:
+                # Fallback/Migration: If no direct links, check lessons
+                result = self.query(
+                    """
+                    MATCH (p:Project {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)-[:ABOUT]->(n)
+                    WITH DISTINCT p, n
+                    RETURN n
+                    ORDER BY n.name ASC
+                    """,
+                    {"project_id": project_id},
+                )
+        
+        return [_serialize_node(r["n"]) for r in result] if result else []
 
     def clear_project_nodes(self, project_id: str) -> None:
         """Remove project links and delete nodes unique to this project."""
@@ -1831,9 +1879,19 @@ class Neo4jClient:
 
     def get_prerequisite_nodes(self, node_id: str) -> list[dict]:
         """Get prerequisite/dependency nodes for a given node."""
+        # Check which relationship types exist to avoid Neo4j warnings
+        rel_types = []
+        for rel in ["PREREQUISITE_FOR", "REQUIRES", "DEPENDS_ON"]:
+            if self.relationship_type_exists(rel):
+                rel_types.append(rel)
+        
+        if not rel_types:
+            return []
+        
+        rel_pattern = "|".join(f":{r}" for r in rel_types)
         result = self.query(
-            """
-            MATCH (prereq)-[:PREREQUISITE_FOR|REQUIRES|DEPENDS_ON]->(n)
+            f"""
+            MATCH (prereq)-[{rel_pattern}]->(n)
             WHERE n.id = $node_id OR elementId(n) = $node_id
             RETURN COALESCE(prereq.id, elementId(prereq)) as id,
                    prereq.name as name,

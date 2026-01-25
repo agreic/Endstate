@@ -688,11 +688,14 @@ onUnmounted(() => {
 });
 
 const getConnectionCount = (nodeId: string): number => {
-  return graphData.value.links.filter((l) => {
+  const neighbors = new Set<string>();
+  graphData.value.links.forEach((l) => {
     const sourceId = typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
     const targetId = typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
-    return sourceId === nodeId || targetId === nodeId;
-  }).length;
+    if (sourceId === nodeId) neighbors.add(targetId);
+    if (targetId === nodeId) neighbors.add(sourceId);
+  });
+  return neighbors.size;
 };
 
 const clearSearch = () => {
@@ -918,7 +921,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
         
         <div class="mt-3 pt-3 border-t border-surface-100">
           <span class="text-xs text-surface-400">
-            {{ getConnectionCount(selectedNode.id) }} relationship{{ getConnectionCount(selectedNode.id) === 1 ? '' : 's' }} in graph
+            Connected to {{ getConnectionCount(selectedNode.id) }} node{{ getConnectionCount(selectedNode.id) === 1 ? '' : 's' }}
           </span>
         </div>
       </div>
