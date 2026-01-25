@@ -185,6 +185,21 @@ class MockChatModel:
                 "overall_feedback": "Mock feedback: good progress, add more concrete details.",
                 "suggestions": ["Add code snippets or specific implementation details."],
             })
+        # Remediation diagnosis
+        if "learning diagnostician" in lower or "analyze why a learner failed" in lower:
+            return json.dumps({
+                "diagnosis": "Confusion between base case and recursive case in recursion concept",
+                "missing_concepts": ["Understanding Base Cases", "Recursion Fundamentals"],
+                "severity": "moderate",
+                "recommended_action": "insert_prerequisite"
+            })
+        # Remediation content generation  
+        if "remediation lesson" in lower or "learner who struggled" in lower:
+            return json.dumps({
+                "name": "Understanding Base Cases",
+                "description": "A focused review of base case concepts essential for recursion.",
+                "explanation": "Base cases are the foundation of recursive thinking. A base case is the condition where the recursion stops. Without proper base cases, recursion leads to infinite loops."
+            })
         return "Mock response: thanks for the message. Please continue."
 
     def invoke(self, messages: object, **_: object) -> AIMessage:

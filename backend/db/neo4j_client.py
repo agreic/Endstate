@@ -1742,3 +1742,199 @@ class Neo4jClient:
             {"node_id": node_id}
         )
         return result
+
+    # =========================================================================
+    # Remediation methods
+    # =========================================================================
+
+    def create_remediation_node(
+        self,
+        project_id: str,
+        node_id: str,
+        name: str,
+        description: str,
+        explanation: str,
+        diagnosis: str,
+        severity: str,
+        before_node_id: str,
+        triggered_by_assessment: str,
+    ) -> dict:
+        """
+        Create a remediation concept node and insert it before the target node.
+
+        Args:
+            project_id: Project this remediation belongs to
+            node_id: ID for the new remediation node
+            name: Short title for the remediation concept
+            description: Description of what this remediation covers
+            explanation: Focused lesson content
+            diagnosis: Original diagnosis text
+            severity: "minor", "moderate", or "major"
+            before_node_id: The node to insert this remediation before
+            triggered_by_assessment: The assessment that triggered this
+
+        Returns:
+            Dictionary with created node info
+        """
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            MATCH (p:Project {id: $project_id})
+            CREATE (r:RemediationConcept {
+                id: $node_id,
+                name: $name,
+                description: $description,
+                explanation: $explanation,
+                diagnosis: $diagnosis,
+                severity: $severity,
+                before_node_id: $before_node_id,
+                triggered_by_assessment: $triggered_by_assessment,
+                node_type: 'remediation',
+                created_at: datetime(),
+                version: 1
+            })
+            CREATE (p)-[:HAS_REMEDIATION {version: 1, created_at: datetime()}]->(r)
+            CREATE (ps)-[:HAS_REMEDIATION]->(r)
+            """,
+            {
+                "project_id": project_id,
+                "node_id": node_id,
+                "name": name,
+                "description": description,
+                "explanation": explanation,
+                "diagnosis": diagnosis,
+                "severity": severity,
+                "before_node_id": before_node_id,
+                "triggered_by_assessment": triggered_by_assessment,
+            },
+        )
+
+        self.query(
+            """
+            MATCH (r:RemediationConcept {id: $remediation_id})
+            MATCH (target)
+            WHERE target.id = $before_node_id OR elementId(target) = $before_node_id
+            MERGE (r)-[:PREREQUISITE_FOR {version: 1, created_at: datetime()}]->(target)
+            """,
+            {
+                "remediation_id": node_id,
+                "before_node_id": before_node_id,
+            },
+        )
+
+        return {
+            "id": node_id,
+            "name": name,
+            "before_node_id": before_node_id,
+            "created": True,
+        }
+
+    def get_prerequisite_nodes(self, node_id: str) -> list[dict]:
+        """Get prerequisite/dependency nodes for a given node."""
+        result = self.query(
+            """
+            MATCH (prereq)-[:PREREQUISITE_FOR|REQUIRES|DEPENDS_ON]->(n)
+            WHERE n.id = $node_id OR elementId(n) = $node_id
+            RETURN COALESCE(prereq.id, elementId(prereq)) as id,
+                   prereq.name as name,
+                   labels(prereq) as labels
+            """,
+            {"node_id": node_id},
+        )
+        return result
+
+    def list_remediation_nodes(self, project_id: str) -> list[dict]:
+        """List all remediation nodes for a project."""
+        if not self.label_exists("RemediationConcept"):
+            return []
+        result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[:HAS_REMEDIATION]->(r:RemediationConcept)
+            RETURN r.id as id,
+                   r.name as name,
+                   r.description as description,
+                   r.explanation as explanation,
+                   r.diagnosis as diagnosis,
+                   r.severity as severity,
+                   r.before_node_id as before_node_id,
+                   r.triggered_by_assessment as triggered_by_assessment,
+                   r.created_at as created_at
+            ORDER BY r.created_at DESC
+            """,
+            {"project_id": project_id},
+        )
+        return result
+
+    def track_remediation_event(
+        self,
+        project_id: str,
+        assessment_id: str,
+        remediation_node_id: str,
+        diagnosis_summary: str,
+        severity: str,
+    ) -> None:
+        """Log a remediation event for auditability."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            CREATE (e:RemediationEvent {
+                id: $event_id,
+                project_id: $project_id,
+                assessment_id: $assessment_id,
+                remediation_node_id: $remediation_node_id,
+                diagnosis_summary: $diagnosis_summary,
+                severity: $severity,
+                created_at: datetime()
+            })
+            CREATE (ps)-[:HAS_REMEDIATION_EVENT]->(e)
+            """,
+            {
+                "project_id": project_id,
+                "event_id": f"rem-event-{assessment_id[-8:]}",
+                "assessment_id": assessment_id,
+                "remediation_node_id": remediation_node_id,
+                "diagnosis_summary": diagnosis_summary,
+                "severity": severity,
+            },
+        )
+
+    def get_assessment_by_id(self, assessment_id: str) -> Optional[dict]:
+        """Get an assessment by its ID."""
+        result = self.query(
+            """
+            MATCH (a:ProjectAssessment {id: $assessment_id})
+            OPTIONAL MATCH (a)-[:ASSESSMENT_FOR]->(l:ProjectLesson)
+            RETURN a.id as id,
+                   a.lesson_id as lesson_id,
+                   a.prompt as prompt,
+                   a.status as status,
+                   a.feedback as feedback,
+                   a.answer as answer,
+                   l.node_id as node_id,
+                   l.title as lesson_title,
+                   l.explanation as lesson_explanation
+            """,
+            {"assessment_id": assessment_id},
+        )
+        return result[0] if result else None
+
+    def get_remediation_node(self, node_id: str) -> Optional[dict]:
+        """Get a remediation node by ID."""
+        if not self.label_exists("RemediationConcept"):
+            return None
+        result = self.query(
+            """
+            MATCH (r:RemediationConcept {id: $node_id})
+            RETURN r.id as id,
+                   r.name as name,
+                   r.description as description,
+                   r.explanation as explanation,
+                   r.diagnosis as diagnosis,
+                   r.severity as severity,
+                   r.before_node_id as before_node_id,
+                   r.triggered_by_assessment as triggered_by_assessment,
+                   r.created_at as created_at
+            """,
+            {"node_id": node_id},
+        )
+        return result[0] if result else None
