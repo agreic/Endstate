@@ -1,6 +1,24 @@
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
 
+function getHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  const geminiKey = localStorage.getItem('endstate_gemini_api_key');
+  const neo4jUri = localStorage.getItem('endstate_neo4j_uri');
+  const neo4jUser = localStorage.getItem('endstate_neo4j_user');
+  const neo4jPass = localStorage.getItem('endstate_neo4j_password');
+
+  if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
+  if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;
+  if (neo4jUser) headers['X-Neo4j-User'] = neo4jUser;
+  if (neo4jPass) headers['X-Neo4j-Password'] = neo4jPass;
+
+  return headers;
+}
+
 async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -8,6 +26,10 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...options,
+      headers: {
+        ...getHeaders(),
+        ...options?.headers,
+      },
       signal: controller.signal,
     });
 
@@ -48,6 +70,10 @@ async function requestJsonAllowNotFound<T>(path: string, notFoundValue: T, optio
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...options,
+      headers: {
+        ...getHeaders(),
+        ...options?.headers,
+      },
       signal: controller.signal,
     });
 
@@ -294,18 +320,18 @@ export async function sendChatMessage(
   requestId?: string,
   signal?: AbortSignal
 ): Promise<ChatResponse> {
-  const endpoint = sessionId 
+  const endpoint = sessionId
     ? `${API_URL}/api/chat/${sessionId}/messages`
     : `${API_URL}/api/chat`;
-  
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  
+
   if (requestId) {
     headers['X-Request-ID'] = requestId;
   }
-  
+
   const init: RequestInit = {
     method: 'POST',
     headers,
@@ -314,11 +340,11 @@ export async function sendChatMessage(
       enable_web_search: enableSearch,
     }),
   };
-  
+
   if (signal) {
     init.signal = signal;
   }
-  
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   if (signal) {
@@ -332,6 +358,10 @@ export async function sendChatMessage(
   try {
     const response = await fetch(endpoint, {
       ...init,
+      headers: {
+        ...getHeaders(),
+        ...init.headers,
+      },
       signal: controller.signal,
     });
     if (!response.ok) {

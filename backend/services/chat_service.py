@@ -156,9 +156,8 @@ class ChatService:
     
     @property
     def llm(self):
-        if self._llm is None:
-            self._llm = get_llm()
-        return self._llm
+        # Do not cache LLM to ensure dynamic API keys from headers are always used
+        return get_llm()
     
     def create_session(self, session_id: str) -> None:
         """Create a chat session if it doesn't exist."""

@@ -85,28 +85,50 @@ class Neo4jClient:
         self._config = neo4j_config or config.neo4j
         self._graph: Optional[Neo4jGraph] = None
         self._driver = None
+        self._last_uri: Optional[str] = None
+        self._last_user: Optional[str] = None
     
     @property
     def graph(self) -> Neo4jGraph:
         """Get or create LangChain Neo4jGraph instance."""
+        current_uri = self._config.uri
+        current_user = self._config.username
+        
+        if self._graph is not None and (current_uri != self._last_uri or current_user != self._last_user):
+            self._graph = None
+
         if self._graph is None:
             self._graph = Neo4jGraph(
-                url=self._config.uri,
-                username=self._config.username,
+                url=current_uri,
+                username=current_user,
                 password=self._config.password,
                 database=self._config.database,
                 refresh_schema=False,
             )
+            self._last_uri = current_uri
+            self._last_user = current_user
         return self._graph
     
     @property
     def driver(self):
         """Get or create Neo4j driver for direct queries."""
+        current_uri = self._config.uri
+        current_user = self._config.username
+        
+        if self._driver is not None and (current_uri != self._last_uri or current_user != self._last_user):
+            try:
+                self._driver.close()
+            except Exception:
+                pass
+            self._driver = None
+
         if self._driver is None:
             self._driver = GraphDatabase.driver(
-                self._config.uri,
-                auth=(self._config.username, self._config.password),
+                current_uri,
+                auth=(current_user, self._config.password),
             )
+            self._last_uri = current_uri
+            self._last_user = current_user
         return self._driver
     
     def test_connection(self) -> bool:

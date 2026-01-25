@@ -25,6 +25,12 @@ from backend.services.evaluation_service import (
 )
 from backend.services.task_registry import TaskRegistry
 from backend.db.neo4j_client import DEFAULT_PROJECT_ID
+from backend.config import (
+    X_GEMINI_API_KEY,
+    X_NEO4J_URI,
+    X_NEO4J_USERNAME,
+    X_NEO4J_PASSWORD,
+)
 
 
 class ChatMessage(BaseModel):
@@ -142,6 +148,42 @@ app.add_middleware(
 )
 
 task_registry = TaskRegistry()
+
+
+@app.middleware("http")
+async def extract_config_headers(request: Request, call_next):
+    """Extract configuration from headers and set in context variables."""
+    # Extract headers
+    gemini_key = request.headers.get("X-Gemini-API-Key")
+    neo4j_uri = request.headers.get("X-Neo4j-URI")
+    neo4j_user = request.headers.get("X-Neo4j-User")
+    neo4j_password = request.headers.get("X-Neo4j-Password")
+
+    # Set context variables and restore them after request
+    tokens = []
+    if gemini_key:
+        tokens.append(X_GEMINI_API_KEY.set(gemini_key))
+    if neo4j_uri:
+        tokens.append(X_NEO4J_URI.set(neo4j_uri))
+    if neo4j_user:
+        tokens.append(X_NEO4J_USERNAME.set(neo4j_user))
+    if neo4j_password:
+        tokens.append(X_NEO4J_PASSWORD.set(neo4j_password))
+
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        # Reset context variables (in reverse order)
+        for token in reversed(tokens):
+            if token.var == X_GEMINI_API_KEY:
+                X_GEMINI_API_KEY.reset(token)
+            elif token.var == X_NEO4J_URI:
+                X_NEO4J_URI.reset(token)
+            elif token.var == X_NEO4J_USERNAME:
+                X_NEO4J_USERNAME.reset(token)
+            elif token.var == X_NEO4J_PASSWORD:
+                X_NEO4J_PASSWORD.reset(token)
 
 
 
