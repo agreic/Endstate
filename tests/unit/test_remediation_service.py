@@ -71,3 +71,25 @@ async def test_generate_remediation_content_returns_valid_structure():
     assert "title" in result
     assert "description" in result
     assert "explanation" in result
+
+
+@pytest.mark.asyncio
+async def test_diagnose_failure_handles_null_prerequisites():
+    """Regression test: diagnose_failure should not crash if prerequisites contain None."""
+    lesson = {"title": "Recursion Basics", "explanation": "Recursion is..."}
+    assessment = {"prompt": "Explain base cases"}
+    answer = "I don't know"
+    feedback = "Missing understanding of base cases"
+    node_context = {"prerequisites": ["Strings", None, "Functions"]}
+    
+    # Should not raise TypeError
+    result = await diagnose_failure(
+        lesson=lesson,
+        assessment=assessment,
+        answer=answer,
+        feedback=feedback,
+        node_context=node_context
+    )
+    
+    assert "diagnosis" in result
+

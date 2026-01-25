@@ -52,6 +52,10 @@ def parse_assessment_content(content: str) -> dict:
 async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
     llm = get_llm()
 
+    explanation = lesson.get("explanation", "").strip()
+    if not explanation:
+        return {"error": "Cannot generate assessment for lesson with no content."}
+
     learning_style = (profile or {}).get("learning_style", "")
     prompt = (
         "Create one assessment prompt based on the lesson below.\n"

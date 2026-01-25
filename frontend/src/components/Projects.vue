@@ -209,10 +209,40 @@ const scheduleJobPoll = (jobId: string, projectId: string) => {
         if (jobMeta?.submission_id && capstoneDetails.value?.submission?.id === jobMeta.submission_id) {
           await loadSubmissionDetails(jobMeta.submission_id);
         }
+        if (status.kind === "remediation" && jobMeta?.assessment_id) {
+          remediationResults.value = { ...remediationResults.value, [jobMeta.assessment_id]: status.result };
+          remediationLoading.value.delete(jobMeta.assessment_id);
+          remediationLoading.value = new Set(remediationLoading.value);
+        }
+        if (status.kind === "assessment-eval" && jobMeta?.assessment_id) {
+          submittingAssessmentIds.value.delete(jobMeta.assessment_id);
+          submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
+          const res = status.result;
+          if (res?.result === "fail" && res?.remediation_available) {
+            remediationAvailable.value = new Set([...remediationAvailable.value, jobMeta.assessment_id]);
+          }
+          if (res?.result === "pass") {
+            const passedAssessment = assessments.value.find((a) => a.id === jobMeta.assessment_id);
+            if (passedAssessment && selectedLesson.value?.id === passedAssessment.lesson_id) {
+              selectedLesson.value = null;
+              showAssessmentPanel.value = false;
+            }
+          }
+        }
         projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
       if (status.status === "failed" || status.status === "canceled") {
+        if (status.kind === "remediation" && jobMeta?.assessment_id) {
+          remediationResults.value = { ...remediationResults.value, [jobMeta.assessment_id]: { error: status.error || "Job failed" } };
+          remediationLoading.value.delete(jobMeta.assessment_id);
+          remediationLoading.value = new Set(remediationLoading.value);
+        }
+        if (status.kind === "assessment-eval" && jobMeta?.assessment_id) {
+          submittingAssessmentIds.value.delete(jobMeta.assessment_id);
+          submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
+          assessmentError.value = status.error || "Evaluation failed";
+        }
         projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
@@ -241,6 +271,23 @@ const loadProjectJobs = async (projectId: string) => {
       pollReinitJob(reinitJobId.value, projectId);
     }
     projectJobs.value.forEach((job) => scheduleJobPoll(job.job_id, projectId));
+    
+    // Sync submitting status from active assessment-eval jobs
+    const evaluatingIds = projectJobs.value
+      .filter((job) => job.kind === "assessment-eval" && job.status === "running")
+      .map((job) => job.meta?.assessment_id)
+      .filter(Boolean);
+    if (evaluatingIds.length > 0) {
+      submittingAssessmentIds.value = new Set([...submittingAssessmentIds.value, ...evaluatingIds]);
+    }
+
+    const remediatingIds = projectJobs.value
+      .filter((job) => job.kind === "remediation" && job.status === "running")
+      .map((job) => job.meta?.assessment_id)
+      .filter(Boolean);
+    if (remediatingIds.length > 0) {
+      remediationLoading.value = new Set([...remediationLoading.value, ...remediatingIds]);
+    }
   } catch (e) {
     projectJobs.value = [];
   }
@@ -371,36 +418,22 @@ const submitAssessment = async (assessmentId: string) => {
   
   try {
     const response = await submitProjectAssessment(selectedProject.value.session_id, assessmentId, answer);
-    assessments.value = assessments.value.map((assessment) =>
-      assessment.id === assessmentId
-        ? { ...assessment, status: response.result, feedback: response.feedback, archived: response.result === "pass" }
-        : assessment,
-    );
     
-    // Track remediation availability for failed assessments
-    if (response.result === "fail" && response.remediation_available) {
-      remediationAvailable.value = new Set([...remediationAvailable.value, assessmentId]);
-    }
+    // Add to project jobs to track progress
+    projectJobs.value.push({
+      job_id: response.job_id,
+      kind: "assessment-eval",
+      status: "running",
+      meta: { assessment_id: assessmentId },
+    });
     
-    if (response.result === "pass") {
-      const passedAssessment = assessments.value.find((assessment) => assessment.id === assessmentId);
-      if (passedAssessment) {
-        lessons.value = lessons.value.map((lesson) =>
-          lesson.id === passedAssessment.lesson_id ? { ...lesson, archived: true } : lesson,
-        );
-        if (selectedLesson.value?.id === passedAssessment.lesson_id) {
-          selectedLesson.value = null;
-          showAssessmentPanel.value = false;
-        }
-      }
-    }
+    // Start polling for this job
+    scheduleJobPoll(response.job_id, selectedProject.value.session_id);
+
   } catch (e) {
     assessmentError.value = e instanceof Error ? e.message : "Failed to submit assessment";
-  } finally {
-    // Remove from submitting set
-    const newSet = new Set(submittingAssessmentIds.value);
-    newSet.delete(assessmentId);
-    submittingAssessmentIds.value = newSet;
+    submittingAssessmentIds.value.delete(assessmentId);
+    submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
   }
 };
 
@@ -412,21 +445,25 @@ const requestRemediation = async (assessmentId: string) => {
   remediationLoading.value = new Set([...remediationLoading.value, assessmentId]);
   
   try {
-    const result = await triggerRemediation(selectedProject.value.session_id, assessmentId);
-    remediationResults.value = { ...remediationResults.value, [assessmentId]: result };
+    const response = await triggerRemediation(selectedProject.value.session_id, assessmentId);
     
+    // Add to project jobs to track progress
+    projectJobs.value.push({
+      job_id: response.job_id,
+      kind: "remediation",
+      status: "running",
+      meta: { assessment_id: assessmentId },
+    });
+    
+    // Start polling for this job
+    scheduleJobPoll(response.job_id, selectedProject.value.session_id);
+
     // Remove from available set since we've triggered it
     const newAvailable = new Set(remediationAvailable.value);
     newAvailable.delete(assessmentId);
     remediationAvailable.value = newAvailable;
-    
-    // Refresh lessons to show the new remediation lesson
-    if (result.action === "node_created" && result.remediation_node_id) {
-      await loadProjectExtras(selectedProject.value.session_id);
-    }
   } catch (e) {
-    assessmentError.value = e instanceof Error ? e.message : "Failed to generate remediation";
-  } finally {
+    assessmentError.value = e instanceof Error ? e.message : "Failed to trigger remediation";
     const newLoading = new Set(remediationLoading.value);
     newLoading.delete(assessmentId);
     remediationLoading.value = newLoading;
@@ -470,7 +507,7 @@ const capstoneHeaderClass = computed(() =>
 );
 const capstoneJobs = computed(() => projectJobs.value.filter((job) => job.kind === "capstone-eval"));
 const lessonJobs = computed(() => projectJobs.value.filter((job) => job.kind === "lesson"));
-const assessmentJobs = computed(() => projectJobs.value.filter((job) => job.kind === "assessment"));
+const assessmentJobs = computed(() => projectJobs.value.filter((job) => job.kind === "assessment" || job.kind === "assessment-eval" || job.kind === "remediation"));
 
 const archiveLesson = async (lessonId: string) => {
   if (!selectedProject.value) return;
@@ -1164,7 +1201,8 @@ onUnmounted(() => {
                   <div class="flex items-start justify-between gap-3">
                     <button @click="openLesson(lesson)" class="flex-1 text-left">
                       <p class="text-sm font-semibold text-surface-700">{{ lesson.title }}</p>
-                      <div class="text-xs text-surface-500 mt-1 line-clamp-2 markdown-container" v-html="renderMarkdown(lesson.explanation)"></div>
+                      <div v-if="lesson.explanation" class="text-xs text-surface-500 mt-1 line-clamp-2 markdown-container" v-html="renderMarkdown(lesson.explanation)"></div>
+                      <p v-else class="text-xs text-surface-400 mt-1 italic">Content not yet available.</p>
                     </button>
                     <div class="flex flex-col gap-2">
                       <button
@@ -1285,14 +1323,32 @@ onUnmounted(() => {
                           v-if="!remediationResults[assessment.id]"
                           @click="requestRemediation(assessment.id)"
                           :disabled="remediationLoading.has(assessment.id)"
-                          class="w-full text-xs px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5 bg-amber-100 text-amber-700 hover:bg-amber-200"
+                          class="w-full text-xs px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                          :class="remediationLoading.has(assessment.id) 
+                            ? 'bg-amber-50 text-amber-400 cursor-wait opacity-75' 
+                            : 'bg-amber-100 text-amber-700 hover:bg-amber-200'"
                         >
                           <span v-if="remediationLoading.has(assessment.id)" class="animate-spin rounded-full h-3 w-3 border-b-2 border-amber-600"></span>
                           <Zap v-else :size="14" />
                           {{ remediationLoading.has(assessment.id) ? 'Generating remediation...' : 'Generate follow-up lesson' }}
                         </button>
                         
-                        <div v-else class="bg-amber-50 rounded-xl p-4 border border-amber-100">
+                        <div v-else-if="remediationResults[assessment.id]?.error" class="mt-2">
+                          <div class="bg-red-50 rounded-xl p-4 border border-red-100 mb-2">
+                            <p class="text-xs font-bold text-red-800 flex items-center gap-1.5 mb-1">
+                              Failed to generate remediation
+                            </p>
+                            <p class="text-xs text-red-600">{{ remediationResults[assessment.id].error }}</p>
+                          </div>
+                          <button
+                            @click="delete remediationResults[assessment.id]; requestRemediation(assessment.id)"
+                            class="text-[10px] text-primary-600 hover:underline font-medium"
+                          >
+                            Try again
+                          </button>
+                        </div>
+
+                        <div v-else-if="remediationResults[assessment.id]" class="bg-amber-50 rounded-xl p-4 border border-amber-100">
                           <p class="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
                             <Sparkles :size="14" />
                             Remediation Path Created

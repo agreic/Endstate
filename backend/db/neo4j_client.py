@@ -1826,11 +1826,12 @@ class Neo4jClient:
         """
         self.query(
             """
-            MATCH (ps:ProjectSummary {id: $project_id})
-            MATCH (p:Project {id: $project_id})
-            CREATE (r:ProjectLesson {
+            MATCH (ps:ProjectSummary) WHERE ps.id = $project_id OR elementId(ps) = $project_id
+            MATCH (p:Project) WHERE p.id = $project_id OR elementId(p) = $project_id
+            CREATE (r:ProjectLesson:Concept {
                 id: $node_id,
                 title: $title,
+                name: $title,
                 description: $description,
                 explanation: $explanation,
                 diagnosis: $diagnosis,

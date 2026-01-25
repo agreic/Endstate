@@ -549,10 +549,10 @@ export async function submitProjectAssessment(
   projectId: string,
   assessmentId: string,
   answer: string,
-): Promise<{ assessment_id: string; result: string; feedback: string; remediation_available?: boolean }> {
-  // Use longer timeout for LLM evaluation
+): Promise<{ status: string; job_id: string }> {
+  // Assessment evaluation is now an async job
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/submit`, {
@@ -652,7 +652,9 @@ export async function getSubmission(submissionId: string): Promise<{ submission:
 }
 
 export interface RemediationResult {
-  action: string;
+  status?: string;
+  job_id?: string;
+  action?: string;
   diagnosis?: {
     diagnosis: string;
     missing_concepts: string[];
@@ -661,7 +663,7 @@ export interface RemediationResult {
   };
   remediation_node_id?: string;
   remediation_content?: {
-    name: string;
+    title: string;
     description: string;
     explanation: string;
   };
@@ -671,7 +673,7 @@ export interface RemediationResult {
 export async function triggerRemediation(
   projectId: string,
   assessmentId: string,
-): Promise<RemediationResult> {
+): Promise<{ status: string; job_id: string }> {
   // Use longer timeout for LLM-based remediation
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);

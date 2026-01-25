@@ -70,8 +70,12 @@ async def diagnose_failure(
     
     prereq_context = ""
     if node_context and node_context.get("prerequisites"):
-        prereqs = ", ".join(node_context.get("prerequisites", []))
-        prereq_context = f"\nKnown prerequisites for this topic: {prereqs}"
+        raw_prereqs = node_context.get("prerequisites", [])
+        # Ensure we only try to join strings
+        prereq_list = [str(p) for p in raw_prereqs if p is not None]
+        if prereq_list:
+            prereqs = ", ".join(prereq_list)
+            prereq_context = f"\nKnown prerequisites for this topic: {prereqs}"
     
     prompt = (
         "You are a learning diagnostician. Analyze why a learner failed this assessment.\n"
@@ -197,10 +201,19 @@ async def generate_remediation_content(
             "explanation": content.strip()[:1000],
         }
     
+    explanation = str(parsed.get("explanation", "")).strip()
+    if not explanation or len(explanation) < 50:
+        return {
+            "error": "LLM returned insufficient remediation content.",
+            "title": str(parsed.get("title", f"Review: {primary_concept}")).strip(),
+            "description": str(parsed.get("description", "")).strip(),
+            "explanation": f"Please review the fundamentals of {primary_concept} before continuing.",
+        }
+
     return {
         "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
         "description": str(parsed.get("description", "")).strip(),
-        "explanation": str(parsed.get("explanation", "")).strip(),
+        "explanation": explanation,
     }
 
 
@@ -282,7 +295,7 @@ async def remediate_assessment_failure(
     
     # Get prerequisites for context
     prereqs = db.get_prerequisite_nodes(node_id)
-    node_context = {"prerequisites": [p.get("name") for p in prereqs]}
+    node_context = {"prerequisites": [p.get("name") for p in prereqs if p.get("name")]}
     
     # Step 1: Diagnose
     diagnosis = await diagnose_failure(
@@ -295,6 +308,12 @@ async def remediate_assessment_failure(
     
     if diagnosis.get("error"):
         logger.warning(f"Diagnosis failed: {diagnosis.get('error')}")
+        return {
+            "action": "failed",
+            "error": diagnosis.get("error"),
+            "message": "Failed to diagnose assessment failure.",
+            "remediation_created": False
+        }
     
     # Check if remediation warranted
     if diagnosis.get("recommended_action") == "hint":
@@ -314,6 +333,12 @@ async def remediate_assessment_failure(
     
     if remediation_content.get("error"):
         logger.warning(f"Content generation failed: {remediation_content.get('error')}")
+        return {
+            "action": "failed",
+            "error": remediation_content.get("error"),
+            "message": "Failed to generate remediation content.",
+            "remediation_created": False
+        }
     
     # Step 3: Create the remediation node
     remediation_node_id = f"remediation-{uuid4().hex[:8]}"
@@ -344,5 +369,5 @@ async def remediate_assessment_failure(
         "remediation_content": remediation_content,
         "remediation_created": True,
         "before_node_id": node_id,
-        "message": f"Created remediation node: {remediation_content.get('name')}",
+        "message": f"Created remediation node: {remediation_content.get('title')}",
     }

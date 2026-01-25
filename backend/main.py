@@ -1369,28 +1369,38 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
-    result = await evaluate_assessment(lesson, assessment, request.answer)
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+    async def _task():
+        result = await evaluate_assessment(lesson, assessment, request.answer)
+        if "error" in result:
+            raise RuntimeError(result["error"])
 
-    status = result.get("result", "fail")
-    archive_assessment = status == "pass"
-    db.update_project_assessment(
-        assessment_id,
-        status,
-        result.get("feedback", ""),
-        request.answer,
-        archived=archive_assessment,
+        status = result.get("result", "fail")
+        archive_assessment = status == "pass"
+        db.update_project_assessment(
+            assessment_id,
+            status,
+            result.get("feedback", ""),
+            request.answer,
+            archived=archive_assessment,
+        )
+        if archive_assessment:
+            db.archive_project_lesson(project_id, assessment.get("lesson_id"))
+
+        return {
+            "assessment_id": assessment_id,
+            "result": status,
+            "feedback": result.get("feedback"),
+            "remediation_available": status == "fail",
+        }
+
+    job = task_registry.register(
+        project_id, 
+        "assessment-eval", 
+        _task(), 
+        meta={"assessment_id": assessment_id}
     )
-    if archive_assessment:
-        db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 
-    return {
-        "assessment_id": assessment_id,
-        "result": status,
-        "feedback": result.get("feedback"),
-        "remediation_available": status == "fail",  # Enable remediation option on failure
-    }
+    return {"status": "queued", "job_id": job.job_id}
 
 
 # =============================================================================
@@ -1441,20 +1451,25 @@ async def remediate_assessment(project_id: str, assessment_id: str):
     feedback = assessment_data.get("feedback", "")
     node_id = assessment_data.get("node_id", "")
     
-    # Run remediation pipeline
-    result = await remediate_assessment_failure(
-        db=db,
+    # Run remediation pipeline as a background task
+    job = task_registry.register(
         project_id=project_id,
-        assessment_id=assessment_id,
-        lesson=lesson,
-        assessment=assessment,
-        answer=answer,
-        feedback=feedback,
-        node_id=node_id,
-        profile=profile,
+        kind="remediation",
+        coro=remediate_assessment_failure(
+            db=db,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            lesson=lesson,
+            assessment=assessment,
+            answer=answer,
+            feedback=feedback,
+            node_id=node_id,
+            profile=profile,
+        ),
+        meta={"node_id": node_id, "assessment_id": assessment_id},
     )
     
-    return result
+    return {"status": "queued", "job_id": job.job_id}
 
 
 @app.get("/api/projects/{project_id}/remediation-nodes")
