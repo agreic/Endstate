@@ -44,21 +44,25 @@ PROMPTS: Dict[str, dict] = {
         "version": "capstone_eval_v2",
         "template": (
             "You are a strict capstone evaluator.\n"
-            "Return ONLY valid JSON. No markdown. No extra text.\n"
-            "Grade ONLY using the provided submission text.\n"
-            "If evidence is not explicitly stated in the submission, it does NOT exist.\n\n"
+            "Return ONLY valid JSON. No markdown. No explanations.\n"
+            "Evaluate strictly based on the submission text.\n"
+            "If something is not explicitly stated, it does NOT exist.\n\n"
+
             "PROJECT BRIEF:\n{project_brief}\n\n"
             "REQUIRED SKILLS:\n{skills}\n\n"
             "SUBMISSION:\n{submission}\n\n"
+
             "EVALUATION RULES:\n"
-            "- For EACH required skill, you must provide a direct quote from the submission as evidence.\n"
-            "- If you cannot quote it, set that skill to \"Missing - not evidenced in submission.\".\n"
-            "- Penalize vague or inflated phrases like \"SOTA\", \"optimized\", \"robust\", \"worked perfectly\".\n"
-            "- Missing implementation details must reduce scores.\n"
-            "- If 2 or more skills are Missing, overall score must be <= 0.49.\n"
-            "- The \"criteria\" section scores must be consistent with the overall score.\n\n"
-            "Return JSON with EXACTLY these keys.\n"
-            "Do not wrap in markdown fences. Output must start with {{ and end with }}.\n"
+            "- Every claimed skill must be supported by a direct quote from the submission.\n"
+            "- If a skill is not clearly supported, mark it as \"Missing - not evidenced in submission\".\n"
+            "- Penalize vague claims such as \"optimized\", \"robust\", \"state-of-the-art\", or \"worked perfectly\".\n"
+            "- Missing implementation details must reduce the score.\n"
+            "- If 2 or more skills are missing, overall score must be <= 0.49.\n"
+            "- Criteria scores must logically align with the overall score.\n\n"
+
+            "Return a JSON object with exactly these keys:\n"
+            "score, criteria, skill_evidence, overall_feedback, suggestions\n\n"
+
             "{{\n"
             "  \"score\": 0.0,\n"
             "  \"criteria\": {{\n"
@@ -67,13 +71,14 @@ PROMPTS: Dict[str, dict] = {
             "    \"completeness\": {{\"score\": 0.0, \"strengths\": [], \"weaknesses\": [], \"suggestions\": []}}\n"
             "  }},\n"
             "  \"skill_evidence\": {{\n"
-            "    \"Skill Name\": \"Direct quote from submission, or Missing - not evidenced in submission.\"\n"
+            "    \"Skill Name\": \"Direct quote from submission, or Missing - not evidenced in submission\"\n"
             "  }},\n"
             "  \"overall_feedback\": \"\",\n"
             "  \"suggestions\": []\n"
             "}}\n"
         ),
     },
+
 
     "kg_quality": {
         "version": "kg_quality_v1",
