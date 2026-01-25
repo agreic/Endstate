@@ -2,18 +2,20 @@
 Neo4j database client for Endstate.
 Provides connection management and graph operations.
 """
+from __future__ import annotations
+
 import json
 import re
 from typing import Optional, Any
-
-DEFAULT_PROJECT_ID = "project-all"
-DEFAULT_PROJECT_NAME = "All"
 
 from langchain_neo4j import Neo4jGraph
 from neo4j import GraphDatabase, Result, RoutingControl
 from neo4j.time import DateTime
 
 from ..config import Neo4jConfig, config
+
+DEFAULT_PROJECT_ID = "project-all"
+DEFAULT_PROJECT_NAME = "All"
 
 
 def _serialize_neo4j_value(value: Any) -> Any:

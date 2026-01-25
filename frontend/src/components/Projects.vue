@@ -56,7 +56,6 @@ const activeLessons = computed(() => lessons.value.filter((lesson) => !lesson.ar
 const archivedLessons = computed(() => lessons.value.filter((lesson) => lesson.archived));
 const activeAssessments = computed(() => assessments.value.filter((assessment) => !assessment.archived));
 const archivedAssessments = computed(() => assessments.value.filter((assessment) => assessment.archived));
-const latestSubmission = computed(() => capstoneSubmissions.value[0] || null);
 const isCapstoneComplete = computed(() => Boolean(selectedProject.value?.capstone?.passed));
 
 const SKILL_LEVELS = ["Beginner", "Intermediate", "Experienced", "Advanced"];
@@ -407,7 +406,7 @@ const isAssessmentJobActive = (lessonId: string) => {
 
 const isDefaultProject = computed(() => {
   if (!selectedProject.value) return false;
-  return selectedProject.value.session_id === DEFAULT_PROJECT_ID || Boolean(selectedProject.value.is_default);
+  return selectedProject.value.session_id === DEFAULT_PROJECT_ID;
 });
 const capstoneHeaderClass = computed(() =>
   isCapstoneComplete.value ? "bg-gradient-to-r from-emerald-500 to-emerald-600" : "bg-gradient-to-r from-primary-500 to-primary-600",

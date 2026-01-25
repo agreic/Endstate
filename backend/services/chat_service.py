@@ -593,13 +593,13 @@ class ChatService:
             result = await evaluate_project_alignment(user_goal, project_info)
             if "error" in result:
                 return
-            prompt_version = str(result.get("prompt_version", "unknown"))
+            str(result.get("prompt_version", "unknown"))
 
         async def _log_kg_quality():
             result = await evaluate_kg_quality(project_info, summary)
             if "error" in result:
                 return
-            prompt_version = str(result.get("prompt_version", "unknown"))
+            str(result.get("prompt_version", "unknown"))
 
         try:
             loop = asyncio.get_running_loop()

@@ -5,7 +5,6 @@ Generate and evaluate assessments for lessons.
 from __future__ import annotations
 
 import asyncio
-import json
 
 from backend.config import config
 from backend.llm.provider import get_llm

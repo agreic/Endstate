@@ -5,30 +5,28 @@ Knowledge-graph powered learning platform with AI-guided project creation and it
 ## The Endstate Loop
 
 ```
-Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons → Assessments → Capstone → Evaluation → Complete
+Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons → Assessments → Capstone → Complete
 ```
 
 ## Key Features
 
 ### 1. Conversational Project Discovery
-- Chat with the Socratic interviewer to clarify goals
-- Click “Suggest Projects” to generate 3 concrete options
-- Select a proposal card to create a project (no “I accept” typing)
+- Socratic interviewer clarifies goals through chat
+- "Suggest Projects" generates 3 concrete options
+- Select a proposal card to create a project
 
 ### 2. Skill-Graph Learning Path
 - Visual knowledge graph of skills and concepts
-- Dependencies between skills shown
+- Dependencies between skills explicitly shown
 - Lessons and assessments linked to projects
 
 ### 3. Iterative Capstone Evaluation
 - Text-based submissions (flexible, LLM-evaluatable)
-- Rubric-based LLM evaluation with skill-to-evidence mapping
-- Constructive feedback for improvement
-- Unlimited resubmissions until complete
+- Rubric-based evaluation with skill-to-evidence mapping
+- Constructive feedback with unlimited resubmissions
 
 ### 4. Persistent Chat Archive
 - All conversations saved alongside projects
-- Projects tab shows chat history per project
 - Review learning journey anytime
 
 ## Architecture
@@ -36,28 +34,14 @@ Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons 
 ```
 endstate/
 ├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
-│   ├── src/
-│   │   ├── components/ # Vue components
-│   │   │   ├── ChatBox.vue        # Chat UI
-│   │   │   ├── KnowledgeGraph.vue # Graph visualization
-│   │   │   ├── Projects.vue       # Project management
-│   │   │   ├── CapstoneSubmission.vue  # Submission UI
-│   │   │   └── EvaluationResult.vue    # Feedback display
-│   │   ├── composables/  # Vue composables
-│   │   │   └── useChat.ts # Chat state + SSE
-│   │   └── services/     # API client
-│   │       └── api.ts
-│   └── dist/
+│   ├── src/components/ # ChatBox, KnowledgeGraph, Projects, etc.
+│   ├── src/composables/# useChat (SSE state management)
+│   └── src/services/   # API client
 ├── backend/            # Python FastAPI
-│   ├── services/
-│   │   ├── chat_service.py      # Chat + SSE + background tasks
-│   │   ├── evaluation_service.py # Rubric-based evaluator
-│   │   └── summary_cache.py      # Project + chat storage
-│   ├── db/
-│   │   └── neo4j_client.py       # Neo4j operations
-│   ├── llm/
-│   │   └── provider.py           # Ollama/Gemini
-│   └── main.py                   # FastAPI app
+│   ├── services/       # chat, evaluation, lesson, knowledge_graph
+│   ├── db/             # neo4j_client
+│   ├── llm/            # provider (Ollama/Gemini)
+│   └── main.py         # FastAPI app
 └── tests/
 ```
 
@@ -65,8 +49,8 @@ endstate/
 
 - Real-time updates via Server-Sent Events (SSE)
 - Idempotent message sending prevents duplicates
-- Project suggestions are requested explicitly and returned as cards
-- Chat history stored in Neo4j alongside the project
+- Project suggestions requested explicitly via "Suggest Projects"
+- Chat history stored in Neo4j alongside projects
 
 ## Knowledge Graph
 
@@ -77,10 +61,10 @@ endstate/
 
 ## Capstone Evaluation
 
-- Submit a text solution explaining skill application
+- Submit text solution explaining skill application
 - LLM evaluates against rubric (skill application, understanding, completeness)
-- Feedback delivered with suggestions for improvement
-- Resubmit and iterate until complete (score ≥ 0.7 + all skills evidenced)
+- Feedback with suggestions for improvement
+- Resubmit until complete (score ≥ 0.7 + all skills evidenced)
 
 ## Installation
 
@@ -92,15 +76,15 @@ uv sync
 cd frontend && npm install
 ```
 
-## Running the Application
+## Running
 
-### Development Mode (Recommended)
+### Development Mode
 
 ```bash
-# Terminal 1: Start backend with hot reload
+# Terminal 1: Backend with hot reload
 uv run uvicorn backend.main:app --reload
 
-# Terminal 2: Start frontend dev server
+# Terminal 2: Frontend dev server
 cd frontend && npm run dev
 ```
 
@@ -120,10 +104,9 @@ docker compose up -d --build --force-recreate
 |----------|--------|-------------|
 | `/api/chat/{id}/stream` | GET | SSE event stream |
 | `/api/chat/{id}/messages` | POST | Send message |
-| `/api/chat/{id}/messages` | GET | Get message history |
 | `/api/chat/{id}/reset` | POST | Reset session |
-| `/api/suggest-projects` | POST | Generate project options from chat history |
-| `/api/suggest-projects/accept` | POST | Accept a project option |
+| `/api/suggest-projects` | POST | Generate project options |
+| `/api/suggest-projects/accept` | POST | Accept a project |
 
 ### Knowledge Graph
 
@@ -143,10 +126,9 @@ docker compose up -d --build --force-recreate
 
 ## Dependencies
 
-### Core
 - Python 3.11+
 - Vue 3 + TypeScript
 - Neo4j database
 - LLM (Ollama or Gemini)
 
-### See `pyproject.toml` and `frontend/package.json` for full dependency lists.
+See `pyproject.toml` and `frontend/package.json` for full dependency lists.

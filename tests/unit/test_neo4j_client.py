@@ -168,7 +168,7 @@ class TestNeo4jClientQuery:
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)
 
-        result = client.query("MATCH (n) RETURN count(n) as count")
+        client.query("MATCH (n) RETURN count(n) as count")
 
         mock_graph.query.assert_called_once_with(
             "MATCH (n) RETURN count(n) as count",

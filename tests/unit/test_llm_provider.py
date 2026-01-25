@@ -123,7 +123,7 @@ class TestGetOllamaLLM:
             ),
         )
 
-        result = _get_ollama_llm(llm_config)
+        _get_ollama_llm(llm_config)
 
         mock_chat_ollama.assert_called_once()
         call_kwargs = mock_chat_ollama.call_args[1]
@@ -142,7 +142,7 @@ class TestGetOllamaLLM:
             ollama=OllamaConfig(model="llama3.2"),
         )
 
-        result = _get_ollama_llm(llm_config, model="mistral")
+        _get_ollama_llm(llm_config, model="mistral")
 
         call_kwargs = mock_chat_ollama.call_args[1]
         assert call_kwargs["model"] == "mistral"
@@ -158,7 +158,7 @@ class TestGetOllamaLLM:
             ollama=OllamaConfig(base_url="http://custom:11434"),
         )
 
-        result = _get_ollama_llm(llm_config, base_url="http://override:11434")
+        _get_ollama_llm(llm_config, base_url="http://override:11434")
 
         call_kwargs = mock_chat_ollama.call_args[1]
         assert call_kwargs["base_url"] == "http://override:11434"
@@ -196,7 +196,7 @@ class TestGetGeminiLLM:
             gemini=GeminiConfig(model="gemini-pro"),
         )
 
-        result = _get_gemini_llm(llm_config)
+        _get_gemini_llm(llm_config)
 
         mock_chat_genai.assert_called_once()
         call_kwargs = mock_chat_genai.call_args[1]
@@ -213,9 +213,9 @@ class TestGetGeminiLLM:
             gemini=GeminiConfig(model="gemini-pro"),
         )
 
-        result = _get_gemini_llm(llm_config, api_key="param_key")
+        _get_gemini_llm(llm_config, api_key="param_key")
 
-        call_kwargs = mock_chat_genai.call_args[1]
+        mock_chat_genai.call_args[1]
         assert os.environ.get("GOOGLE_API_KEY") == "param_key"
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
@@ -245,7 +245,7 @@ class TestGetGeminiLLM:
             ),
         )
 
-        result = _get_gemini_llm(llm_config, model="gemini-ultra")
+        _get_gemini_llm(llm_config, model="gemini-ultra")
 
         call_kwargs = mock_chat_genai.call_args[1]
         assert call_kwargs["model"] == "gemini-ultra"

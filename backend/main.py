@@ -894,7 +894,6 @@ async def generate_node_lesson(node_id: str, request: LessonRequest):
 async def generate_node_lessons(node_id: str):
     """Generate lessons for all projects connected to a KG node."""
     from backend.db.neo4j_client import Neo4jClient, _serialize_node
-    from neo4j.time import DateTime
 
     db = Neo4jClient()
     db.ensure_default_project()
@@ -948,7 +947,6 @@ async def generate_node_lessons(node_id: str):
 async def queue_project_lesson(project_id: str, request: LessonGenerateRequest):
     """Queue lesson generation for a project node."""
     from backend.db.neo4j_client import Neo4jClient, _serialize_node
-    from neo4j.time import DateTime
 
     db = Neo4jClient()
     if project_id == DEFAULT_PROJECT_ID:
@@ -1109,7 +1107,6 @@ def delete_project_assessment(project_id: str, assessment_id: str):
 async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
     """Submit a capstone project for evaluation."""
     from backend.db.neo4j_client import Neo4jClient
-    from neo4j.time import DateTime
     from backend.config import config
 
     db = Neo4jClient()
@@ -1167,10 +1164,10 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
             skill_evidence = result.get("skill_evidence", {}) if isinstance(result.get("skill_evidence"), dict) else {}
             if required_skills:
                 covered = sum(1 for value in skill_evidence.values() if value and "missing" not in str(value).lower())
-                coverage = covered / max(len(required_skills), 1)
+                covered / max(len(required_skills), 1)
             else:
-                coverage = 1.0
-            prompt_version = str(result.get("prompt_version", "unknown"))
+                pass
+            str(result.get("prompt_version", "unknown"))
             previous_score = None
             submissions = db.list_project_submissions(project_id)
             for submission in submissions:
@@ -1184,7 +1181,7 @@ async def submit_capstone(project_id: str, request: CapstoneSubmissionRequest):
                     except (TypeError, ValueError):
                         continue
             if previous_score is not None:
-                improvement = safe_score - previous_score
+                safe_score - previous_score
             capstone = summary.get("capstone") if isinstance(summary.get("capstone"), dict) else {}
             capstone.update({
                 "last_submission_id": submission_id,
@@ -1325,7 +1322,7 @@ async def create_project_assessment(project_id: str, request: AssessmentRequest)
         raise HTTPException(status_code=500, detail=str(e))
 
     lessons = db.list_project_lessons(project_id)
-    lesson = next((l for l in lessons if l.get("id") == request.lesson_id), None)
+    lesson = next((lesson_item for lesson_item in lessons if lesson_item.get("id") == request.lesson_id), None)
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
@@ -1358,7 +1355,7 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
 
     summary_json = summary_records[0].get("summary_json") or "{}"
     try:
-        summary = json.loads(summary_json)
+        json.loads(summary_json)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1368,7 +1365,7 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
         raise HTTPException(status_code=404, detail="Assessment not found")
 
     lessons = db.list_project_lessons(project_id)
-    lesson = next((l for l in lessons if l.get("id") == assessment.get("lesson_id")), None)
+    lesson = next((lesson_item for lesson_item in lessons if lesson_item.get("id") == assessment.get("lesson_id")), None)
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
@@ -1511,7 +1508,7 @@ async def start_project(project_id: str):
             for node in doc.nodes:
                 node_refs.append({"label": node.type, "name": node.properties.get("name")})
         db.connect_project_to_nodes(project_id, node_refs)
-        summary_extra = db.upsert_project_nodes_from_summary(project_id, summary)
+        db.upsert_project_nodes_from_summary(project_id, summary)
         graph_counts = db.get_project_graph_counts(project_id)
         node_count = graph_counts.get("nodes", 0)
         rel_count = graph_counts.get("relationships", 0)
