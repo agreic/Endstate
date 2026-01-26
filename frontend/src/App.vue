@@ -140,7 +140,7 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
       <div v-if="isConfigMissing" class="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-900/30 px-4 py-2 flex items-center justify-between">
         <div class="flex items-center gap-2 text-amber-800 dark:text-amber-400">
           <AlertTriangle :size="16" />
-          <span class="text-xs font-medium">Cloud configuration missing. Please set your OpenRouter API Key and/or Neo4j credentials in Settings.</span>
+          <span class="text-xs font-medium">Cloud configuration missing. Please set your Gemini API Key and Neo4j credentials (optional) in Settings.</span>
         </div>
         <button 
           @click="showSettings = true"

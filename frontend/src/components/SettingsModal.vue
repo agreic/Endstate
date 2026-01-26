@@ -141,7 +141,7 @@ onMounted(() => {
             
             <div class="space-y-3">
               <div>
-                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">OpenRouter API Key</label>
+                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Gemini API Key</label>
                 <input 
                   v-model="geminiApiKey"
                   type="password"
