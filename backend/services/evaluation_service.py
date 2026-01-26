@@ -193,7 +193,7 @@ def build_project_brief(summary: dict) -> str:
     ]
     milestones = agreed.get("milestones") if isinstance(agreed.get("milestones"), list) else []
     if milestones:
-        parts.append("Milestones: " + "; ".join(milestones))
+        parts.append("Milestones: " + "; ".join(str(m) for m in milestones if m is not None))
     return "\n".join([part for part in parts if part.strip()])
 
 
@@ -232,9 +232,9 @@ async def evaluate_kg_quality(project: dict, summary: dict) -> dict[str, Any]:
     prompt = template.format(
         project_name=project.get("name", ""),
         project_description=project.get("description", ""),
-        skills=", ".join(skills),
-        topics=", ".join(topics),
-        concepts=", ".join(concepts),
+        skills=", ".join(str(s) for s in skills if s is not None),
+        topics=", ".join(str(t) for t in topics if t is not None),
+        concepts=", ".join(str(c) for c in concepts if c is not None),
     )
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=EVALUATION_TIMEOUT)

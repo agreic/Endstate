@@ -170,6 +170,18 @@ class Neo4jClient:
             {"label": label},
         )
         return bool(result and result[0].get("count", 0))
+
+    def relationship_type_exists(self, rel_type: str) -> bool:
+        """Check whether a relationship type exists in the database."""
+        result = self.query(
+            """
+            CALL db.relationshipTypes() YIELD relationshipType
+            WHERE relationshipType = $rel_type
+            RETURN count(relationshipType) as count
+            """,
+            {"rel_type": rel_type},
+        )
+        return bool(result and result[0].get("count", 0))
     
     def clean_graph(self) -> None:
         """Delete all nodes and relationships from the graph."""
@@ -917,7 +929,7 @@ class Neo4jClient:
         self.upsert_project_summary(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, summary_json, is_default=True)
 
     def ensure_project_nodes(self) -> None:
-        """Ensure every project summary has a KG project node."""
+        """Ensure every project summary has a KG project node and prune redundant relationships."""
         self.query(
             """
             MATCH (ps:ProjectSummary)
@@ -929,6 +941,22 @@ class Neo4jClient:
             MERGE (ps)-[:SUMMARY_FOR]->(p)
             """
         )
+        # Prune redundant HAS_NODE if more specific links exist to avoid double counting
+        if self.relationship_type_exists("HAS_NODE"):
+            rel_types = []
+            for rel in ["HAS_SKILL", "HAS_CONCEPT", "HAS_TOPIC", "HAS_MILESTONE"]:
+                if self.relationship_type_exists(rel):
+                    rel_types.append(rel)
+            
+            if rel_types:
+                rel_pattern = "|".join(f":{r}" for r in rel_types)
+                self.query(
+                    f"""
+                    MATCH (p:Project)-[r:HAS_NODE]->(n)
+                    WHERE (p)-[{rel_pattern}]->(n)
+                    DELETE r
+                    """
+                )
 
     def upsert_project_profile_node(self, project_id: str, profile: dict) -> None:
         """Create or update a project profile node and link to project."""
@@ -1060,7 +1088,6 @@ class Neo4jClient:
                 MATCH (p:Project {{id: $project_id}})
                 UNWIND $names as node_name
                 MATCH (n:{label} {{name: node_name}})
-                MERGE (p)-[:HAS_NODE]->(n)
                 MERGE (p)-[:{rel_type}]->(n)
                 """,
                 {"project_id": project_id, "names": list(names)},
@@ -1068,26 +1095,47 @@ class Neo4jClient:
 
     def list_project_nodes(self, project_id: str) -> list[dict]:
         """List KG nodes connected to a project."""
-        result = self.query(
-            """
-            MATCH (p:Project {id: $project_id})-[:HAS_NODE]->(n)
-            RETURN n
-            ORDER BY n.name ASC
-            """,
-            {"project_id": project_id},
-        )
-        if not result:
+        # Check which relationship types exist to avoid Neo4j warnings
+        rel_types = []
+        for rel in ["HAS_SKILL", "HAS_CONCEPT", "HAS_TOPIC", "HAS_MILESTONE", "HAS_NODE"]:
+            if self.relationship_type_exists(rel):
+                rel_types.append(rel)
+        
+        if not rel_types:
+            # Check lessons as fallback
             result = self.query(
                 """
                 MATCH (p:Project {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)-[:ABOUT]->(n)
                 WITH DISTINCT p, n
-                MERGE (p)-[:HAS_NODE]->(n)
                 RETURN n
                 ORDER BY n.name ASC
                 """,
                 {"project_id": project_id},
             )
-        return [_serialize_node(row["n"]) for row in result]
+        else:
+            rel_pattern = "|".join(f":{r}" for r in rel_types)
+            result = self.query(
+                f"""
+                MATCH (p:Project {{id: $project_id}})-[{rel_pattern}]->(n)
+                RETURN n
+                ORDER BY n.name ASC
+                """,
+                {"project_id": project_id},
+            )
+            
+            if not result:
+                # Fallback/Migration: If no direct links, check lessons
+                result = self.query(
+                    """
+                    MATCH (p:Project {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)-[:ABOUT]->(n)
+                    WITH DISTINCT p, n
+                    RETURN n
+                    ORDER BY n.name ASC
+                    """,
+                    {"project_id": project_id},
+                )
+        
+        return [_serialize_node(r["n"]) for r in result] if result else []
 
     def clear_project_nodes(self, project_id: str) -> None:
         """Remove project links and delete nodes unique to this project."""
@@ -1742,3 +1790,213 @@ class Neo4jClient:
             {"node_id": node_id}
         )
         return result
+
+    # =========================================================================
+    # Remediation methods
+    # =========================================================================
+
+    def create_remediation_node(
+        self,
+        project_id: str,
+        node_id: str,
+        title: str,
+        description: str,
+        explanation: str,
+        diagnosis: str,
+        severity: str,
+        before_node_id: str,
+        triggered_by_assessment: str,
+    ) -> dict:
+        """
+        Create a remediation lesson node and link to the project.
+
+        Args:
+            project_id: Project this remediation belongs to
+            node_id: ID for the new remediation node
+            title: Short title for the remediation lesson
+            description: Description of what this remediation covers
+            explanation: Focused lesson content
+            diagnosis: Original diagnosis text
+            severity: "minor", "moderate", or "major"
+            before_node_id: The node to insert this remediation before
+            triggered_by_assessment: The assessment that triggered this
+
+        Returns:
+            Dictionary with created node info
+        """
+        self.query(
+            """
+            MATCH (ps:ProjectSummary) WHERE ps.id = $project_id OR elementId(ps) = $project_id
+            MATCH (p:Project) WHERE p.id = $project_id OR elementId(p) = $project_id
+            CREATE (r:ProjectLesson:Concept {
+                id: $node_id,
+                title: $title,
+                name: $title,
+                description: $description,
+                explanation: $explanation,
+                diagnosis: $diagnosis,
+                severity: $severity,
+                before_node_id: $before_node_id,
+                triggered_by_assessment: $triggered_by_assessment,
+                node_type: 'remediation',
+                is_remediation: true,
+                created_at: datetime(),
+                archived: false,
+                version: 1
+            })
+            CREATE (p)-[:HAS_LESSON {version: 1, created_at: datetime()}]->(r)
+            CREATE (ps)-[:HAS_LESSON]->(r)
+            """,
+            {
+                "project_id": project_id,
+                "node_id": node_id,
+                "title": title,
+                "description": description,
+                "explanation": explanation,
+                "diagnosis": diagnosis,
+                "severity": severity,
+                "before_node_id": before_node_id,
+                "triggered_by_assessment": triggered_by_assessment,
+            },
+        )
+
+        self.query(
+            """
+            MATCH (r:ProjectLesson {id: $remediation_id})
+            MATCH (target)
+            WHERE target.id = $before_node_id OR elementId(target) = $before_node_id
+            MERGE (r)-[:PREREQUISITE_FOR {version: 1, created_at: datetime()}]->(target)
+            """,
+            {
+                "remediation_id": node_id,
+                "before_node_id": before_node_id,
+            },
+        )
+
+        return {
+            "id": node_id,
+            "title": title,
+            "before_node_id": before_node_id,
+            "created": True,
+        }
+
+    def get_prerequisite_nodes(self, node_id: str) -> list[dict]:
+        """Get prerequisite/dependency nodes for a given node."""
+        # Check which relationship types exist to avoid Neo4j warnings
+        rel_types = []
+        for rel in ["PREREQUISITE_FOR", "REQUIRES", "DEPENDS_ON"]:
+            if self.relationship_type_exists(rel):
+                rel_types.append(rel)
+        
+        if not rel_types:
+            return []
+        
+        rel_pattern = "|".join(f":{r}" for r in rel_types)
+        result = self.query(
+            f"""
+            MATCH (prereq)-[{rel_pattern}]->(n)
+            WHERE n.id = $node_id OR elementId(n) = $node_id
+            RETURN COALESCE(prereq.id, elementId(prereq)) as id,
+                   prereq.name as name,
+                   labels(prereq) as labels
+            """,
+            {"node_id": node_id},
+        )
+        return result
+
+    def list_remediation_nodes(self, project_id: str) -> list[dict]:
+        """List all remediation nodes for a project (legacy and new)."""
+        # Supports old RemediationConcept and new ProjectLesson with is_remediation=true
+        result = self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})-[:HAS_REMEDIATION|HAS_LESSON]->(r)
+            WHERE (r:RemediationConcept) OR (r:ProjectLesson AND r.is_remediation = true)
+            RETURN r.id as id,
+                   COALESCE(r.title, r.name) as name,
+                   r.description as description,
+                   r.explanation as explanation,
+                   r.diagnosis as diagnosis,
+                   r.severity as severity,
+                   r.before_node_id as before_node_id,
+                   r.triggered_by_assessment as triggered_by_assessment,
+                   r.created_at as created_at
+            ORDER BY r.created_at DESC
+            """,
+            {"project_id": project_id},
+        )
+        return result
+        return result
+
+    def track_remediation_event(
+        self,
+        project_id: str,
+        assessment_id: str,
+        remediation_node_id: str,
+        diagnosis_summary: str,
+        severity: str,
+    ) -> None:
+        """Log a remediation event for auditability."""
+        self.query(
+            """
+            MATCH (ps:ProjectSummary {id: $project_id})
+            CREATE (e:RemediationEvent {
+                id: $event_id,
+                project_id: $project_id,
+                assessment_id: $assessment_id,
+                remediation_node_id: $remediation_node_id,
+                diagnosis_summary: $diagnosis_summary,
+                severity: $severity,
+                created_at: datetime()
+            })
+            CREATE (ps)-[:HAS_REMEDIATION_EVENT]->(e)
+            """,
+            {
+                "project_id": project_id,
+                "event_id": f"rem-event-{assessment_id[-8:]}",
+                "assessment_id": assessment_id,
+                "remediation_node_id": remediation_node_id,
+                "diagnosis_summary": diagnosis_summary,
+                "severity": severity,
+            },
+        )
+
+    def get_assessment_by_id(self, assessment_id: str) -> Optional[dict]:
+        """Get an assessment by its ID."""
+        result = self.query(
+            """
+            MATCH (a:ProjectAssessment {id: $assessment_id})
+            OPTIONAL MATCH (a)-[:ASSESSMENT_FOR]->(l:ProjectLesson)
+            RETURN a.id as id,
+                   a.lesson_id as lesson_id,
+                   a.prompt as prompt,
+                   a.status as status,
+                   a.feedback as feedback,
+                   a.answer as answer,
+                   l.node_id as node_id,
+                   l.title as lesson_title,
+                   l.explanation as lesson_explanation
+            """,
+            {"assessment_id": assessment_id},
+        )
+        return result[0] if result else None
+
+    def get_remediation_node(self, node_id: str) -> Optional[dict]:
+        """Get a remediation node by ID (legacy or new)."""
+        result = self.query(
+            """
+            MATCH (r)
+            WHERE (r:RemediationConcept AND r.id = $node_id) 
+               OR (r:ProjectLesson AND r.is_remediation = true AND r.id = $node_id)
+            RETURN r.id as id,
+                   COALESCE(r.title, r.name) as name,
+                   r.description as description,
+                   r.explanation as explanation,
+                   r.diagnosis as diagnosis,
+                   r.severity as severity,
+                   r.before_node_id as before_node_id,
+                   r.triggered_by_assessment as triggered_by_assessment,
+                   r.created_at as created_at
+            """,
+            {"node_id": node_id},
+        )
+        return result[0] if result else None

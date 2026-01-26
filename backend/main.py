@@ -1369,23 +1369,163 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
-    result = await evaluate_assessment(lesson, assessment, request.answer)
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+    async def _task():
+        result = await evaluate_assessment(lesson, assessment, request.answer)
+        if "error" in result:
+            raise RuntimeError(result["error"])
 
-    status = result.get("result", "fail")
-    archive_assessment = status == "pass"
-    db.update_project_assessment(
-        assessment_id,
-        status,
-        result.get("feedback", ""),
-        request.answer,
-        archived=archive_assessment,
+        status = result.get("result", "fail")
+        archive_assessment = status == "pass"
+        db.update_project_assessment(
+            assessment_id,
+            status,
+            result.get("feedback", ""),
+            request.answer,
+            archived=archive_assessment,
+        )
+        if archive_assessment:
+            db.archive_project_lesson(project_id, assessment.get("lesson_id"))
+
+        return {
+            "assessment_id": assessment_id,
+            "result": status,
+            "feedback": result.get("feedback"),
+            "remediation_available": status == "fail",
+        }
+
+    job = task_registry.register(
+        project_id, 
+        "assessment-eval", 
+        _task(), 
+        meta={"assessment_id": assessment_id}
     )
-    if archive_assessment:
-        db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 
-    return {"assessment_id": assessment_id, "result": status, "feedback": result.get("feedback")}
+    return {"status": "queued", "job_id": job.job_id}
+
+
+# =============================================================================
+# Remediation endpoints
+# =============================================================================
+
+
+@app.post("/api/projects/{project_id}/assessments/{assessment_id}/remediate")
+async def remediate_assessment(project_id: str, assessment_id: str):
+    """Trigger remediation for a failed assessment."""
+    from backend.db.neo4j_client import Neo4jClient
+    from backend.services.remediation_service import remediate_assessment_failure
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
+    
+    # Get project summary for profile
+    summary_records = db.get_project_summary(project_id)
+    if not summary_records:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    summary_json = summary_records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    profile = summary.get("user_profile")
+    
+    # Get assessment details
+    assessment_data = db.get_assessment_by_id(assessment_id)
+    if not assessment_data:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    
+    if assessment_data.get("status") != "fail":
+        raise HTTPException(status_code=400, detail="Remediation only available for failed assessments")
+    
+    # Build lesson and assessment dicts for remediation service
+    lesson = {
+        "title": assessment_data.get("lesson_title", ""),
+        "explanation": assessment_data.get("lesson_explanation", ""),
+    }
+    assessment = {
+        "prompt": assessment_data.get("prompt", ""),
+    }
+    answer = assessment_data.get("answer", "")
+    feedback = assessment_data.get("feedback", "")
+    node_id = assessment_data.get("node_id", "")
+    
+    # Run remediation pipeline as a background task
+    job = task_registry.register(
+        project_id=project_id,
+        kind="remediation",
+        coro=remediate_assessment_failure(
+            db=db,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            lesson=lesson,
+            assessment=assessment,
+            answer=answer,
+            feedback=feedback,
+            node_id=node_id,
+            profile=profile,
+        ),
+        meta={"node_id": node_id, "assessment_id": assessment_id},
+    )
+    
+    return {"status": "queued", "job_id": job.job_id}
+
+
+@app.get("/api/projects/{project_id}/remediation-nodes")
+def list_project_remediation_nodes(project_id: str):
+    """List remediation nodes for a project."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
+    
+    records = db.list_remediation_nodes(project_id)
+    nodes = []
+    for row in records:
+        created_at = row.get("created_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        nodes.append({
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "description": row.get("description"),
+            "severity": row.get("severity"),
+            "before_node_id": row.get("before_node_id"),
+            "triggered_by_assessment": row.get("triggered_by_assessment"),
+            "created_at": created_at,
+        })
+    return {"remediation_nodes": nodes}
+
+
+@app.get("/api/remediation/{node_id}")
+def get_remediation_node(node_id: str):
+    """Get remediation node details."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    node = db.get_remediation_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Remediation node not found")
+    
+    created_at = node.get("created_at")
+    if isinstance(created_at, DateTime):
+        created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    
+    return {
+        "id": node.get("id"),
+        "name": node.get("name"),
+        "description": node.get("description"),
+        "explanation": node.get("explanation"),
+        "diagnosis": node.get("diagnosis"),
+        "severity": node.get("severity"),
+        "before_node_id": node.get("before_node_id"),
+        "triggered_by_assessment": node.get("triggered_by_assessment"),
+        "created_at": created_at,
+    }
 
 
 @app.get("/api/jobs/{job_id}")

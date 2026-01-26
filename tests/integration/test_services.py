@@ -37,9 +37,9 @@ def test_config():
     """Create test configuration."""
     return Config(
         neo4j=Neo4jConfig(
-            uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
-            username=os.getenv("NEO4J_USERNAME", "neo4j"),
-            password=os.getenv("NEO4J_PASSWORD", "password123"),
+            _uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            _username=os.getenv("NEO4J_USERNAME", "neo4j"),
+            _password=os.getenv("NEO4J_PASSWORD", "password123"),
             database="neo4j",
         ),
         llm=LLMConfig(

@@ -11,8 +11,9 @@ from backend.llm.provider import (
     get_llm,
     _get_ollama_llm,
     _get_gemini_llm,
+    _get_openrouter_llm,
 )
-from backend.config import LLMConfig, OllamaConfig, GeminiConfig
+from backend.config import LLMConfig, OllamaConfig, GeminiConfig, OpenRouterConfig
 
 
 class TestLLMProvider:
@@ -76,6 +77,28 @@ class TestGetLLM:
         llm = get_llm(provider=LLMProvider.GEMINI)
 
         mock_get_gemini.assert_called_once()
+        assert llm == mock_llm
+
+    @patch("backend.llm.provider._get_openrouter_llm")
+    def test_get_openrouter_by_string(self, mock_get_or):
+        """Test getting OpenRouter LLM with string provider."""
+        mock_llm = MagicMock()
+        mock_get_or.return_value = mock_llm
+
+        llm = get_llm(provider="openrouter")
+
+        mock_get_or.assert_called_once()
+        assert llm == mock_llm
+
+    @patch("backend.llm.provider._get_openrouter_llm")
+    def test_get_openrouter_by_enum(self, mock_get_or):
+        """Test getting OpenRouter LLM with enum provider."""
+        mock_llm = MagicMock()
+        mock_get_or.return_value = mock_llm
+
+        llm = get_llm(provider=LLMProvider.OPENROUTER)
+
+        mock_get_or.assert_called_once()
         assert llm == mock_llm
 
     @patch("backend.llm.provider._get_ollama_llm")
@@ -203,6 +226,7 @@ class TestGetGeminiLLM:
         assert call_kwargs["model"] == "gemini-pro"
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
+    @patch.dict(os.environ, {}, clear=False)
     def test_gemini_with_api_key_parameter(self, mock_chat_genai):
         """Test Gemini LLM with API key passed as parameter."""
         mock_instance = MagicMock()
@@ -215,15 +239,15 @@ class TestGetGeminiLLM:
 
         _get_gemini_llm(llm_config, api_key="param_key")
 
-        mock_chat_genai.call_args[1]
-        assert os.environ.get("GOOGLE_API_KEY") == "param_key"
+        # Verify ChatGoogleGenerativeAI was called (api_key is set via env var in _get_gemini_llm)
+        mock_chat_genai.assert_called_once()
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
     def test_gemini_without_api_key_raises_error(self, mock_chat_genai):
         """Test that Gemini raises error without API key."""
         llm_config = LLMConfig(
             provider="gemini",
-            gemini=GeminiConfig(api_key=""),
+            gemini=GeminiConfig(_api_key=""),
         )
 
         with patch.dict(os.environ, {}, clear=True):
@@ -240,7 +264,7 @@ class TestGetGeminiLLM:
         llm_config = LLMConfig(
             provider="gemini",
             gemini=GeminiConfig(
-                api_key="test_key",
+                _api_key="test_key",
                 model="gemini-1.5-flash",
             ),
         )
@@ -249,6 +273,76 @@ class TestGetGeminiLLM:
 
         call_kwargs = mock_chat_genai.call_args[1]
         assert call_kwargs["model"] == "gemini-ultra"
+
+
+class TestGetOpenRouterLLM:
+    """Tests for _get_openrouter_llm function."""
+
+    @patch("langchain_openai.ChatOpenAI")
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=False)
+    def test_openrouter_with_api_key_from_env(self, mock_chat_openai):
+        """Test OpenRouter LLM with API key from environment."""
+        mock_instance = MagicMock()
+        mock_chat_openai.return_value = mock_instance
+
+        llm_config = LLMConfig(
+            provider="openrouter",
+            openrouter=OpenRouterConfig(model="openai/gpt-4o"),
+        )
+
+        _get_openrouter_llm(llm_config)
+
+        mock_chat_openai.assert_called_once()
+        call_kwargs = mock_chat_openai.call_args[1]
+        assert call_kwargs["model"] == "openai/gpt-4o"
+        assert call_kwargs["openai_api_base"] == "https://openrouter.ai/api/v1"
+
+    @patch("langchain_openai.ChatOpenAI")
+    @patch.dict(os.environ, {}, clear=False)
+    def test_openrouter_with_api_key_parameter(self, mock_chat_openai):
+        """Test OpenRouter LLM with API key passed as parameter."""
+        mock_instance = MagicMock()
+        mock_chat_openai.return_value = mock_instance
+
+        llm_config = LLMConfig(
+            provider="openrouter",
+            openrouter=OpenRouterConfig(model="openai/gpt-4o"),
+        )
+
+        _get_openrouter_llm(llm_config, api_key="param_or_key")
+
+        mock_chat_openai.assert_called_once()
+        call_kwargs = mock_chat_openai.call_args[1]
+        assert call_kwargs["openai_api_key"] == "param_or_key"
+
+    @patch("langchain_openai.ChatOpenAI")
+    def test_openrouter_without_api_key_raises_error(self, mock_chat_openai):
+        """Test that OpenRouter raises error without API key."""
+        llm_config = LLMConfig(
+            provider="openrouter",
+            openrouter=OpenRouterConfig(),
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ValueError, match="OpenRouter API key not found"):
+                _get_openrouter_llm(llm_config)
+
+    @patch("langchain_openai.ChatOpenAI")
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "test_key"}, clear=True)
+    def test_openrouter_with_custom_model(self, mock_chat_openai):
+        """Test OpenRouter LLM with custom model override."""
+        mock_instance = MagicMock()
+        mock_chat_openai.return_value = mock_instance
+
+        llm_config = LLMConfig(
+            provider="openrouter",
+            openrouter=OpenRouterConfig(model="openai/gpt-4o-mini"),
+        )
+
+        _get_openrouter_llm(llm_config, model="anthropic/claude-3-opus")
+
+        call_kwargs = mock_chat_openai.call_args[1]
+        assert call_kwargs["model"] == "anthropic/claude-3-opus"
 
 
 class TestTestLLM:

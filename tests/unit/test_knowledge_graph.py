@@ -71,7 +71,7 @@ class TestKnowledgeGraphServiceInit:
     ):
         """Test initialization with custom configuration."""
         custom_config = Config(
-            neo4j=Neo4jConfig(uri="bolt://custom:7687"),
+            neo4j=Neo4jConfig(_uri="bolt://custom:7687"),
             llm=LLMConfig(provider="ollama"),
         )
         mock_llm = MagicMock()

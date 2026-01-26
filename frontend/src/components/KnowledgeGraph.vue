@@ -688,11 +688,14 @@ onUnmounted(() => {
 });
 
 const getConnectionCount = (nodeId: string): number => {
-  return graphData.value.links.filter((l) => {
+  const neighbors = new Set<string>();
+  graphData.value.links.forEach((l) => {
     const sourceId = typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
     const targetId = typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
-    return sourceId === nodeId || targetId === nodeId;
-  }).length;
+    if (sourceId === nodeId) neighbors.add(targetId);
+    if (targetId === nodeId) neighbors.add(sourceId);
+  });
+  return neighbors.size;
 };
 
 const clearSearch = () => {
@@ -722,6 +725,11 @@ const getDisplayLabels = (labels?: string[]): string[] => {
   if (!labels) return [];
   return labels.filter((label) => label !== "__Entity__");
 };
+
+const isProjectNode = computed(() => {
+  if (!selectedNode.value) return false;
+  return selectedNode.value.labels?.includes("Project") || selectedNode.value.labels?.includes("ProjectSummary");
+});
 </script>
 
 <template>
@@ -878,7 +886,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
+        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0 && !isProjectNode" class="mb-3">
           <button
             @click="showProperties = !showProperties"
             class="flex items-center gap-2 text-xs text-surface-500 font-medium"
@@ -893,7 +901,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div class="mt-3">
+        <div class="mt-3" v-if="!isProjectNode">
           <button
             @click="loadLesson"
             :disabled="lessonLoading"
@@ -916,9 +924,15 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </button>
         </div>
         
+        <div v-if="isProjectNode" class="p-3 bg-surface-50 rounded-xl border border-surface-100">
+          <p class="text-xs text-surface-500 leading-relaxed">
+            This is your project node. It represents the target goal of your learning journey.
+          </p>
+        </div>
+        
         <div class="mt-3 pt-3 border-t border-surface-100">
           <span class="text-xs text-surface-400">
-            Connected to {{ getConnectionCount(selectedNode.id) }} nodes
+            Connected to {{ getConnectionCount(selectedNode.id) }} node{{ getConnectionCount(selectedNode.id) === 1 ? '' : 's' }}
           </span>
         </div>
       </div>

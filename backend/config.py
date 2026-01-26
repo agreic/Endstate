@@ -17,6 +17,7 @@ import contextvars
 
 # Context variables for request-scoped overrides
 X_GEMINI_API_KEY = contextvars.ContextVar("x_gemini_api_key", default="")
+X_OPENROUTER_API_KEY = contextvars.ContextVar("x_openrouter_api_key", default="")
 X_NEO4J_URI = contextvars.ContextVar("x_neo4j_uri", default="")
 X_NEO4J_USERNAME = contextvars.ContextVar("x_neo4j_username", default="")
 X_NEO4J_PASSWORD = contextvars.ContextVar("x_neo4j_password", default="")
@@ -70,13 +71,28 @@ class GeminiConfig:
 
 
 @dataclass
+class OpenRouterConfig:
+    """OpenRouter API configuration."""
+    _api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
+    model: str = field(default_factory=lambda: os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"))
+    base_url: str = "https://openrouter.ai/api/v1"
+    temperature: float = 0.0
+
+    @property
+    def api_key(self) -> str:
+        override = X_OPENROUTER_API_KEY.get()
+        return override if override else self._api_key
+
+
+@dataclass
 class LLMConfig:
     """LLM provider configuration."""
-    provider: Literal["ollama", "gemini", "mock"] = field(
+    provider: Literal["ollama", "gemini", "openrouter", "mock"] = field(
         default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama")
     )
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
     timeout_seconds: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT_SECONDS", "600")))
 
 

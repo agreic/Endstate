@@ -52,6 +52,10 @@ def parse_assessment_content(content: str) -> dict:
 async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
     llm = get_llm()
 
+    explanation = lesson.get("explanation", "").strip()
+    if not explanation:
+        return {"error": "Cannot generate assessment for lesson with no content."}
+
     learning_style = (profile or {}).get("learning_style", "")
     prompt = (
         "Create one assessment prompt based on the lesson below.\n"
@@ -64,6 +68,10 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment generation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment generation failed: {e}"}
 
@@ -86,6 +94,10 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment evaluation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment evaluation failed: {e}"}
 
