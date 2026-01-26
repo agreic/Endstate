@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OLLAMA = "ollama"
     GEMINI = "gemini"
+    OPENROUTER = "openrouter"
     MOCK = "mock"
 
 
@@ -48,6 +49,8 @@ def get_llm(
         return _get_ollama_llm(llm_config, **kwargs)
     elif provider == LLMProvider.GEMINI:
         return _get_gemini_llm(llm_config, **kwargs)
+    elif provider == LLMProvider.OPENROUTER:
+        return _get_openrouter_llm(llm_config, **kwargs)
     elif provider == LLMProvider.MOCK:
         return MockChatModel()
     else:
@@ -92,6 +95,29 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
         temperature=kwargs.get("temperature", gemini_config.temperature),
         google_api_key=api_key,
         **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "google_api_key"]},
+    )
+
+
+def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
+    """Get OpenRouter LLM instance (OpenAI compatible)."""
+    from langchain_openai import ChatOpenAI
+
+    or_config = llm_config.openrouter
+
+    # Check for API key
+    api_key = kwargs.get("api_key") or or_config.api_key
+    if not api_key:
+        raise ValueError(
+            "OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable "
+            "or pass api_key parameter."
+        )
+
+    return ChatOpenAI(
+        model=kwargs.get("model", or_config.model),
+        temperature=kwargs.get("temperature", or_config.temperature),
+        openai_api_key=api_key,
+        openai_api_base=or_config.base_url,
+        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "openai_api_key", "openai_api_base"]},
     )
 
 
