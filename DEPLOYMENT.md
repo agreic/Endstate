@@ -56,6 +56,8 @@ Deploy Endstate to the cloud using free tiers.
 
 > [!TIP]
 > This "Bring Your Own Key" architecture ensures the live demo is completely free for the maintainer while keeping user data perfectly isolated.
+> 
+> **Security Note:** All overrides are **request-scoped**. Credentials provided in the UI are sent via headers and managed in memory only for the duration of that specific request. They never modify the global server configuration or affect other users.
 
 ## Alternative: Local Development
 

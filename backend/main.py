@@ -163,16 +163,16 @@ async def extract_config_headers(request: Request, call_next):
 
     # Set context variables and restore them after request
     tokens = []
-    if gemini_key:
-        tokens.append(X_GEMINI_API_KEY.set(gemini_key))
-    if openrouter_key:
-        tokens.append(X_OPENROUTER_API_KEY.set(openrouter_key))
-    if neo4j_uri:
-        tokens.append(X_NEO4J_URI.set(neo4j_uri))
-    if neo4j_user:
-        tokens.append(X_NEO4J_USERNAME.set(neo4j_user))
-    if neo4j_password:
-        tokens.append(X_NEO4J_PASSWORD.set(neo4j_password))
+    
+    def set_if_valid(var, val):
+        if val and val.strip():
+            tokens.append(var.set(val.strip()))
+
+    set_if_valid(X_GEMINI_API_KEY, gemini_key)
+    set_if_valid(X_OPENROUTER_API_KEY, openrouter_key)
+    set_if_valid(X_NEO4J_URI, neo4j_uri)
+    set_if_valid(X_NEO4J_USERNAME, neo4j_user)
+    set_if_valid(X_NEO4J_PASSWORD, neo4j_password)
 
     try:
         response = await call_next(request)
