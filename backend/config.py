@@ -21,6 +21,7 @@ X_OPENROUTER_API_KEY = contextvars.ContextVar("x_openrouter_api_key", default=""
 X_NEO4J_URI = contextvars.ContextVar("x_neo4j_uri", default="")
 X_NEO4J_USERNAME = contextvars.ContextVar("x_neo4j_username", default="")
 X_NEO4J_PASSWORD = contextvars.ContextVar("x_neo4j_password", default="")
+X_LLM_PROVIDER = contextvars.ContextVar("x_llm_provider", default="")
 
 
 @dataclass
@@ -87,13 +88,18 @@ class OpenRouterConfig:
 @dataclass
 class LLMConfig:
     """LLM provider configuration."""
-    provider: Literal["ollama", "gemini", "openrouter", "mock"] = field(
+    _provider: Literal["ollama", "gemini", "openrouter", "mock"] = field(
         default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama")
     )
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
     openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
     timeout_seconds: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT_SECONDS", "600")))
+
+    @property
+    def provider(self) -> str:
+        override = X_LLM_PROVIDER.get()
+        return override if override else self._provider
 
 
 @dataclass

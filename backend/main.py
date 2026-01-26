@@ -31,6 +31,7 @@ from backend.config import (
     X_NEO4J_URI,
     X_NEO4J_USERNAME,
     X_NEO4J_PASSWORD,
+    X_LLM_PROVIDER,
 )
 
 
@@ -160,6 +161,7 @@ async def extract_config_headers(request: Request, call_next):
     neo4j_user = request.headers.get("X-Neo4j-User")
     neo4j_password = request.headers.get("X-Neo4j-Password")
     openrouter_key = request.headers.get("X-OpenRouter-API-Key") or request.headers.get("X-Gemini-API-Key")
+    llm_provider = request.headers.get("X-LLM-Provider")
 
     # Set context variables and restore them after request
     tokens = []
@@ -173,6 +175,7 @@ async def extract_config_headers(request: Request, call_next):
     set_if_valid(X_NEO4J_URI, neo4j_uri)
     set_if_valid(X_NEO4J_USERNAME, neo4j_user)
     set_if_valid(X_NEO4J_PASSWORD, neo4j_password)
+    set_if_valid(X_LLM_PROVIDER, llm_provider)
 
     try:
         response = await call_next(request)
@@ -180,16 +183,7 @@ async def extract_config_headers(request: Request, call_next):
     finally:
         # Reset context variables (in reverse order)
         for token in reversed(tokens):
-            if token.var == X_GEMINI_API_KEY:
-                X_GEMINI_API_KEY.reset(token)
-            elif token.var == X_OPENROUTER_API_KEY:
-                X_OPENROUTER_API_KEY.reset(token)
-            elif token.var == X_NEO4J_URI:
-                X_NEO4J_URI.reset(token)
-            elif token.var == X_NEO4J_USERNAME:
-                X_NEO4J_USERNAME.reset(token)
-            elif token.var == X_NEO4J_PASSWORD:
-                X_NEO4J_PASSWORD.reset(token)
+            token.var.reset(token)
 
 
 

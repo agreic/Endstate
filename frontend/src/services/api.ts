@@ -21,7 +21,9 @@ function getHeaders(): Record<string, string> {
   const neo4jUri = getValue('endstate_neo4j_uri');
   const neo4jUser = getValue('endstate_neo4j_user');
   const neo4jPass = getValue('endstate_neo4j_password');
+  const llmProvider = getValue('endstate_llm_provider');
 
+  if (llmProvider) headers['X-LLM-Provider'] = llmProvider;
   if (openrouterKey) headers['X-OpenRouter-API-Key'] = openrouterKey;
   if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
   if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, computed } from 'vue';
 import { X, Moon, Sun, Monitor } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -11,6 +11,7 @@ const emit = defineEmits<{
 }>();
 
 type Theme = 'light' | 'dark' | 'system';
+type LLMProvider = '' | 'gemini' | 'openrouter';
 
 const currentTheme = ref<Theme>('system');
 const isDark = ref(false);
@@ -21,10 +22,29 @@ const themes: { value: Theme; label: string; icon: any }[] = [
   { value: 'system', label: 'System', icon: Monitor },
 ];
 
-const geminiApiKey = ref('');
+const llmProvider = ref<LLMProvider>('');
+const apiKey = ref('');
 const neo4jUri = ref('');
 const neo4jUser = ref('');
 const neo4jPassword = ref('');
+
+const providerOptions: { value: LLMProvider; label: string }[] = [
+  { value: '', label: 'Use server default' },
+  { value: 'gemini', label: 'Gemini (Google AI)' },
+  { value: 'openrouter', label: 'OpenRouter' },
+];
+
+const apiKeyLabel = computed(() => {
+  if (llmProvider.value === 'gemini') return 'Gemini API Key';
+  if (llmProvider.value === 'openrouter') return 'OpenRouter API Key';
+  return 'LLM API Key (optional)';
+});
+
+const apiKeyPlaceholder = computed(() => {
+  if (llmProvider.value === 'gemini') return 'AIza...';
+  if (llmProvider.value === 'openrouter') return 'sk-or-...';
+  return 'Paste your API key here...';
+});
 
 const setTheme = (theme: Theme) => {
   currentTheme.value = theme;
@@ -46,8 +66,9 @@ const applyTheme = (theme: Theme) => {
 };
 
 const saveConfig = () => {
-  localStorage.setItem('endstate_openrouter_api_key', geminiApiKey.value);
-  localStorage.setItem('endstate_gemini_api_key', geminiApiKey.value);
+  localStorage.setItem('endstate_llm_provider', llmProvider.value);
+  localStorage.setItem('endstate_gemini_api_key', apiKey.value);
+  localStorage.setItem('endstate_openrouter_api_key', apiKey.value);
   localStorage.setItem('endstate_neo4j_uri', neo4jUri.value);
   localStorage.setItem('endstate_neo4j_user', neo4jUser.value);
   localStorage.setItem('endstate_neo4j_password', neo4jPassword.value);
@@ -61,7 +82,8 @@ const handleBackdropClick = (e: MouseEvent) => {
 };
 
 const loadConfig = () => {
-  geminiApiKey.value = localStorage.getItem('endstate_openrouter_api_key') || localStorage.getItem('endstate_gemini_api_key') || '';
+  llmProvider.value = (localStorage.getItem('endstate_llm_provider') || '') as LLMProvider;
+  apiKey.value = localStorage.getItem('endstate_openrouter_api_key') || localStorage.getItem('endstate_gemini_api_key') || '';
   neo4jUri.value = localStorage.getItem('endstate_neo4j_uri') || '';
   neo4jUser.value = localStorage.getItem('endstate_neo4j_user') || '';
   neo4jPassword.value = localStorage.getItem('endstate_neo4j_password') || '';
@@ -141,11 +163,23 @@ onMounted(() => {
             
             <div class="space-y-3">
               <div>
-                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">Gemini API Key</label>
+                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">LLM Provider</label>
+                <select
+                  v-model="llmProvider"
+                  class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
+                >
+                  <option v-for="opt in providerOptions" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-surface-500 dark:text-surface-400 mb-1">{{ apiKeyLabel }}</label>
                 <input 
-                  v-model="geminiApiKey"
+                  v-model="apiKey"
                   type="password"
-                  placeholder="Paste your API key here..."
+                  :placeholder="apiKeyPlaceholder"
                   class="w-full px-3 py-2 text-sm rounded-lg border dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
                 />
               </div>

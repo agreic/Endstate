@@ -41,7 +41,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_ollama.return_value = mock_llm
 
-        llm = get_llm(provider="ollama")
+        llm = get_llm(_provider="ollama")
 
         mock_get_ollama.assert_called_once()
         assert llm == mock_llm
@@ -52,7 +52,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_ollama.return_value = mock_llm
 
-        llm = get_llm(provider=LLMProvider.OLLAMA)
+        llm = get_llm(_provider=LLMProvider.OLLAMA)
 
         mock_get_ollama.assert_called_once()
         assert llm == mock_llm
@@ -63,7 +63,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_gemini.return_value = mock_llm
 
-        llm = get_llm(provider="gemini")
+        llm = get_llm(_provider="gemini")
 
         mock_get_gemini.assert_called_once()
         assert llm == mock_llm
@@ -74,7 +74,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_gemini.return_value = mock_llm
 
-        llm = get_llm(provider=LLMProvider.GEMINI)
+        llm = get_llm(_provider=LLMProvider.GEMINI)
 
         mock_get_gemini.assert_called_once()
         assert llm == mock_llm
@@ -85,7 +85,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_or.return_value = mock_llm
 
-        llm = get_llm(provider="openrouter")
+        llm = get_llm(_provider="openrouter")
 
         mock_get_or.assert_called_once()
         assert llm == mock_llm
@@ -96,7 +96,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_or.return_value = mock_llm
 
-        llm = get_llm(provider=LLMProvider.OPENROUTER)
+        llm = get_llm(_provider=LLMProvider.OPENROUTER)
 
         mock_get_or.assert_called_once()
         assert llm == mock_llm
@@ -107,7 +107,7 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_ollama.return_value = mock_llm
 
-        llm_config = LLMConfig(provider="ollama")
+        llm_config = LLMConfig(_provider="ollama")
         llm = get_llm(llm_config=llm_config)
 
         mock_get_ollama.assert_called_once()
@@ -119,13 +119,13 @@ class TestGetLLM:
         mock_llm = MagicMock()
         mock_get_ollama.return_value = mock_llm
 
-        llm = get_llm(provider="OLLAMA")
+        llm = get_llm(_provider="OLLAMA")
         assert llm == mock_llm
 
     def test_unsupported_provider(self):
         """Test error on unsupported provider."""
         with pytest.raises(ValueError):
-            get_llm(provider="unsupported")
+            get_llm(_provider="unsupported")
 
 
 class TestGetOllamaLLM:
@@ -138,7 +138,7 @@ class TestGetOllamaLLM:
         mock_chat_ollama.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="ollama",
+            _provider="ollama",
             ollama=OllamaConfig(
                 base_url="http://localhost:11434",
                 model="llama3.2",
@@ -161,7 +161,7 @@ class TestGetOllamaLLM:
         mock_chat_ollama.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="ollama",
+            _provider="ollama",
             ollama=OllamaConfig(model="llama3.2"),
         )
 
@@ -177,7 +177,7 @@ class TestGetOllamaLLM:
         mock_chat_ollama.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="ollama",
+            _provider="ollama",
             ollama=OllamaConfig(base_url="http://custom:11434"),
         )
 
@@ -193,7 +193,7 @@ class TestGetOllamaLLM:
         mock_chat_ollama.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="ollama",
+            _provider="ollama",
             ollama=OllamaConfig(model="llama3.2"),
         )
 
@@ -215,7 +215,7 @@ class TestGetGeminiLLM:
         mock_chat_genai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="gemini",
+            _provider="gemini",
             gemini=GeminiConfig(model="gemini-pro"),
         )
 
@@ -233,7 +233,7 @@ class TestGetGeminiLLM:
         mock_chat_genai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="gemini",
+            _provider="gemini",
             gemini=GeminiConfig(model="gemini-pro"),
         )
 
@@ -246,7 +246,7 @@ class TestGetGeminiLLM:
     def test_gemini_without_api_key_raises_error(self, mock_chat_genai):
         """Test that Gemini raises error without API key."""
         llm_config = LLMConfig(
-            provider="gemini",
+            _provider="gemini",
             gemini=GeminiConfig(_api_key=""),
         )
 
@@ -262,7 +262,7 @@ class TestGetGeminiLLM:
         mock_chat_genai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="gemini",
+            _provider="gemini",
             gemini=GeminiConfig(
                 _api_key="test_key",
                 model="gemini-1.5-flash",
@@ -286,7 +286,7 @@ class TestGetOpenRouterLLM:
         mock_chat_openai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="openrouter",
+            _provider="openrouter",
             openrouter=OpenRouterConfig(model="openai/gpt-4o"),
         )
 
@@ -305,7 +305,7 @@ class TestGetOpenRouterLLM:
         mock_chat_openai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="openrouter",
+            _provider="openrouter",
             openrouter=OpenRouterConfig(model="openai/gpt-4o"),
         )
 
@@ -319,7 +319,7 @@ class TestGetOpenRouterLLM:
     def test_openrouter_without_api_key_raises_error(self, mock_chat_openai):
         """Test that OpenRouter raises error without API key."""
         llm_config = LLMConfig(
-            provider="openrouter",
+            _provider="openrouter",
             openrouter=OpenRouterConfig(),
         )
 
@@ -335,7 +335,7 @@ class TestGetOpenRouterLLM:
         mock_chat_openai.return_value = mock_instance
 
         llm_config = LLMConfig(
-            provider="openrouter",
+            _provider="openrouter",
             openrouter=OpenRouterConfig(model="openai/gpt-4o-mini"),
         )
 
