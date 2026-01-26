@@ -8,10 +8,12 @@ function getHeaders(): Record<string, string> {
   };
 
   const geminiKey = localStorage.getItem('endstate_gemini_api_key');
+  const openrouterKey = localStorage.getItem('endstate_openrouter_api_key') || geminiKey;
   const neo4jUri = localStorage.getItem('endstate_neo4j_uri');
   const neo4jUser = localStorage.getItem('endstate_neo4j_user');
   const neo4jPass = localStorage.getItem('endstate_neo4j_password');
 
+  if (openrouterKey) headers['X-OpenRouter-API-Key'] = openrouterKey;
   if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
   if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;
   if (neo4jUser) headers['X-Neo4j-User'] = neo4jUser;

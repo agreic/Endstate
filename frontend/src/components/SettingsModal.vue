@@ -46,6 +46,7 @@ const applyTheme = (theme: Theme) => {
 };
 
 const saveConfig = () => {
+  localStorage.setItem('endstate_openrouter_api_key', geminiApiKey.value);
   localStorage.setItem('endstate_gemini_api_key', geminiApiKey.value);
   localStorage.setItem('endstate_neo4j_uri', neo4jUri.value);
   localStorage.setItem('endstate_neo4j_user', neo4jUser.value);
@@ -60,7 +61,7 @@ const handleBackdropClick = (e: MouseEvent) => {
 };
 
 const loadConfig = () => {
-  geminiApiKey.value = localStorage.getItem('endstate_gemini_api_key') || '';
+  geminiApiKey.value = localStorage.getItem('endstate_openrouter_api_key') || localStorage.getItem('endstate_gemini_api_key') || '';
   neo4jUri.value = localStorage.getItem('endstate_neo4j_uri') || '';
   neo4jUser.value = localStorage.getItem('endstate_neo4j_user') || '';
   neo4jPassword.value = localStorage.getItem('endstate_neo4j_password') || '';

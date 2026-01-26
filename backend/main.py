@@ -27,6 +27,7 @@ from backend.services.task_registry import TaskRegistry
 from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 from backend.config import (
     X_GEMINI_API_KEY,
+    X_OPENROUTER_API_KEY,
     X_NEO4J_URI,
     X_NEO4J_USERNAME,
     X_NEO4J_PASSWORD,
@@ -158,11 +159,14 @@ async def extract_config_headers(request: Request, call_next):
     neo4j_uri = request.headers.get("X-Neo4j-URI")
     neo4j_user = request.headers.get("X-Neo4j-User")
     neo4j_password = request.headers.get("X-Neo4j-Password")
+    openrouter_key = request.headers.get("X-OpenRouter-API-Key") or request.headers.get("X-Gemini-API-Key")
 
     # Set context variables and restore them after request
     tokens = []
     if gemini_key:
         tokens.append(X_GEMINI_API_KEY.set(gemini_key))
+    if openrouter_key:
+        tokens.append(X_OPENROUTER_API_KEY.set(openrouter_key))
     if neo4j_uri:
         tokens.append(X_NEO4J_URI.set(neo4j_uri))
     if neo4j_user:
@@ -178,6 +182,8 @@ async def extract_config_headers(request: Request, call_next):
         for token in reversed(tokens):
             if token.var == X_GEMINI_API_KEY:
                 X_GEMINI_API_KEY.reset(token)
+            elif token.var == X_OPENROUTER_API_KEY:
+                X_OPENROUTER_API_KEY.reset(token)
             elif token.var == X_NEO4J_URI:
                 X_NEO4J_URI.reset(token)
             elif token.var == X_NEO4J_USERNAME:

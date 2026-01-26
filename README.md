@@ -90,11 +90,26 @@ cd frontend && npm run dev
 
 Access at http://localhost:3000
 
-### Docker (Production)
+### Docker
 
 ```bash
 docker compose up -d --build --force-recreate
 ```
+
+### Docker Profiles
+
+We use Docker Compose profiles to keep the local LLM optional. 
+
+- **Cloud Mode (Default):** Runs only the backend, frontend, and Neo4j. Best for Gemini/OpenRouter.
+  ```bash
+  docker compose up -d
+  ```
+- **Local Mode:** Runs Ollama alongside the other services.
+  ```bash
+  COMPOSE_PROFILES=ollama docker compose up -d
+  ```
+
+You can also set `COMPOSE_PROFILES=ollama` in your `.env` file to make it permanent.
 
 ## API Endpoints
 

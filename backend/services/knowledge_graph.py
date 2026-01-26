@@ -139,17 +139,95 @@ class KnowledgeGraphService:
         """
         return self._transformer.process_text(text)
     
-    async def aextract(self, text: str) -> list:
+    async def aextract(self, text: str, fallback_on_empty: bool = True) -> list:
         """
         Extract graph documents from text asynchronously.
         
         Args:
             text: Text to extract from.
+            fallback_on_empty: If True, try a simpler extraction if primary fails.
             
         Returns:
             List of GraphDocument objects.
         """
-        return await self._transformer.aprocess_text(text)
+        try:
+            docs = await self._transformer.aprocess_text(text)
+            
+            # If primary extraction returned nothing, try a fallback with a simpler prompt
+            if fallback_on_empty and (not docs or not docs[0].nodes):
+                provider = self._config.llm.provider
+                if provider in ("openrouter", "ollama"):
+                    print(f"[KnowledgeGraph] Primary extraction returned 0 nodes. Trying simpler fallback for {provider}...")
+                    fallback_docs = await self._fallback_extract(text)
+                    if fallback_docs and fallback_docs[0].nodes:
+                        return fallback_docs
+            
+            return docs
+        except Exception as e:
+            if fallback_on_empty:
+                print(f"[KnowledgeGraph] Primary extraction failed: {e}. Trying fallback...")
+                return await self._fallback_extract(text)
+            raise e
+
+    async def _fallback_extract(self, text: str) -> list:
+        """Simpler extraction for models that struggle with LLMGraphTransformer."""
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import JsonOutputParser
+        from langchain_neo4j.graphs.graph_document import GraphDocument, Node, Relationship
+        from langchain_core.documents import Document
+
+        prompt = ChatPromptTemplate.from_template("""
+        Extract a knowledge graph from the following text based on this schema:
+        Nodes: {nodes}
+        Relationships: {relationships}
+        
+        Format the output as a JSON object with "nodes" and "relationships" keys.
+        Each node must have "id" and "type".
+        Each relationship must have "source", "target", and "type".
+        
+        Text: {text}
+        
+        Output JSON:
+        """)
+        
+        chain = prompt | self._llm | JsonOutputParser()
+        
+        try:
+            result = await chain.ainvoke({
+                "nodes": ", ".join(self.schema.allowed_nodes),
+                "relationships": ", ".join([f"({s})-[:{r}]->({t})" for s, r, t in self.schema.allowed_relationships[:10]]), # Limit to first 10 for brevity
+                "text": text[:2000] # Limit text
+            })
+            
+            nodes = []
+            node_map = {}
+            for n in result.get("nodes", []):
+                # Map 'label' to 'type' if model used it
+                ntype = n.get("type") or n.get("label", "Skill")
+                node = Node(id=str(n.get("id")), type=ntype, properties=n)
+                nodes.append(node)
+                node_map[str(n.get("id"))] = node
+                
+            relationships = []
+            for r in result.get("relationships", []):
+                source_id = str(r.get("source"))
+                target_id = str(r.get("target"))
+                if source_id in node_map and target_id in node_map:
+                    rel = Relationship(
+                        source=node_map[source_id],
+                        target=node_map[target_id],
+                        type=r.get("type", "RELATED_TO"),
+                        properties=r
+                    )
+                    relationships.append(rel)
+                    
+            if not nodes:
+                return []
+                
+            return [GraphDocument(nodes=nodes, relationships=relationships, source=Document(page_content=text))]
+        except Exception as e:
+            print(f"[KnowledgeGraph] Fallback extraction failed: {e}")
+            return []
     
     def extract_many(self, texts: list[str]) -> list:
         """
@@ -242,18 +320,71 @@ class KnowledgeGraphService:
         return documents
 
     def _normalize_documents(self, documents: list) -> list:
-        """Ensure extracted nodes have required properties for UI."""
+        """Ensure extracted nodes have required properties for UI and match schema."""
         allowed = set(self._transformer.schema.allowed_nodes)
+        
+        # Create a map for case-insensitive matching and synonyms
+        type_map = {a.lower(): a for a in allowed}
+        
+        # Add common synonyms produced by LLMs
+        synonyms = {
+            "technology": "Tool",
+            "library": "Tool",
+            "framework": "Tool",
+            "language": "Skill",
+            "programming language": "Skill",
+            "software": "Tool",
+            "app": "Project",
+            "application": "Project",
+            "user": "Person",
+            "assistant": "Person",
+            "developer": "Person",
+            "learner": "Person",
+        }
+        for k, v in synonyms.items():
+            if v in allowed:
+                type_map[k] = v
+
         normalized = []
         for doc in documents:
             nodes = []
             for node in doc.nodes:
+                # Type normalization
+                current_type = str(node.type)
+                type_lower = current_type.lower()
+                
+                if type_lower in type_map:
+                    node.type = type_map[type_lower]
+                elif current_type.title() in allowed:
+                    node.type = current_type.title()
+                
+                # Strict mode check
                 if self._transformer.schema.strict_mode and node.type not in allowed:
                     continue
+                
+                # Property normalization
                 if not node.properties.get("name"):
-                    node.properties["name"] = str(node.id) if node.id else node.type
+                    # Use ID if name is missing, clean up underscores/dashes
+                    node.id = str(node.id)
+                    node.properties["name"] = node.id.replace("_", " ").replace("-", " ").title()
+                
                 nodes.append(node)
+            
+            # Re-check relationships to ensure they point to existing nodes
+            maintained_node_ids = {str(n.id) for n in nodes}
+            relationships = []
+            for rel in doc.relationships:
+                if str(rel.source.id) in maintained_node_ids and str(rel.target.id) in maintained_node_ids:
+                    # Also normalize source/target objects to have corrected types if needed
+                    # Find maintained nodes to sync types
+                    source_node = next((n for n in nodes if str(n.id) == str(rel.source.id)), None)
+                    target_node = next((n for n in nodes if str(n.id) == str(rel.target.id)), None)
+                    if source_node: rel.source.type = source_node.type
+                    if target_node: rel.target.type = target_node.type
+                    relationships.append(rel)
+            
             doc.nodes = nodes
+            doc.relationships = relationships
             normalized.append(doc)
         return normalized
 
