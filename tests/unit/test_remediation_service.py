@@ -90,8 +90,6 @@ async def test_diagnose_failure_handles_null_prerequisites():
         feedback=feedback,
         node_context=node_context
     )
-    
-    assert "diagnosis" in result
 
     assert "diagnosis" in result
 

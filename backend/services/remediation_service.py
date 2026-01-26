@@ -161,19 +161,36 @@ async def generate_remediation_content(
     learning_style = (profile or {}).get("learning_style", "")
     skill_level = (profile or {}).get("skill_level", "intermediate")
     
-    prompt = (
-        "Create a focused remediation lesson for a learner who struggled with a concept.\n"
-        "Return JSON with keys: title, description, explanation.\n\n"
-        "Requirements:\n"
-        "- title: Short title (2-5 words) for this remediation topic\n"
-        "- description: 1-2 sentence description of what this covers\n"
-        "- explanation: DETAILED technical explanation (minimum 200 words) covering the concept in depth. Use examples.\n\n"
-        f"Original topic the learner struggled with: {original_name}\n"
-        f"Diagnosed gap: {diagnosis_text}\n"
-        f"Missing concept to address: {primary_concept}\n"
-        f"Skill level: {skill_level}\n"
-        f"Learning style: {learning_style or 'balanced'}\n"
-    )
+    prompt = f"""You are the Senior Remediation Specialist.
+
+YOUR TASK:
+Create a "Bridge Lesson" that fills a specific knowledge gap identified in a student's recent failure.
+You must explain the missing concept in a way that connects it back to the original topic.
+
+INPUT CONTEXT:
+- **Failed Topic:** {original_name}
+- **Diagnosed Gap:** {diagnosis_text}
+- **Missing Concept:** {primary_concept}
+- **Student Profile:** {skill_level} / {learning_style or 'balanced'}
+
+DESIGN PHILOSOPHY:
+1. **The "Bridge" Approach:** Do not just repeat the original lesson. Explain the *missing ingredient* (the concept) and how it makes the original topic work.
+2. **Analogy First:** Start with a non-technical analogy if the learning style permits.
+3. **Concrete Examples:** If the gap is technical, provide a minimal, correct code snippet demonstrating ONLY that concept.
+
+OUTPUT FORMAT:
+Return strictly valid JSON. Do not include markdown formatting (```json).
+
+JSON SCHEMA:
+{{
+  "remediation": {{
+      "title": "Title (e.g., 'Understanding the Base Case')",
+      "description": "1 sentence on why this specific concept matters.",
+      "explanation": "A rich, detailed explanation (approx. 200 words). Use line breaks (\\n) for readability. Include an analogy and a technical example.",
+      "bridge_connection": "One sentence explaining how this concept fixes their error in '{original_name}'."
+  }}
+}}
+"""
     
     max_retries = 2
     last_error = None
@@ -188,8 +205,18 @@ async def generate_remediation_content(
             content = str(response.content if hasattr(response, "content") else response)
             parsed = _extract_json_block(content)
             
+            # Handle nested "remediation" key from new schema
+            if parsed and "remediation" in parsed:
+                parsed = parsed["remediation"]
+            
             if parsed:
                 explanation = str(parsed.get("explanation", "")).strip()
+                bridge = str(parsed.get("bridge_connection", "")).strip()
+                
+                # Append bridge connection to explanation if present
+                if bridge and bridge not in explanation:
+                    explanation = f"{explanation}\n\n**Connection:** {bridge}"
+                
                 # Check for minimum length to avoid "empty" lessons
                 if explanation and len(explanation) >= 100:
                     return {
@@ -199,7 +226,7 @@ async def generate_remediation_content(
                     }
             
             # If we're here, it was too short or failed to parse
-            logger.warning(f"Remediation generation attempt {attempt + 1} produced insufficient content.")
+            logger.warning(f"Remediation generation attempt {attempt + 1} produced insufficient content. Raw: {content[:200]}")
             
         except asyncio.CancelledError:
             raise
