@@ -702,22 +702,23 @@ class Neo4jClient:
         
         allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
         
-        # Get relationships where both source and target are connected to the project
-        # This includes direct project relationships and relationships between project nodes
+        # Get relationships where at least one end is a project node or connected to it.
+        # This iterates over the project's connections rather than all relationships in the graph.
         result = self.query(
             """
             MATCH (p:Project {id: $project_id})
             OPTIONAL MATCH (p)-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE|HAS_LESSON]->(connected)
-            WITH p, COLLECT(DISTINCT COALESCE(connected.id, elementId(connected))) + [p.id] as project_node_ids
-            MATCH (n)-[r]->(m)
-            WHERE (COALESCE(n.id, elementId(n)) IN project_node_ids OR COALESCE(m.id, elementId(m)) IN project_node_ids)
-              AND any(label IN labels(n) WHERE label IN $labels)
+            WITH COLLECT(DISTINCT connected) + [p] as project_nodes
+            UNWIND project_nodes as n
+            MATCH (n)-[r]-(m)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
               AND any(label IN labels(m) WHERE label IN $labels)
               AND NOT (n:Project AND COALESCE(n.is_default, false))
               AND NOT (m:Project AND COALESCE(m.is_default, false))
-            RETURN COALESCE(n.id, elementId(n)) as source,
+            WITH DISTINCT r
+            RETURN COALESCE(startNode(r).id, elementId(startNode(r))) as source,
                    type(r) as type,
-                   COALESCE(m.id, elementId(m)) as target,
+                   COALESCE(endNode(r).id, elementId(endNode(r))) as target,
                    properties(r) as properties
             LIMIT $limit
             """,
