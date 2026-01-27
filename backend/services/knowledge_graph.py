@@ -162,6 +162,7 @@ class KnowledgeGraphService:
             #             return fallback_docs
             if not docs or not docs[0].nodes:
                 print(f"[KnowledgeGraph] Primary extraction returned 0 nodes.")
+                print(f"[KnowledgeGraph] Text: {text}")
             
             return docs
         except Exception as e:
@@ -169,6 +170,7 @@ class KnowledgeGraphService:
             #     print(f"[KnowledgeGraph] Primary extraction failed: {e}. Trying fallback...")
             #     return await self._fallback_extract(text)
             print(f"[KnowledgeGraph] Extraction failed: {e}")
+            print(f"[KnowledgeGraph] Text: {text}")
             raise e
 
     async def _fallback_extract(self, text: str) -> list:

@@ -1670,6 +1670,24 @@ async def start_project(project_id: str):
         documents = await service.aextract(text)
         normalized = service.normalize_documents(documents)
 
+        # Filter out "Project" nodes to prevents duplicates of the main project node
+        # We rely on generic HAS_NODE/HAS_SKILL links for connecting items to the project
+        filtered_docs = []
+        for doc in normalized:
+            valid_nodes = [n for n in doc.nodes if n.type != "Project"]
+            valid_node_ids = {n.id for n in valid_nodes}
+            
+            valid_rels = []
+            for rel in doc.relationships:
+                if rel.source.id in valid_node_ids and rel.target.id in valid_node_ids:
+                    valid_rels.append(rel)
+            
+            doc.nodes = valid_nodes
+            doc.relationships = valid_rels
+            filtered_docs.append(doc)
+        
+        normalized = filtered_docs
+
         node_count = sum(len(doc.nodes) for doc in normalized)
         rel_count = sum(len(doc.relationships) for doc in normalized)
         if node_count == 0 and rel_count == 0:
