@@ -152,21 +152,23 @@ class KnowledgeGraphService:
         """
         try:
             docs = await self._transformer.aprocess_text(text)
-            
-            # If primary extraction returned nothing, try a fallback with a simpler prompt
-            if fallback_on_empty and (not docs or not docs[0].nodes):
-                provider = self._config.llm.provider
-                if provider in ("openrouter", "ollama"):
-                    print(f"[KnowledgeGraph] Primary extraction returned 0 nodes. Trying simpler fallback for {provider}...")
-                    fallback_docs = await self._fallback_extract(text)
-                    if fallback_docs and fallback_docs[0].nodes:
-                        return fallback_docs
+            # # If primary extraction returned nothing, try a fallback with a simpler prompt
+            # if fallback_on_empty and (not docs or not docs[0].nodes):
+            #     provider = self._config.llm.provider
+            #     if provider in ("openrouter", "ollama"):
+            #         print(f"[KnowledgeGraph] Primary extraction returned 0 nodes. Trying simpler fallback for {provider}...")
+            #         fallback_docs = await self._fallback_extract(text)
+            #         if fallback_docs and fallback_docs[0].nodes:
+            #             return fallback_docs
+            if not docs or not docs[0].nodes:
+                print(f"[KnowledgeGraph] Primary extraction returned 0 nodes.")
             
             return docs
         except Exception as e:
-            if fallback_on_empty:
-                print(f"[KnowledgeGraph] Primary extraction failed: {e}. Trying fallback...")
-                return await self._fallback_extract(text)
+            # if fallback_on_empty:
+            #     print(f"[KnowledgeGraph] Primary extraction failed: {e}. Trying fallback...")
+            #     return await self._fallback_extract(text)
+            print(f"[KnowledgeGraph] Extraction failed: {e}")
             raise e
 
     async def _fallback_extract(self, text: str) -> list:
