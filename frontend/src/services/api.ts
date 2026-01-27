@@ -269,6 +269,7 @@ export interface ProjectListItem {
   name: string;
   created_at: string;
   interests: string[];
+  capstone_passed?: boolean;
 }
 
 export interface GraphProjectsResponse {

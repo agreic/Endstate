@@ -804,27 +804,40 @@ onUnmounted(() => {
               v-for="project in projects"
               :key="project.id"
               @click="selectProject(project.id)"
-              class="w-full bg-white rounded-xl p-4 border border-surface-200 hover:border-primary-300 hover:shadow-md transition-all text-left"
-              :class="{ 'border-primary-500 ring-2 ring-primary-100': selectedProject?.session_id === project.id }"
+              class="w-full rounded-xl p-4 border transition-all text-left"
+              :class="[
+                selectedProject?.session_id === project.id
+                  ? 'border-primary-500 ring-2 ring-primary-100'
+                  : project.capstone_passed
+                    ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-400 hover:shadow-md'
+                    : 'bg-white border-surface-200 hover:border-primary-300 hover:shadow-md'
+              ]"
             >
               <div class="flex items-center justify-between mb-2">
-                <Target :size="18" class="text-primary-500" />
+                <CheckCircle
+                  v-if="project.capstone_passed"
+                  :size="18"
+                  class="text-emerald-500"
+                />
+                <Target v-else :size="18" class="text-primary-500" />
                 <ChevronRight
                   :size="16"
                   class="text-surface-400 transition-transform"
                   :class="{ 'rotate-90': selectedProject?.session_id === project.id }"
                 />
               </div>
-              <h3 class="font-semibold text-surface-800 mb-2 line-clamp-2">{{ project.name }}</h3>
-              <div class="flex items-center gap-2 text-xs text-surface-400">
-                <Clock :size="12" />
-                <span>{{ formatDate(project.created_at) }}</span>
+              <h3 class="font-semibold mb-2 line-clamp-2" :class="project.capstone_passed ? 'text-emerald-800' : 'text-surface-800'">{{ project.name }}</h3>
+              <div class="flex items-center gap-2 text-xs" :class="project.capstone_passed ? 'text-emerald-600' : 'text-surface-400'">
+                <CheckCircle v-if="project.capstone_passed" :size="12" />
+                <Clock v-else :size="12" />
+                <span>{{ project.capstone_passed ? 'Completed' : formatDate(project.created_at) }}</span>
               </div>
               <div v-if="project.interests.length > 0" class="mt-3 flex flex-wrap gap-1">
                 <span
                   v-for="interest in project.interests.slice(0, 3)"
                   :key="interest"
-                  class="text-xs px-2 py-0.5 bg-surface-100 text-surface-600 rounded-full"
+                  class="text-xs px-2 py-0.5 rounded-full"
+                  :class="project.capstone_passed ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-100 text-surface-600'"
                 >
                   {{ interest }}
                 </span>

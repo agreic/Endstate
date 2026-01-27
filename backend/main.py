@@ -702,11 +702,15 @@ def list_projects(limit: int = 50):
         except Exception:
             data = {}
 
+        capstone_data = data.get("capstone", {})
+        capstone_passed = bool(capstone_data.get("passed", False))
+        
         projects.append({
             "id": row.get("id"),
             "name": row.get("name") or data.get("agreed_project", {}).get("name", "Untitled"),
             "created_at": created_at,
             "interests": data.get("user_profile", {}).get("interests", []),
+            "capstone_passed": capstone_passed,
         })
 
     return {"projects": projects}
