@@ -8,6 +8,7 @@ import asyncio
 
 from backend.config import config
 from backend.llm.provider import get_llm
+from .utils import extract_json, clean_markdown
 
 
 ASSESSMENT_TIMEOUT = config.llm.timeout_seconds
@@ -24,28 +25,28 @@ def _style_hint(style: str) -> str:
     return "Use a short conceptual question."
 
 
-def _extract_json_block(content: str) -> dict | None:
-    try:
-        import json
-        import re
-
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
-        if fence_match:
-            return json.loads(fence_match.group(1))
-
-        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
-        if obj_match:
-            return json.loads(obj_match.group(1))
-    except Exception:
-        return None
-    return None
+# Removed _extract_json_block in favor of .utils.extract_json
 
 
 def parse_assessment_content(content: str) -> dict:
-    data = _extract_json_block(content)
+    data = extract_json(content)
     if data:
+        # Flexible mapping for common synonym keys
+        if "prompt" not in data:
+            for key in ["question", "problem", "task", "assessment"]:
+                if key in data:
+                    data["prompt"] = data[key]
+                    break
+        
+        if "result" not in data:
+            for key in ["score", "status", "outcome"]:
+                if key in data:
+                    data["result"] = data[key]
+                    break
+
         return data
-    cleaned = content.replace("```json", "").replace("```", "").strip()
+        
+    cleaned = clean_markdown(content)
     return {"raw": cleaned}
 
 
