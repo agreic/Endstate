@@ -192,55 +192,54 @@ JSON SCHEMA:
 }}
 """
     
-    max_retries = 2
-    last_error = None
-    
-    for attempt in range(max_retries):
-        try:
-            response = await asyncio.wait_for(
-                llm.ainvoke([("human", prompt)]),
-                timeout=REMEDIATION_TIMEOUT
-            )
+    try:
+        response = await asyncio.wait_for(
+            llm.ainvoke([("human", prompt)]),
+            timeout=REMEDIATION_TIMEOUT
+        )
+        
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = _extract_json_block(content)
+        
+        # Handle nested "remediation" key from new schema
+        if parsed and "remediation" in parsed:
+            parsed = parsed["remediation"]
+        
+        if parsed:
+            explanation = str(parsed.get("explanation", "")).strip()
+            bridge = str(parsed.get("bridge_connection", "")).strip()
             
-            content = str(response.content if hasattr(response, "content") else response)
-            parsed = _extract_json_block(content)
+            # Append bridge connection to explanation if present
+            if bridge and bridge not in explanation:
+                explanation = f"{explanation}\n\n**Connection:** {bridge}"
             
-            # Handle nested "remediation" key from new schema
-            if parsed and "remediation" in parsed:
-                parsed = parsed["remediation"]
-            
-            if parsed:
-                explanation = str(parsed.get("explanation", "")).strip()
-                bridge = str(parsed.get("bridge_connection", "")).strip()
-                
-                # Append bridge connection to explanation if present
-                if bridge and bridge not in explanation:
-                    explanation = f"{explanation}\n\n**Connection:** {bridge}"
-                
-                # Check for minimum length to avoid "empty" lessons
-                if explanation and len(explanation) >= 100:
-                    return {
-                        "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
-                        "description": str(parsed.get("description", "")).strip(),
-                        "explanation": explanation,
-                    }
-            
-            # If we're here, it was too short or failed to parse
-            logger.warning(f"Remediation generation attempt {attempt + 1} produced insufficient content. Raw: {content[:200]}")
-            
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.error(f"Remediation content generation failed attempt {attempt + 1}: {e}")
-            last_error = e
-            
-    # If all retries failed
-    return {
-        "error": "LLM failed to generate sufficient remediation content after retries.",
-        "title": f"Review: {primary_concept}",
-        "description": f"Reinforcement of {primary_concept}.",
-        "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
-    }
+            # Check for minimum length to avoid "empty" lessons
+            if explanation and len(explanation) >= 100:
+                return {
+                    "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
+                    "description": str(parsed.get("description", "")).strip(),
+                    "explanation": explanation,
+                }
+        
+        # Content was too short or failed to parse
+        logger.warning(f"Remediation generation produced insufficient content. Raw: {content[:200]}")
+        return {
+            "error": "LLM produced insufficient remediation content.",
+            "title": f"Review: {primary_concept}",
+            "description": f"Reinforcement of {primary_concept}.",
+            "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
+        }
+        
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"Remediation content generation failed: {e}")
+        return {
+            "error": f"LLM failed: {e}",
+            "title": f"Review: {primary_concept}",
+            "description": f"Reinforcement of {primary_concept}.",
+            "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
+        }
 
 
 def create_remediation_node(

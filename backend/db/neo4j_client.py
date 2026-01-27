@@ -1113,7 +1113,8 @@ class Neo4jClient:
                 {"project_id": project_id},
             )
         else:
-            rel_pattern = "|".join(f":{r}" for r in rel_types)
+            # Neo4j 5.x syntax: first rel has colon, others don't
+            rel_pattern = ":" + "|".join(rel_types)
             result = self.query(
                 f"""
                 MATCH (p:Project {{id: $project_id}})-[{rel_pattern}]->(n)
@@ -1330,7 +1331,11 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson)
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, 
+                   l.explanation as explanation, l.task as task, 
+                   l.created_at as created_at, 
+                   coalesce(l.archived, false) as archived, 
+                   l.archived_at as archived_at
             ORDER BY l.created_at DESC
             """,
             {"project_id": project_id},
@@ -1342,7 +1347,11 @@ class Neo4jClient:
         result = self.query(
             """
             MATCH (p:ProjectSummary {id: $project_id})-[:HAS_LESSON]->(l:ProjectLesson {node_id: $node_id})
-            RETURN l.id as id, l.node_id as node_id, l.title as title, l.explanation as explanation, l.task as task, l.created_at as created_at, l.archived as archived, l.archived_at as archived_at
+            RETURN l.id as id, l.node_id as node_id, l.title as title, 
+                   l.explanation as explanation, l.task as task, 
+                   l.created_at as created_at, 
+                   coalesce(l.archived, false) as archived, 
+                   l.archived_at as archived_at
             ORDER BY l.created_at DESC
             LIMIT 1
             """,
@@ -1446,13 +1455,19 @@ class Neo4jClient:
         """List assessments for a project."""
         result = self.query(
             """
-            MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
-            RETURN a.id as id, a.lesson_id as lesson_id, a.prompt as prompt, a.status as status, a.feedback as feedback, a.created_at as created_at, a.updated_at as updated_at, a.archived as archived, a.archived_at as archived_at
+            OPTIONAL MATCH (p:ProjectSummary {id: $project_id})-[:HAS_ASSESSMENT]->(a:ProjectAssessment)
+            WHERE a IS NOT NULL
+            RETURN a.id as id, a.lesson_id as lesson_id, a.prompt as prompt, 
+                   a.status as status, a.feedback as feedback, 
+                   a.created_at as created_at, a.updated_at as updated_at, 
+                   coalesce(a.archived, false) as archived, 
+                   a.archived_at as archived_at
             ORDER BY a.created_at DESC
             """,
             {"project_id": project_id},
         )
-        return result
+        # Filter out null results from OPTIONAL MATCH
+        return [r for r in result if r.get("id") is not None]
 
     def create_project_submission(
         self,

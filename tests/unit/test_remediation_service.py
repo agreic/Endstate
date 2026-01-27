@@ -95,26 +95,20 @@ async def test_diagnose_failure_handles_null_prerequisites():
 
 
 @pytest.mark.asyncio
-async def test_generate_remediation_retry_logic():
-    """Test that generate_remediation_content retries on insufficient content."""
+async def test_generate_remediation_fail_fast_on_insufficient_content():
+    """Test that generate_remediation_content fails fast on insufficient content."""
     from unittest.mock import MagicMock, AsyncMock, patch
     
     # Mock LLM behavior
     mock_llm = MagicMock()
     
-    # First response: Content too short
+    # Response: Content too short (should fail immediately, no retry)
     short_content = '{"title": "Short", "description": "Desc", "explanation": "Too short."}'
-    val1 = MagicMock()
-    val1.content = short_content
+    val = MagicMock()
+    val.content = short_content
     
-    # Second response: Valid content
-    valid_explanation = "This is a detailed explanation that is definitely longer than 100 characters to pass the validation check. " * 5
-    valid_content = f'{{"title": "Valid", "description": "Good", "explanation": "{valid_explanation}"}}'
-    val2 = MagicMock()
-    val2.content = valid_content
-    
-    # Setup async return values
-    mock_llm.ainvoke = AsyncMock(side_effect=[val1, val2])
+    # Setup async return value
+    mock_llm.ainvoke = AsyncMock(return_value=val)
     
     # Patch get_llm
     with patch("backend.services.remediation_service.get_llm", return_value=mock_llm):
@@ -123,6 +117,6 @@ async def test_generate_remediation_retry_logic():
         
         result = await generate_remediation_content(diagnosis, original_node)
         
-        assert result["title"] == "Valid"
-        assert len(result["explanation"]) > 100
-        assert mock_llm.ainvoke.call_count == 2
+        # Should fail fast with error, only 1 call (no retry)
+        assert "error" in result
+        assert mock_llm.ainvoke.call_count == 1
