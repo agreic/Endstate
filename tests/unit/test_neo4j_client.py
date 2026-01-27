@@ -101,6 +101,7 @@ class TestNeo4jClientDriver:
         mock_graph_db.driver.assert_called_once_with(
             "bolt://localhost:7687",
             auth=("neo4j", "password123"),
+            notifications_disabled_categories=["UNRECOGNIZED", "DEPRECATION"],
         )
         assert driver == mock_driver
 

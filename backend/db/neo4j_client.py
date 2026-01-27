@@ -125,9 +125,12 @@ class Neo4jClient:
             self._driver = None
 
         if self._driver is None:
+            # Suppress notifications about non-existent labels/properties/relationship types
+            # These are informational warnings that occur when querying fresh databases
             self._driver = GraphDatabase.driver(
                 current_uri,
                 auth=(current_user, self._config.password),
+                notifications_disabled_categories=["UNRECOGNIZED", "DEPRECATION"],
             )
             self._last_uri = current_uri
             self._last_user = current_user
@@ -873,6 +876,52 @@ class Neo4jClient:
             },
         )
 
+    def find_existing_project_by_content(
+        self,
+        session_id: str,
+        title: str,
+        description: str,
+    ) -> Optional[dict]:
+        """Check if a project with similar content already exists for this session.
+        
+        Returns project info (id, name) if exists, None otherwise.
+        Uses case-insensitive matching on title AND description.
+        """
+        # Normalize for comparison
+        norm_title = title.strip().lower()
+        norm_desc = description.strip().lower()[:200]  # First 200 chars
+        
+        result = self.query(
+            """
+            MATCH (ps:ProjectSummary)
+            WHERE ps.summary_json IS NOT NULL
+            RETURN ps.id as id, ps.project_name as name, ps.summary_json as summary_json
+            """,
+            {},
+        )
+        
+        for row in result:
+            try:
+                summary = json.loads(row.get("summary_json", "{}"))
+                # Check if this project is for the same session
+                if summary.get("session_id") != session_id:
+                    continue
+                agreed = summary.get("agreed_project", {})
+                if not isinstance(agreed, dict):
+                    continue
+                existing_title = str(agreed.get("name", "")).strip().lower()
+                existing_desc = str(agreed.get("description", "")).strip().lower()[:200]
+                
+                # Match by either same title OR same description (first 200 chars)
+                if existing_title and existing_title == norm_title:
+                    return {"id": row.get("id"), "name": row.get("name")}
+                if existing_desc and norm_desc and existing_desc == norm_desc:
+                    return {"id": row.get("id"), "name": row.get("name")}
+            except (json.JSONDecodeError, TypeError):
+                continue
+        
+        return None
+
     def update_project_capstone_state(
         self,
         project_id: str,
@@ -1168,7 +1217,7 @@ class Neo4jClient:
             """
             MATCH (p:Project)-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE]->(n)
             WHERE n.id = $node_id OR elementId(n) = $node_id OR n.name = $node_name
-            RETURN DISTINCT p.id as id, p.is_default as is_default
+            RETURN DISTINCT p.id as id, p.is_default as is_default, p.created_at as created_at
             ORDER BY p.is_default ASC, p.created_at ASC
             """,
             {"node_id": node_id, "node_name": node_name},
