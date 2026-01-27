@@ -143,6 +143,7 @@ export interface GraphData {
   relationships: ApiRelationship[];
   total_nodes: number;
   total_relationships: number;
+  filtered_project_id?: string | null;
 }
 
 export interface GraphStats {
@@ -270,8 +271,18 @@ export interface ProjectListItem {
   interests: string[];
 }
 
-export async function fetchGraphData(): Promise<GraphData> {
-  return requestJson<GraphData>('/api/graph');
+export interface GraphProjectsResponse {
+  projects: Array<{ id: string; name: string; created_at: string; is_default: boolean }>;
+  most_recent_project_id: string | null;
+}
+
+export async function fetchGraphData(projectId?: string): Promise<GraphData> {
+  const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return requestJson<GraphData>(`/api/graph${params}`);
+}
+
+export async function fetchGraphProjects(): Promise<GraphProjectsResponse> {
+  return requestJson<GraphProjectsResponse>('/api/graph/projects');
 }
 
 export async function fetchGraphStats(): Promise<GraphStats> {

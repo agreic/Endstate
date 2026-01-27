@@ -210,28 +210,74 @@ def health_check():
 
 
 @app.get("/api/graph")
-def get_graph():
+def get_graph(project_id: Optional[str] = None):
     """
-    Fetch all nodes and relationships from the graph database.
+    Fetch nodes and relationships from the graph database.
     Excludes chat-related nodes and relationships.
     
+    Args:
+        project_id: Optional project ID to filter by. 
+                   If "all" or omitted with no projects, returns all nodes.
+                   If omitted and projects exist, auto-filters to most recent project.
+    
     Returns:
-        JSON with nodes and relationships arrays
+        JSON with nodes, relationships, and filtered_project_id
     """
     service = get_service()
     try:
         service.db.ensure_project_nodes()
-        nodes = service.db.get_knowledge_graph_nodes()
-        relationships = service.db.get_knowledge_graph_relationships()
+        
+        # Determine which project to filter by
+        effective_project_id = None
+        if project_id == "all":
+            # Explicitly show all nodes
+            effective_project_id = None
+        elif project_id:
+            # Filter to specific project
+            effective_project_id = project_id
+        else:
+            # Auto-detect: use most recent project if available
+            effective_project_id = service.db.get_most_recent_project_id()
+        
+        # Get filtered nodes and relationships
+        nodes = service.db.get_knowledge_graph_nodes_for_project(
+            effective_project_id
+        )
+        relationships = service.db.get_knowledge_graph_relationships_for_project(
+            effective_project_id
+        )
         
         return {
             "nodes": nodes,
             "relationships": relationships,
             "total_nodes": len(nodes),
             "total_relationships": len(relationships),
+            "filtered_project_id": effective_project_id,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/graph/projects")
+def get_graph_projects():
+    """
+    Get list of projects available for knowledge graph filtering.
+    
+    Returns:
+        JSON with list of projects (id, name, created_at)
+    """
+    service = get_service()
+    try:
+        projects = service.db.list_all_projects(include_default=False)
+        most_recent_id = service.db.get_most_recent_project_id()
+        return {
+            "projects": projects,
+            "most_recent_project_id": most_recent_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @app.get("/api/graph/stats")

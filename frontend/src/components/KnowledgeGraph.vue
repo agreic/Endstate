@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, fetchGraphProjects, type ApiNode, type ApiRelationship, type GraphProjectsResponse } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -52,6 +52,13 @@ const lessonJobIds = ref<string[]>([]);
 const lessonCanceling = ref(false);
 const lessonJobNodeId = ref<string | null>(null);
 const lessonQueuedCount = ref(0);
+
+// Project filter state
+const selectedProjectId = ref<string | null>(null);
+const showAllProjects = ref(false);
+const availableProjects = ref<Array<{ id: string; name: string; created_at: string }>>([]);
+const filteredProjectId = ref<string | null>(null);
+
 let lessonPollTimer: number | null = null;
 const lessonQueuedText = computed(() => {
   if (lessonQueuedCount.value > 0) {
@@ -174,12 +181,33 @@ const getDisplayProperties = (node: GraphNode): Array<{ key: string; value: any 
     .map(([key, value]) => ({ key, value }));
 };
 
+const loadProjects = async () => {
+  try {
+    const data = await fetchGraphProjects();
+    availableProjects.value = data.projects;
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+  }
+};
+
 const loadGraphData = async () => {
   isLoading.value = true;
   loadError.value = null;
   
   try {
-    const data = await fetchGraphData();
+    // Determine which project_id to pass
+    let projectIdParam: string | undefined;
+    if (showAllProjects.value) {
+      projectIdParam = 'all';
+    } else if (selectedProjectId.value) {
+      projectIdParam = selectedProjectId.value;
+    }
+    // If neither, let backend auto-select most recent project
+    
+    const data = await fetchGraphData(projectIdParam);
+    
+    // Store the active filtered project ID from response
+    filteredProjectId.value = data.filtered_project_id || null;
     
     if (data.total_nodes === 0) {
       if (graphData.value.nodes.length > 0) {
@@ -676,8 +704,14 @@ const handleResize = () => {
 };
 
 onMounted(() => {
+  loadProjects();
   loadGraphData();
   window.addEventListener("resize", handleResize);
+});
+
+// Watch for project filter changes and reload graph
+watch([selectedProjectId, showAllProjects], () => {
+  loadGraphData();
 });
 
 onUnmounted(() => {
@@ -775,6 +809,33 @@ const isRemediationNode = computed(() => {
             Refresh
           </template>
         </button>
+        
+        <!-- Project Filter -->
+        <div class="mb-3 border-t border-surface-100 pt-3">
+          <label class="flex items-center gap-2 text-xs text-surface-600 mb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              v-model="showAllProjects"
+              class="form-checkbox rounded text-primary-500"
+            />
+            <span>Show All Projects</span>
+          </label>
+          
+          <select
+            v-if="!showAllProjects && availableProjects.length > 0"
+            v-model="selectedProjectId"
+            class="w-full text-xs border border-surface-200 rounded-lg p-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-300"
+          >
+            <option :value="null">Latest Project</option>
+            <option v-for="project in availableProjects" :key="project.id" :value="project.id">
+              {{ project.name || project.id }}
+            </option>
+          </select>
+          
+          <p v-if="filteredProjectId && !showAllProjects" class="text-xs text-surface-400 mt-1">
+            Showing: {{ availableProjects.find(p => p.id === filteredProjectId)?.name || filteredProjectId }}
+          </p>
+        </div>
         
         <div v-if="loadError" class="text-xs text-red-500 mb-2">
           {{ loadError }}

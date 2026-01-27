@@ -601,6 +601,161 @@ class Neo4jClient:
         )
         return result[0]["count"] if result else 0
 
+    def get_most_recent_project_id(self) -> Optional[str]:
+        """
+        Get the ID of the most recently created non-default project.
+        
+        Returns:
+            Project ID string, or None if no projects exist
+        """
+        result = self.query(
+            """
+            MATCH (p:Project)
+            WHERE NOT COALESCE(p.is_default, false)
+            RETURN p.id as id, p.created_at as created_at
+            ORDER BY p.created_at DESC
+            LIMIT 1
+            """
+        )
+        return result[0]["id"] if result else None
+
+    def get_knowledge_graph_nodes_for_project(
+        self, project_id: Optional[str], limit: int = 500
+    ) -> list[dict]:
+        """
+        Get nodes for the knowledge graph filtered by project.
+        
+        Includes nodes connected to the project via HAS_NODE, HAS_SKILL, HAS_CONCEPT,
+        HAS_TOPIC, HAS_MILESTONE, or HAS_LESSON relationships.
+        If project_id is None, returns all nodes (same as get_knowledge_graph_nodes).
+        
+        Args:
+            project_id: Project ID to filter by, or None for all nodes
+            limit: Maximum number of nodes to return
+            
+        Returns:
+            List of node dictionaries
+        """
+        if project_id is None:
+            return self.get_knowledge_graph_nodes(limit=limit)
+        
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
+        
+        # Get the project node itself
+        project_result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})
+            WHERE NOT COALESCE(p.is_default, false)
+            RETURN labels(p) as labels,
+                   properties(p) as properties,
+                   elementId(p) as element_id,
+                   p.id as id
+            """,
+            {"project_id": project_id},
+        )
+        
+        # Get nodes connected to this project via various relationship types
+        connected_nodes = self.query(
+            """
+            MATCH (p:Project {id: $project_id})-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE|HAS_LESSON]->(n)
+            WHERE any(label IN labels(n) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
+            RETURN labels(n) as labels,
+                   properties(n) as properties,
+                   elementId(n) as element_id,
+                   n.id as id
+            LIMIT $limit
+            """,
+            {"project_id": project_id, "labels": allowed_labels, "limit": limit},
+        )
+        
+        combined = project_result + connected_nodes
+        seen = set()
+        nodes = []
+        for row in combined:
+            node = _serialize_node(row)
+            node_id = node.get("id")
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            nodes.append(node)
+        return nodes
+
+    def get_knowledge_graph_relationships_for_project(
+        self, project_id: Optional[str], limit: int = 500
+    ) -> list[dict]:
+        """
+        Get relationships for the knowledge graph filtered by project.
+        
+        Returns relationships where at least one node is connected to the project.
+        If project_id is None, returns all relationships.
+        
+        Args:
+            project_id: Project ID to filter by, or None for all relationships
+            limit: Maximum number of relationships to return
+            
+        Returns:
+            List of relationship dictionaries
+        """
+        if project_id is None:
+            return self.get_knowledge_graph_relationships(limit=limit)
+        
+        allowed_labels = ["Skill", "Concept", "Topic", "Project", "Milestone"]
+        
+        # Get relationships where both source and target are connected to the project
+        # This includes direct project relationships and relationships between project nodes
+        result = self.query(
+            """
+            MATCH (p:Project {id: $project_id})
+            OPTIONAL MATCH (p)-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE|HAS_LESSON]->(connected)
+            WITH p, COLLECT(DISTINCT COALESCE(connected.id, elementId(connected))) + [p.id] as project_node_ids
+            MATCH (n)-[r]->(m)
+            WHERE (COALESCE(n.id, elementId(n)) IN project_node_ids OR COALESCE(m.id, elementId(m)) IN project_node_ids)
+              AND any(label IN labels(n) WHERE label IN $labels)
+              AND any(label IN labels(m) WHERE label IN $labels)
+              AND NOT (n:Project AND COALESCE(n.is_default, false))
+              AND NOT (m:Project AND COALESCE(m.is_default, false))
+            RETURN COALESCE(n.id, elementId(n)) as source,
+                   type(r) as type,
+                   COALESCE(m.id, elementId(m)) as target,
+                   properties(r) as properties
+            LIMIT $limit
+            """,
+            {"project_id": project_id, "labels": allowed_labels, "limit": limit},
+        )
+        return result
+
+    def list_all_projects(self, include_default: bool = False) -> list[dict]:
+        """
+        List all projects with their basic info.
+        
+        Args:
+            include_default: Whether to include the default project
+            
+        Returns:
+            List of project dictionaries with id, name, and created_at
+        """
+        if include_default:
+            result = self.query(
+                """
+                MATCH (p:Project)
+                RETURN p.id as id, p.name as name, p.created_at as created_at,
+                       COALESCE(p.is_default, false) as is_default
+                ORDER BY p.is_default ASC, p.created_at DESC
+                """
+            )
+        else:
+            result = self.query(
+                """
+                MATCH (p:Project)
+                WHERE NOT COALESCE(p.is_default, false)
+                RETURN p.id as id, p.name as name, p.created_at as created_at,
+                       false as is_default
+                ORDER BY p.created_at DESC
+                """
+            )
+        return result
+
     def get_all_relationships(self, limit: int = 100) -> list[dict]:
         """
         Get all relationships.
