@@ -708,7 +708,8 @@ class Neo4jClient:
             """
             MATCH (p:Project {id: $project_id})
             OPTIONAL MATCH (p)-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE|HAS_LESSON]->(connected)
-            WITH COLLECT(DISTINCT connected) + [p] as project_nodes
+            WITH p, COLLECT(DISTINCT connected) as connected_nodes
+            WITH connected_nodes + [p] as project_nodes
             UNWIND project_nodes as n
             MATCH (n)-[r]-(m)
             WHERE any(label IN labels(n) WHERE label IN $labels)
@@ -1154,11 +1155,11 @@ class Neo4jClient:
                     rel_types.append(rel)
             
             if rel_types:
-                rel_pattern = "|".join(f":{r}" for r in rel_types)
+                rel_pattern = "|".join(rel_types)
                 self.query(
                     f"""
                     MATCH (p:Project)-[r:HAS_NODE]->(n)
-                    WHERE (p)-[{rel_pattern}]->(n)
+                    WHERE (p)-[:{rel_pattern}]->(n)
                     DELETE r
                     """
                 )

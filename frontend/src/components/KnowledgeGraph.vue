@@ -257,9 +257,15 @@ const loadGraphData = async () => {
     }));
     
     setTimeout(() => {
-      initGraph();
-      isLoading.value = false;
-    }, 100);
+      try {
+        initGraph();
+      } catch (e) {
+        console.error("Failed to initialize graph visualization:", e);
+        loadError.value = "Failed to render graph visualization";
+      } finally {
+        isLoading.value = false;
+      }
+    }, 200);
     
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
@@ -530,7 +536,15 @@ const initGraph = () => {
     fx: null,
     fy: null,
   }));
-  const links: GraphLink[] = graphData.value.links.map((d) => ({ ...d }));
+  
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const links: GraphLink[] = graphData.value.links
+    .filter(link => {
+      const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      return nodeIds.has(sourceId) && nodeIds.has(targetId);
+    })
+    .map((d) => ({ ...d }));
 
   for (const link of links) {
     const sourceNode = nodes.find((n) => n.id === link.source || (link.source as GraphNode)?.id === link.source);
