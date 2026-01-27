@@ -730,6 +730,12 @@ const isProjectNode = computed(() => {
   if (!selectedNode.value) return false;
   return selectedNode.value.labels?.includes("Project") || selectedNode.value.labels?.includes("ProjectSummary");
 });
+
+const isRemediationNode = computed(() => {
+  if (!selectedNode.value) return false;
+  return selectedNode.value.properties?.is_remediation === true || 
+         selectedNode.value.properties?.node_type === 'remediation';
+});
 </script>
 
 <template>
@@ -901,7 +907,7 @@ const isProjectNode = computed(() => {
           </div>
         </div>
 
-        <div class="mt-3" v-if="!isProjectNode">
+        <div class="mt-3" v-if="!isProjectNode && !isRemediationNode">
           <button
             @click="loadLesson"
             :disabled="lessonLoading"

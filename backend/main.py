@@ -1002,6 +1002,9 @@ def list_project_lessons(project_id: str):
         if isinstance(archived_at, DateTime):
             archived_at = archived_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         explanation = row.get("explanation") or ""
+        if isinstance(explanation, list):
+            explanation = " ".join(str(e) for e in explanation)
+        explanation = str(explanation)
         task = row.get("task") or ""
         if "```" in explanation or explanation.strip().startswith("{"):
             parsed = parse_lesson_content(explanation)

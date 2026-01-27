@@ -1159,13 +1159,16 @@ class Neo4jClient:
         )
 
     def get_projects_for_node(self, node_id: str, node_name: str) -> list[dict]:
-        """Get projects connected to a node by id or name."""
+        """Get projects connected to a node by id or name via any relationship type."""
+        # Build a union of all relationship types to find connected projects
+        rel_types = ["HAS_NODE", "HAS_SKILL", "HAS_CONCEPT", "HAS_TOPIC", "HAS_MILESTONE"]
+        
         result = self.query(
             """
-            MATCH (p:Project)-[:HAS_NODE]->(n)
+            MATCH (p:Project)-[:HAS_NODE|HAS_SKILL|HAS_CONCEPT|HAS_TOPIC|HAS_MILESTONE]->(n)
             WHERE n.id = $node_id OR elementId(n) = $node_id OR n.name = $node_name
-            RETURN p.id as id, p.is_default as is_default
-            ORDER BY p.created_at ASC
+            RETURN DISTINCT p.id as id, p.is_default as is_default
+            ORDER BY p.is_default ASC, p.created_at ASC
             """,
             {"node_id": node_id, "node_name": node_name},
         )
