@@ -117,58 +117,56 @@ async def generate_lesson(
         f"{prior_section}"
     )
 
-    trace_input = {
-        "workflow": "lesson_generation",
-        "node_id": node.get("id"),
-        "node_name": name,
-        "labels": node.get("labels", []),
-        "description": description,
-        "lesson_index": lesson_index,
-        "prior_titles": prior_titles,
-        "profile": profile or {},
-        "learning_style": learning_style or "not specified",
-        "skill_level": skill_level,
-        "time_available": time_available,
-        "instruction": instruction,
-        "model": model,
-        "provider": provider,
-        "prompt": prompt,
-    }
+    model_used = (
+        getattr(llm, "model_name", None)
+        or getattr(llm, "model", None)
+        or getattr(getattr(llm, "client", None), "model", None)
+        or getattr(getattr(llm, "client", None), "model_name", None)
+        or model
+        or "unknown"
+    )
 
     with trace(
-        "endstate.lesson.generate",
-        input=trace_input,
+        name="lesson_generation.generate_lesson",
+        input={
+            "workflow": "lesson_generation.generate_lesson",
+            "model_used": model_used,
+            "prompt": prompt,
+            "node_id": node.get("id"),
+            "node_name": name,
+            "lesson_index": lesson_index,
+        },
         tags=[
-            "workflow:lesson",
-            "step:generate",
-            f"model:{model}",
+            "workflow:lesson_generation",
+            "stage:generate_lesson",
+            f"model:{model_used}",
             f"provider:{provider}",
             f"node_id:{node.get('id')}",
         ],
-    ) as t:
+    ) as tr:
         try:
-            with span("llm.call"):
-                response = await asyncio.wait_for(
-                    llm.ainvoke([("human", prompt)]),
-                    timeout=LESSON_TIMEOUT,
-                )
+            response = await asyncio.wait_for(
+                llm.ainvoke([("human", prompt)]),
+                timeout=LESSON_TIMEOUT,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            if t is not None:
-                t.output = {"error": f"Lesson generation failed: {e}"}
+            if tr is not None:
+                tr.output = {"error": f"Lesson generation failed: {e}"}
             return {"error": f"Lesson generation failed: {e}"}
 
         content = str(response.content if hasattr(response, "content") else response)
         parsed = parse_lesson_content(content)
 
-        if t is not None:
-            t.output = {
-                "parsed": parsed,
+        if tr is not None:
+            tr.output = {
                 "raw": content,
+                "parsed": parsed or {},
             }
 
         return parsed
+
 
 
 
