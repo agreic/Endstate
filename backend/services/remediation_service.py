@@ -127,6 +127,11 @@ async def diagnose_failure(
         "missing_concepts": parsed.get("missing_concepts", []),
         "severity": str(parsed.get("severity", "moderate")).lower(),
         "recommended_action": str(parsed.get("recommended_action", "review_prerequisite")),
+        "_opik": {
+            "prompt": prompt,
+            "raw": content[:2000],
+            "parsed": parsed or {},
+        },
     }
 
 
@@ -192,7 +197,9 @@ JSON SCHEMA:
   }}
 }}
 """
-    
+    raw_content = ""
+
+    parsed_top = None  
     try:
         response = await asyncio.wait_for(
             llm.ainvoke([("human", prompt)]),
@@ -229,6 +236,11 @@ JSON SCHEMA:
             "title": f"Review: {primary_concept}",
             "description": f"Reinforcement of {primary_concept}.",
             "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
+            "_opik": {
+                "prompt": prompt,
+                "raw": content[:2000],
+                "parsed": parsed or {},
+            },
         }
         
     except asyncio.CancelledError:
