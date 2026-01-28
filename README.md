@@ -66,6 +66,51 @@ endstate/
 - Feedback with suggestions for improvement
 - Resubmit until complete (score ≥ 0.7 + all skills evidenced)
 
+## How to Use Endstate
+
+Follow this step-by-step workflow to get the most out of the platform:
+
+### Step 1: Start a Conversation
+Open the Chat tab and describe your learning goals to the AI. Be specific about:
+- What you want to learn or build
+- Your current skill level
+- Time constraints and preferences
+
+### Step 2: Generate Project Proposals
+Click the **"Suggest Projects"** button to receive 2-3 tailored project options based on your conversation.
+
+### Step 3: Accept a Project
+Select a project proposal card to create it. The project will be added to:
+- **Projects Tab**: View project details, skills, and milestones
+- **Knowledge Graph**: Visualize skills and concepts as interactive nodes
+
+### Step 4: Add More Skills & Topics
+To expand your learning path:
+1. Go to the **Projects tab**
+2. Click on your project to open Project Details
+3. Click **"Generate Nodes"** to add more skills, concepts, and topics
+
+### Step 5: Generate Lessons from the Knowledge Graph
+Individual lessons can be created for any skill or topic:
+1. Open the **Knowledge Graph** view
+2. Click on a skill or topic node
+3. Click **"Generate Lesson"** to create personalized learning content
+
+### Step 6: View Lessons & Create Assessments
+Access your generated lessons:
+1. Go to **Projects tab** → click on a project
+2. View the list of generated lessons in the Project Details
+3. Click on a lesson to reveal its content
+4. Use **"Generate Assessment"** to create practice tasks
+
+### Step 7: Capstone Mode - Final Test
+When you're ready to prove your mastery:
+1. Open the project and enter **Capstone Mode**
+2. Submit a text-based solution demonstrating your skills
+3. Receive AI-powered evaluation with detailed feedback
+4. Resubmit as many times as needed
+5. **Pass** (score ≥ 0.7 with all skills evidenced) to complete the project!
+
 ## Installation
 
 ```bash

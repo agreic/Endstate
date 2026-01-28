@@ -12,28 +12,38 @@ const emit = defineEmits<{
 const steps = [
   {
     icon: MessageSquare,
-    title: 'Start a Conversation',
+    title: '1. Start a Conversation',
     description: 'Tell the AI about your learning goals, interests, and what you want to achieve. The chat focuses on understanding your intent and constraints.'
   },
   {
     icon: Sparkles,
-    title: 'Receive Project Proposals',
-    description: 'Click “Suggest Projects” to generate 2-3 focused project options based on the chat so far.'
+    title: '2. Receive Project Proposals',
+    description: 'Click "Suggest Projects" to generate 2-3 focused project options based on the chat so far.'
   },
   {
     icon: CheckCircle,
-    title: 'Choose or Reject',
-    description: 'Pick a proposal card to create a project, or reject all and continue chatting to refine ideas.'
+    title: '3. Choose or Reject',
+    description: 'Pick a proposal card to create a project, or reject all and continue chatting to refine ideas. After creating a project, you can view it in the Knowledge Graph or the Projects tab.'
   },
   {
     icon: FolderOpen,
-    title: 'Track Your Progress',
-    description: 'View your project plans in the Projects tab. Each plan includes skills to develop, topics to learn, and achievable milestones.'
+    title: '4. Add More Skills & Topics',
+    description: 'Go to the Projects tab, click on a project, and use "Generate Nodes" to add more skills, concepts, and topics to your learning path.'
   },
   {
     icon: Network,
-    title: 'Explore Your Knowledge Graph',
-    description: 'Watch your learning journey visualize as a knowledge graph. See connections between concepts and track your growing expertise.'
+    title: '5. Generate Lessons from the Knowledge Graph',
+    description: 'In the Knowledge Graph view, click on any skill or topic node, then click "Generate Lesson" to create personalized learning content for that specific skill.'
+  },
+  {
+    icon: BookOpen,
+    title: '6. View Lessons & Create Assessments',
+    description: 'Generated lessons appear in the Project Details section. Click on a lesson to view its content, and generate assessment tasks to test your understanding.'
+  },
+  {
+    icon: Zap,
+    title: '7. Capstone Mode - Final Evaluation',
+    description: 'When you\'re ready, enter Capstone Mode for you final test. Submit your solution and receive AI-powered evaluation to determine if you\'ve mastered the skills. Pass to complete the project!'
   }
 ];
 
@@ -103,8 +113,9 @@ const handleBackdropClick = (e: MouseEvent) => {
                 <h4 class="text-sm font-medium text-surface-900 dark:text-white mb-1">Pro Tips</h4>
                 <ul class="text-sm text-surface-600 dark:text-surface-400 space-y-1">
                   <li>• Be specific about your current skill level and time availability</li>
-                  <li>• Accept projects that genuinely interest you for best results</li>
-                  <li>• Reset conversations anytime to start fresh</li>
+                  <li>• Use the Knowledge Graph to generate lessons for skills you want to focus on</li>
+                  <li>• Complete assessment tasks before attempting the Capstone to ensure readiness</li>
+                  <li>• You can resubmit Capstone solutions unlimited times until you pass</li>
                   <li>• Toggle dark mode in Settings for comfortable nighttime learning</li>
                 </ul>
               </div>
