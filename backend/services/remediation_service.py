@@ -235,14 +235,38 @@ JSON SCHEMA:
 
     parsed_top = None  
     try:
-        response = await asyncio.wait_for(
-            llm.ainvoke([("human", prompt)]),
-            timeout=REMEDIATION_TIMEOUT
+        model_used = (
+            getattr(llm, "model_name", None)
+            or getattr(llm, "model", None)
+            or getattr(getattr(llm, "client", None), "model", None)
+            or getattr(getattr(llm, "client", None), "model_name", None)
+            or "unknown"
         )
-        
-        content = str(response.content if hasattr(response, "content") else response)
-        raw_content = content[:2000]
-        parsed_top = _extract_json_block(content)
+
+        with trace(
+            name="assessment_evaluation.generate_remediation",
+            input={
+                "workflow": "assessment_evaluation.generate_remediation",
+                "model_used": model_used,
+                "prompt": prompt,
+            },
+            tags=["workflow:assessment_evaluation", "stage:generate_remediation"],
+        ) as tr:
+
+            response = await asyncio.wait_for(
+                llm.ainvoke([("human", prompt)]),
+                timeout=REMEDIATION_TIMEOUT
+            )
+
+            content = str(response.content if hasattr(response, "content") else response)
+            parsed_top = _extract_json_block(content)
+
+            if tr is not None:
+                tr.output = {
+                    "raw": content,
+                    "parsed": parsed_top or {},
+                }
+
 
         parsed = parsed_top
         # Handle nested "remediation" key from new schema
