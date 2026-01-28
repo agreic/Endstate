@@ -33,6 +33,36 @@ export function useChat() {
 
   const FETCH_TIMEOUT = Number(import.meta.env.VITE_CHAT_TIMEOUT_MS) || 120000; // 120 seconds default
 
+  const getHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    const getValue = (key: string): string | null => {
+      const val = localStorage.getItem(key);
+      if (!val) return null;
+      const trimmed = val.trim();
+      if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+      return trimmed;
+    };
+
+    const geminiKey = getValue('endstate_gemini_api_key');
+    const openrouterKey = getValue('endstate_openrouter_api_key') || geminiKey;
+    const neo4jUri = getValue('endstate_neo4j_uri');
+    const neo4jUser = getValue('endstate_neo4j_user');
+    const neo4jPass = getValue('endstate_neo4j_password');
+    const llmProvider = getValue('endstate_llm_provider');
+
+    if (llmProvider) headers['X-LLM-Provider'] = llmProvider;
+    if (openrouterKey) headers['X-OpenRouter-API-Key'] = openrouterKey;
+    if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
+    if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;
+    if (neo4jUser) headers['X-Neo4j-User'] = neo4jUser;
+    if (neo4jPass) headers['X-Neo4j-Password'] = neo4jPass;
+
+    return headers;
+  };
+
   const fetchWithTimeout = async (url: string, options?: RequestInit): Promise<Response> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
@@ -40,6 +70,10 @@ export function useChat() {
     try {
       const response = await fetch(url, {
         ...options,
+        headers: {
+          ...getHeaders(),
+          ...options?.headers,
+        },
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
