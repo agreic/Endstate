@@ -207,8 +207,10 @@ JSON SCHEMA:
         )
         
         content = str(response.content if hasattr(response, "content") else response)
-        parsed = _extract_json_block(content)
-        
+        raw_content = content[:2000]
+        parsed_top = _extract_json_block(content)
+
+        parsed = parsed_top
         # Handle nested "remediation" key from new schema
         if parsed and "remediation" in parsed:
             parsed = parsed["remediation"]
@@ -227,6 +229,11 @@ JSON SCHEMA:
                     "title": str(parsed.get("title", parsed.get("name", f"Review: {primary_concept}"))).strip(),
                     "description": str(parsed.get("description", "")).strip(),
                     "explanation": explanation,
+                    "_opik": {
+                        "prompt": prompt,
+                        "raw": raw_content,
+                        "parsed": parsed_top or {},
+                        },
                 }
         
         # Content was too short or failed to parse
@@ -238,8 +245,8 @@ JSON SCHEMA:
             "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
             "_opik": {
                 "prompt": prompt,
-                "raw": content[:2000],
-                "parsed": parsed or {},
+                "raw": raw_content,
+                "parsed": parsed_top or {},
             },
         }
         
@@ -252,7 +259,13 @@ JSON SCHEMA:
             "title": f"Review: {primary_concept}",
             "description": f"Reinforcement of {primary_concept}.",
             "explanation": f"Unable to generate detailed lesson. Please review the fundamentals of {primary_concept}.",
+            "_opik": {
+                "prompt": prompt,
+                "raw": raw_content,
+                "parsed": parsed_top or {},
+            },
         }
+
 
 
 def create_remediation_node(
@@ -434,10 +447,25 @@ async def remediate_assessment_failure(
                 "status": "ok",
                 "project_id": project_id,
                 "assessment_id": assessment_id,
+                "node_id": node_id,
                 "remediation_node_id": remediation_node_id,
-                "severity": diagnosis.get("severity"),
-                "recommended_action": diagnosis.get("recommended_action"),
+                "diagnosis": {
+                    "diagnosis": diagnosis.get("diagnosis"),
+                    "missing_concepts": diagnosis.get("missing_concepts", []),
+                    "severity": diagnosis.get("severity"),
+                    "recommended_action": diagnosis.get("recommended_action"),
+                },
+                "remediation": {
+                    "title": remediation_content.get("title"),
+                    "description": remediation_content.get("description"),
+                    "explanation_chars": len((remediation_content.get("explanation") or "")),
+                },
+                "llm": {
+                    "diagnose_failure": (diagnosis.get("_opik") or {}),
+                    "generate_remediation": (remediation_content.get("_opik") or {}),
+                },
             }
+
 
         return {
             "action": "node_created",
