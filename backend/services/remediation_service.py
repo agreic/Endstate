@@ -94,7 +94,14 @@ async def diagnose_failure(
         f"{prereq_context}"
     )
     
-    model_used = getattr(config.llm, "model", None) or getattr(config.llm, "model_name", None) or "unknown"
+    model_used = (
+        getattr(llm, "model_name", None)
+        or getattr(llm, "model", None)
+        or getattr(getattr(llm, "client", None), "model", None)
+        or getattr(getattr(llm, "client", None), "model_name", None)
+        or "unknown"
+    )
+
 
     with trace(
         name="assessment_evaluation.diagnose_failure",
