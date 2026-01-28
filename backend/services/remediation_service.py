@@ -110,7 +110,7 @@ async def diagnose_failure(
             "model_used": model_used,
             "prompt": prompt,
         },
-        tags=["workflow:assessment_evaluation", "stage:diagnose_failure"],
+        tags=["workflow:assessment_evaluation", "stage:diagnose_failure", f"model:{model_used}"],
     ) as tr:
         try:
             response = await asyncio.wait_for(
@@ -250,7 +250,7 @@ JSON SCHEMA:
                 "model_used": model_used,
                 "prompt": prompt,
             },
-            tags=["workflow:assessment_evaluation", "stage:generate_remediation"],
+            tags=["workflow:assessment_evaluation", "stage:generate_remediation",f"model:{model_used}"],
         ) as tr:
 
             response = await asyncio.wait_for(
@@ -260,6 +260,7 @@ JSON SCHEMA:
 
             content = str(response.content if hasattr(response, "content") else response)
             parsed_top = _extract_json_block(content)
+            raw_content = content[:2000]
 
             if tr is not None:
                 tr.output = {
@@ -405,7 +406,7 @@ async def remediate_assessment_failure(
     }
 
     tags = [
-        "workflow:remediation",
+        "workflow:assessment_evaluation.remediation",
         f"project_id:{project_id}",
         f"assessment_id:{assessment_id}",
     ]
