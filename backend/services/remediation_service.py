@@ -413,128 +413,92 @@ async def remediate_assessment_failure(
     diagnosis: dict = {}
     remediation_content: dict = {}
 
-    with trace("assessment_evaluation.remediation", input=trace_input, tags=tags) as t:
+   # Get node context for better diagnosis
+    node_result = db.get_node_by_id(node_id)
+    original_node = {}
+    if node_result:
+        from backend.db.neo4j_client import _serialize_node
+        original_node = _serialize_node(node_result.get("node"))
 
+    # Get prerequisites for context
+    prereqs = db.get_prerequisite_nodes(node_id)
+    node_context = {"prerequisites": [p.get("name") for p in prereqs if p.get("name")]}
 
-        # Get node context for better diagnosis
-        node_result = db.get_node_by_id(node_id)
-        original_node = {}
-        if node_result:
-            from backend.db.neo4j_client import _serialize_node
-            original_node = _serialize_node(node_result.get("node"))
+    # Step 1: Diagnose (diagnose_failure already has its own trace)
+    diagnosis = await diagnose_failure(
+        lesson=lesson,
+        assessment=assessment,
+        answer=answer,
+        feedback=feedback,
+        node_context=node_context,
+    )
 
-        # Get prerequisites for context
-        prereqs = db.get_prerequisite_nodes(node_id)
-        node_context = {"prerequisites": [p.get("name") for p in prereqs if p.get("name")]}
-
-        # Step 1: Diagnose
-        with span("llm.diagnose_failure"):
-            diagnosis = await diagnose_failure(
-                lesson=lesson,
-                assessment=assessment,
-                answer=answer,
-                feedback=feedback,
-                node_context=node_context,
-            )
-
-        if diagnosis.get("error"):
-            logger.warning(f"Diagnosis failed: {diagnosis.get('error')}")
-            return {
-                "action": "failed",
-                "error": diagnosis.get("error"),
-                "message": "Failed to diagnose assessment failure.",
-                "remediation_created": False,
-            }
-
-        # Check if remediation warranted
-        if diagnosis.get("recommended_action") == "hint":
-            return {
-                "action": "hint",
-                "diagnosis": diagnosis,
-                "remediation_created": False,
-                "message": "Minor gap - hint recommended instead of new node",
-            }
-
-        # Step 2: Generate remediation content
-        with span("llm.generate_remediation"):
-            remediation_content = await generate_remediation_content(
-                diagnosis=diagnosis,
-                original_node=original_node,
-                profile=profile,
-            )
-
-        if remediation_content.get("error"):
-            logger.warning(f"Content generation failed: {remediation_content.get('error')}")
-            return {
-                "action": "failed",
-                "error": remediation_content.get("error"),
-                "message": "Failed to generate remediation content.",
-                "remediation_created": False,
-            }
-
-        # Step 3: Create the remediation node
-        remediation_node_id = f"remediation-{uuid4().hex[:8]}"
-
-        with span("db.create_remediation_node"):
-            node_result = create_remediation_node(
-                db=db,
-                project_id=project_id,
-                node_id=remediation_node_id,
-                remediation_content=remediation_content,
-                diagnosis=diagnosis,
-                before_node_id=node_id,
-                assessment_id=assessment_id,
-            )
-
-        # Track the event
-        db.track_remediation_event(
-            project_id=project_id,
-            assessment_id=assessment_id,
-            remediation_node_id=remediation_node_id,
-            diagnosis_summary=diagnosis.get("diagnosis", ""),
-            severity=diagnosis.get("severity", "moderate"),
-        )
-
-        log_metric(
-            "remediation.node_created",
-            1.0,
-            session_id=project_id,
-            tags=tags,
-        )
-
-        if t is not None:
-            t.output = {
-                "status": "ok",
-                "project_id": project_id,
-                "assessment_id": assessment_id,
-                "node_id": node_id,
-                "remediation_node_id": remediation_node_id,
-                "diagnosis": {
-                    "diagnosis": diagnosis.get("diagnosis"),
-                    "missing_concepts": diagnosis.get("missing_concepts", []),
-                    "severity": diagnosis.get("severity"),
-                    "recommended_action": diagnosis.get("recommended_action"),
-                },
-                "remediation": {
-                    "title": remediation_content.get("title"),
-                    "description": remediation_content.get("description"),
-                    "explanation_chars": len((remediation_content.get("explanation") or "")),
-                },
-                "llm": {
-                    "diagnose_failure": {
-                        "raw": (diagnosis.get("_opik") or {}).get("raw", ""),
-                        "parsed": (diagnosis.get("_opik") or {}).get("parsed", {}),
-                    },
-                    "generate_remediation": {
-                        "raw": (remediation_content.get("_opik") or {}).get("raw", ""),
-                        "parsed": (remediation_content.get("_opik") or {}).get("parsed", {}),
-                    },
-                },
-
-            }
-
-
+    if diagnosis.get("error"):
+        logger.warning(f"Diagnosis failed: {diagnosis.get('error')}")
         return {
+            "action": "failed",
+            "error": diagnosis.get("error"),
+            "message": "Failed to diagnose assessment failure.",
+            "remediation_created": False,
+        }
+
+    # Check if remediation warranted
+    if diagnosis.get("recommended_action") == "hint":
+        return {
+            "action": "hint",
+            "diagnosis": diagnosis,
+            "remediation_created": False,
+            "message": "Minor gap - hint recommended instead of new node",
+        }
+
+    # Step 2: Generate remediation content (generate_remediation_content already has its own trace)
+    remediation_content = await generate_remediation_content(
+        diagnosis=diagnosis,
+        original_node=original_node,
+        profile=profile,
+    )
+
+    if remediation_content.get("error"):
+        logger.warning(f"Content generation failed: {remediation_content.get('error')}")
+        return {
+            "action": "failed",
+            "error": remediation_content.get("error"),
+            "message": "Failed to generate remediation content.",
+            "remediation_created": False,
+        }
+
+    # Step 3: Create the remediation node
+    remediation_node_id = f"remediation-{uuid4().hex[:8]}"
+
+    node_result = create_remediation_node(
+        db=db,
+        project_id=project_id,
+        node_id=remediation_node_id,
+        remediation_content=remediation_content,
+        diagnosis=diagnosis,
+        before_node_id=node_id,
+        assessment_id=assessment_id,
+    )
+
+    # Track the event
+    db.track_remediation_event(
+        project_id=project_id,
+        assessment_id=assessment_id,
+        remediation_node_id=remediation_node_id,
+        diagnosis_summary=diagnosis.get("diagnosis", ""),
+        severity=diagnosis.get("severity", "moderate"),
+    )
+
+    log_metric(
+        "remediation.node_created",
+        1.0,
+        session_id=project_id,
+        tags=tags,
+    )
+
+
+
+    return {
             "action": "node_created",
             "diagnosis": diagnosis,
             "remediation_node_id": remediation_node_id,
