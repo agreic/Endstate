@@ -27,9 +27,11 @@ from backend.services.task_registry import TaskRegistry
 from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 from backend.config import (
     X_GEMINI_API_KEY,
+    X_OPENROUTER_API_KEY,
     X_NEO4J_URI,
     X_NEO4J_USERNAME,
     X_NEO4J_PASSWORD,
+    X_LLM_PROVIDER,
 )
 
 
@@ -158,17 +160,22 @@ async def extract_config_headers(request: Request, call_next):
     neo4j_uri = request.headers.get("X-Neo4j-URI")
     neo4j_user = request.headers.get("X-Neo4j-User")
     neo4j_password = request.headers.get("X-Neo4j-Password")
+    openrouter_key = request.headers.get("X-OpenRouter-API-Key") or request.headers.get("X-Gemini-API-Key")
+    llm_provider = request.headers.get("X-LLM-Provider")
 
     # Set context variables and restore them after request
     tokens = []
-    if gemini_key:
-        tokens.append(X_GEMINI_API_KEY.set(gemini_key))
-    if neo4j_uri:
-        tokens.append(X_NEO4J_URI.set(neo4j_uri))
-    if neo4j_user:
-        tokens.append(X_NEO4J_USERNAME.set(neo4j_user))
-    if neo4j_password:
-        tokens.append(X_NEO4J_PASSWORD.set(neo4j_password))
+    
+    def set_if_valid(var, val):
+        if val and val.strip():
+            tokens.append(var.set(val.strip()))
+
+    set_if_valid(X_GEMINI_API_KEY, gemini_key)
+    set_if_valid(X_OPENROUTER_API_KEY, openrouter_key)
+    set_if_valid(X_NEO4J_URI, neo4j_uri)
+    set_if_valid(X_NEO4J_USERNAME, neo4j_user)
+    set_if_valid(X_NEO4J_PASSWORD, neo4j_password)
+    set_if_valid(X_LLM_PROVIDER, llm_provider)
 
     try:
         response = await call_next(request)
@@ -176,14 +183,7 @@ async def extract_config_headers(request: Request, call_next):
     finally:
         # Reset context variables (in reverse order)
         for token in reversed(tokens):
-            if token.var == X_GEMINI_API_KEY:
-                X_GEMINI_API_KEY.reset(token)
-            elif token.var == X_NEO4J_URI:
-                X_NEO4J_URI.reset(token)
-            elif token.var == X_NEO4J_USERNAME:
-                X_NEO4J_USERNAME.reset(token)
-            elif token.var == X_NEO4J_PASSWORD:
-                X_NEO4J_PASSWORD.reset(token)
+            token.var.reset(token)
 
 
 
@@ -210,28 +210,74 @@ def health_check():
 
 
 @app.get("/api/graph")
-def get_graph():
+def get_graph(project_id: Optional[str] = None):
     """
-    Fetch all nodes and relationships from the graph database.
+    Fetch nodes and relationships from the graph database.
     Excludes chat-related nodes and relationships.
     
+    Args:
+        project_id: Optional project ID to filter by. 
+                   If "all" or omitted with no projects, returns all nodes.
+                   If omitted and projects exist, auto-filters to most recent project.
+    
     Returns:
-        JSON with nodes and relationships arrays
+        JSON with nodes, relationships, and filtered_project_id
     """
     service = get_service()
     try:
         service.db.ensure_project_nodes()
-        nodes = service.db.get_knowledge_graph_nodes()
-        relationships = service.db.get_knowledge_graph_relationships()
+        
+        # Determine which project to filter by
+        effective_project_id = None
+        if project_id == "all":
+            # Explicitly show all nodes
+            effective_project_id = None
+        elif project_id:
+            # Filter to specific project
+            effective_project_id = project_id
+        else:
+            # Auto-detect: use most recent project if available
+            effective_project_id = service.db.get_most_recent_project_id()
+        
+        # Get filtered nodes and relationships
+        nodes = service.db.get_knowledge_graph_nodes_for_project(
+            effective_project_id
+        )
+        relationships = service.db.get_knowledge_graph_relationships_for_project(
+            effective_project_id
+        )
         
         return {
             "nodes": nodes,
             "relationships": relationships,
             "total_nodes": len(nodes),
             "total_relationships": len(relationships),
+            "filtered_project_id": effective_project_id,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/graph/projects")
+def get_graph_projects():
+    """
+    Get list of projects available for knowledge graph filtering.
+    
+    Returns:
+        JSON with list of projects (id, name, created_at)
+    """
+    service = get_service()
+    try:
+        projects = service.db.list_all_projects(include_default=False)
+        most_recent_id = service.db.get_most_recent_project_id()
+        return {
+            "projects": projects,
+            "most_recent_project_id": most_recent_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @app.get("/api/graph/stats")
@@ -656,11 +702,15 @@ def list_projects(limit: int = 50):
         except Exception:
             data = {}
 
+        capstone_data = data.get("capstone", {})
+        capstone_passed = bool(capstone_data.get("passed", False))
+        
         projects.append({
             "id": row.get("id"),
             "name": row.get("name") or data.get("agreed_project", {}).get("name", "Untitled"),
             "created_at": created_at,
             "interests": data.get("user_profile", {}).get("interests", []),
+            "capstone_passed": capstone_passed,
         })
 
     return {"projects": projects}
@@ -1002,6 +1052,9 @@ def list_project_lessons(project_id: str):
         if isinstance(archived_at, DateTime):
             archived_at = archived_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         explanation = row.get("explanation") or ""
+        if isinstance(explanation, list):
+            explanation = " ".join(str(e) for e in explanation)
+        explanation = str(explanation)
         task = row.get("task") or ""
         if "```" in explanation or explanation.strip().startswith("{"):
             parsed = parse_lesson_content(explanation)
@@ -1369,23 +1422,163 @@ async def submit_project_assessment(project_id: str, assessment_id: str, request
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
 
-    result = await evaluate_assessment(lesson, assessment, request.answer)
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+    async def _task():
+        result = await evaluate_assessment(lesson, assessment, request.answer)
+        if "error" in result:
+            raise RuntimeError(result["error"])
 
-    status = result.get("result", "fail")
-    archive_assessment = status == "pass"
-    db.update_project_assessment(
-        assessment_id,
-        status,
-        result.get("feedback", ""),
-        request.answer,
-        archived=archive_assessment,
+        status = result.get("result", "fail")
+        archive_assessment = status == "pass"
+        db.update_project_assessment(
+            assessment_id,
+            status,
+            result.get("feedback", ""),
+            request.answer,
+            archived=archive_assessment,
+        )
+        if archive_assessment:
+            db.archive_project_lesson(project_id, assessment.get("lesson_id"))
+
+        return {
+            "assessment_id": assessment_id,
+            "result": status,
+            "feedback": result.get("feedback"),
+            "remediation_available": status == "fail",
+        }
+
+    job = task_registry.register(
+        project_id, 
+        "assessment-eval", 
+        _task(), 
+        meta={"assessment_id": assessment_id}
     )
-    if archive_assessment:
-        db.archive_project_lesson(project_id, assessment.get("lesson_id"))
 
-    return {"assessment_id": assessment_id, "result": status, "feedback": result.get("feedback")}
+    return {"status": "queued", "job_id": job.job_id}
+
+
+# =============================================================================
+# Remediation endpoints
+# =============================================================================
+
+
+@app.post("/api/projects/{project_id}/assessments/{assessment_id}/remediate")
+async def remediate_assessment(project_id: str, assessment_id: str):
+    """Trigger remediation for a failed assessment."""
+    from backend.db.neo4j_client import Neo4jClient
+    from backend.services.remediation_service import remediate_assessment_failure
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
+    
+    # Get project summary for profile
+    summary_records = db.get_project_summary(project_id)
+    if not summary_records:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    summary_json = summary_records[0].get("summary_json") or "{}"
+    try:
+        summary = json.loads(summary_json)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    profile = summary.get("user_profile")
+    
+    # Get assessment details
+    assessment_data = db.get_assessment_by_id(assessment_id)
+    if not assessment_data:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    
+    if assessment_data.get("status") != "fail":
+        raise HTTPException(status_code=400, detail="Remediation only available for failed assessments")
+    
+    # Build lesson and assessment dicts for remediation service
+    lesson = {
+        "title": assessment_data.get("lesson_title", ""),
+        "explanation": assessment_data.get("lesson_explanation", ""),
+    }
+    assessment = {
+        "prompt": assessment_data.get("prompt", ""),
+    }
+    answer = assessment_data.get("answer", "")
+    feedback = assessment_data.get("feedback", "")
+    node_id = assessment_data.get("node_id", "")
+    
+    # Run remediation pipeline as a background task
+    job = task_registry.register(
+        project_id=project_id,
+        kind="remediation",
+        coro=remediate_assessment_failure(
+            db=db,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            lesson=lesson,
+            assessment=assessment,
+            answer=answer,
+            feedback=feedback,
+            node_id=node_id,
+            profile=profile,
+        ),
+        meta={"node_id": node_id, "assessment_id": assessment_id},
+    )
+    
+    return {"status": "queued", "job_id": job.job_id}
+
+
+@app.get("/api/projects/{project_id}/remediation-nodes")
+def list_project_remediation_nodes(project_id: str):
+    """List remediation nodes for a project."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    if project_id == DEFAULT_PROJECT_ID:
+        db.ensure_default_project()
+    
+    records = db.list_remediation_nodes(project_id)
+    nodes = []
+    for row in records:
+        created_at = row.get("created_at")
+        if isinstance(created_at, DateTime):
+            created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        nodes.append({
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "description": row.get("description"),
+            "severity": row.get("severity"),
+            "before_node_id": row.get("before_node_id"),
+            "triggered_by_assessment": row.get("triggered_by_assessment"),
+            "created_at": created_at,
+        })
+    return {"remediation_nodes": nodes}
+
+
+@app.get("/api/remediation/{node_id}")
+def get_remediation_node(node_id: str):
+    """Get remediation node details."""
+    from backend.db.neo4j_client import Neo4jClient
+    from neo4j.time import DateTime
+
+    db = Neo4jClient()
+    node = db.get_remediation_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Remediation node not found")
+    
+    created_at = node.get("created_at")
+    if isinstance(created_at, DateTime):
+        created_at = created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    
+    return {
+        "id": node.get("id"),
+        "name": node.get("name"),
+        "description": node.get("description"),
+        "explanation": node.get("explanation"),
+        "diagnosis": node.get("diagnosis"),
+        "severity": node.get("severity"),
+        "before_node_id": node.get("before_node_id"),
+        "triggered_by_assessment": node.get("triggered_by_assessment"),
+        "created_at": created_at,
+    }
 
 
 @app.get("/api/jobs/{job_id}")
@@ -1476,6 +1669,24 @@ async def start_project(project_id: str):
         service = KnowledgeGraphService(schema=SkillGraphSchema)
         documents = await service.aextract(text)
         normalized = service.normalize_documents(documents)
+
+        # Filter out "Project" nodes to prevents duplicates of the main project node
+        # We rely on generic HAS_NODE/HAS_SKILL links for connecting items to the project
+        filtered_docs = []
+        for doc in normalized:
+            valid_nodes = [n for n in doc.nodes if n.type != "Project"]
+            valid_node_ids = {n.id for n in valid_nodes}
+            
+            valid_rels = []
+            for rel in doc.relationships:
+                if rel.source.id in valid_node_ids and rel.target.id in valid_node_ids:
+                    valid_rels.append(rel)
+            
+            doc.nodes = valid_nodes
+            doc.relationships = valid_rels
+            filtered_docs.append(doc)
+        
+        normalized = filtered_docs
 
         node_count = sum(len(doc.nodes) for doc in normalized)
         rel_count = sum(len(doc.relationships) for doc in normalized)

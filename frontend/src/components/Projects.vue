@@ -1,8 +1,19 @@
+<script lang="ts">
+import { ref } from "vue";
+import type { RemediationResult } from "../services/api";
+
+// Persistent state across component unmounts (tab switching)
+const submittingAssessmentIds = ref<Set<string>>(new Set());
+const remediationAvailable = ref<Set<string>>(new Set());
+const remediationLoading = ref<Set<string>>(new Set());
+const remediationResults = ref<Record<string, RemediationResult>>({});
+</script>
+
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { onMounted, onUnmounted, computed } from "vue";
 import { FolderOpen, Trash2, Clock, ChevronRight, BookOpen, Target, Brain, CheckCircle, MessageSquare, ChevronDown, ChevronUp, User, Bot, Pencil, Save, X, Play, Zap } from "lucide-vue-next";
 import { marked } from "marked";
-import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, submitCapstone, listProjectSubmissions, getSubmission, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode, type ProjectSubmission, type SubmissionEvaluation } from "../services/api";
+import { listProjects, getProject, deleteProject, getProjectChat, renameProject, startProject, listProjectLessons, listProjectAssessments, updateProjectProfile, createProjectAssessment, submitProjectAssessment, archiveProjectLesson, deleteProjectLesson, archiveProjectAssessment, deleteProjectAssessment, getJobStatus, cancelJob, listProjectJobs, listProjectNodes, submitCapstone, listProjectSubmissions, getSubmission, triggerRemediation, type ProjectSummary, type ProjectListItem, type ChatMessage, type ProjectLesson, type ProjectAssessment, type ApiNode, type ProjectSubmission, type SubmissionEvaluation } from "../services/api";
 
 const projects = ref<ProjectListItem[]>([]);
 const selectedProject = ref<ProjectSummary | null>(null);
@@ -198,10 +209,40 @@ const scheduleJobPoll = (jobId: string, projectId: string) => {
         if (jobMeta?.submission_id && capstoneDetails.value?.submission?.id === jobMeta.submission_id) {
           await loadSubmissionDetails(jobMeta.submission_id);
         }
+        if (status.kind === "remediation" && jobMeta?.assessment_id) {
+          remediationResults.value = { ...remediationResults.value, [jobMeta.assessment_id]: status.result };
+          remediationLoading.value.delete(jobMeta.assessment_id);
+          remediationLoading.value = new Set(remediationLoading.value);
+        }
+        if (status.kind === "assessment-eval" && jobMeta?.assessment_id) {
+          submittingAssessmentIds.value.delete(jobMeta.assessment_id);
+          submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
+          const res = status.result;
+          if (res?.result === "fail" && res?.remediation_available) {
+            remediationAvailable.value = new Set([...remediationAvailable.value, jobMeta.assessment_id]);
+          }
+          if (res?.result === "pass") {
+            const passedAssessment = assessments.value.find((a) => a.id === jobMeta.assessment_id);
+            if (passedAssessment && selectedLesson.value?.id === passedAssessment.lesson_id) {
+              selectedLesson.value = null;
+              showAssessmentPanel.value = false;
+            }
+          }
+        }
         projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
       if (status.status === "failed" || status.status === "canceled") {
+        if (status.kind === "remediation" && jobMeta?.assessment_id) {
+          remediationResults.value = { ...remediationResults.value, [jobMeta.assessment_id]: { error: status.error || "Job failed" } };
+          remediationLoading.value.delete(jobMeta.assessment_id);
+          remediationLoading.value = new Set(remediationLoading.value);
+        }
+        if (status.kind === "assessment-eval" && jobMeta?.assessment_id) {
+          submittingAssessmentIds.value.delete(jobMeta.assessment_id);
+          submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
+          assessmentError.value = status.error || "Evaluation failed";
+        }
         projectJobs.value = projectJobs.value.filter((job) => job.job_id !== jobId);
         return;
       }
@@ -230,6 +271,23 @@ const loadProjectJobs = async (projectId: string) => {
       pollReinitJob(reinitJobId.value, projectId);
     }
     projectJobs.value.forEach((job) => scheduleJobPoll(job.job_id, projectId));
+    
+    // Sync submitting status from active assessment-eval jobs
+    const evaluatingIds = projectJobs.value
+      .filter((job) => job.kind === "assessment-eval" && job.status === "running")
+      .map((job) => job.meta?.assessment_id)
+      .filter(Boolean);
+    if (evaluatingIds.length > 0) {
+      submittingAssessmentIds.value = new Set([...submittingAssessmentIds.value, ...evaluatingIds]);
+    }
+
+    const remediatingIds = projectJobs.value
+      .filter((job) => job.kind === "remediation" && job.status === "running")
+      .map((job) => job.meta?.assessment_id)
+      .filter(Boolean);
+    if (remediatingIds.length > 0) {
+      remediationLoading.value = new Set([...remediationLoading.value, ...remediatingIds]);
+    }
   } catch (e) {
     projectJobs.value = [];
   }
@@ -346,33 +404,69 @@ const generateAssessment = async (lessonId: string) => {
 
 const submitAssessment = async (assessmentId: string) => {
   if (!selectedProject.value) return;
+  if (submittingAssessmentIds.value.has(assessmentId)) return; // Prevent double submission
+  
   assessmentError.value = null;
   const answer = assessmentAnswers.value[assessmentId] || "";
   if (!answer.trim()) {
     assessmentError.value = "Answer cannot be empty";
     return;
   }
+  
+  // Add to submitting set
+  submittingAssessmentIds.value = new Set([...submittingAssessmentIds.value, assessmentId]);
+  
   try {
     const response = await submitProjectAssessment(selectedProject.value.session_id, assessmentId, answer);
-    assessments.value = assessments.value.map((assessment) =>
-      assessment.id === assessmentId
-        ? { ...assessment, status: response.result, feedback: response.feedback, archived: response.result === "pass" }
-        : assessment,
-    );
-    if (response.result === "pass") {
-      const passedAssessment = assessments.value.find((assessment) => assessment.id === assessmentId);
-      if (passedAssessment) {
-        lessons.value = lessons.value.map((lesson) =>
-          lesson.id === passedAssessment.lesson_id ? { ...lesson, archived: true } : lesson,
-        );
-        if (selectedLesson.value?.id === passedAssessment.lesson_id) {
-          selectedLesson.value = null;
-          showAssessmentPanel.value = false;
-        }
-      }
-    }
+    
+    // Add to project jobs to track progress
+    projectJobs.value.push({
+      job_id: response.job_id,
+      kind: "assessment-eval",
+      status: "running",
+      meta: { assessment_id: assessmentId },
+    });
+    
+    // Start polling for this job
+    scheduleJobPoll(response.job_id, selectedProject.value.session_id);
+
   } catch (e) {
     assessmentError.value = e instanceof Error ? e.message : "Failed to submit assessment";
+    submittingAssessmentIds.value.delete(assessmentId);
+    submittingAssessmentIds.value = new Set(submittingAssessmentIds.value);
+  }
+};
+
+const requestRemediation = async (assessmentId: string) => {
+  if (!selectedProject.value) return;
+  if (remediationLoading.value.has(assessmentId)) return;
+  
+  assessmentError.value = null;
+  remediationLoading.value = new Set([...remediationLoading.value, assessmentId]);
+  
+  try {
+    const response = await triggerRemediation(selectedProject.value.session_id, assessmentId);
+    
+    // Add to project jobs to track progress
+    projectJobs.value.push({
+      job_id: response.job_id,
+      kind: "remediation",
+      status: "running",
+      meta: { assessment_id: assessmentId },
+    });
+    
+    // Start polling for this job
+    scheduleJobPoll(response.job_id, selectedProject.value.session_id);
+
+    // Remove from available set since we've triggered it
+    const newAvailable = new Set(remediationAvailable.value);
+    newAvailable.delete(assessmentId);
+    remediationAvailable.value = newAvailable;
+  } catch (e) {
+    assessmentError.value = e instanceof Error ? e.message : "Failed to trigger remediation";
+    const newLoading = new Set(remediationLoading.value);
+    newLoading.delete(assessmentId);
+    remediationLoading.value = newLoading;
   }
 };
 
@@ -413,7 +507,7 @@ const capstoneHeaderClass = computed(() =>
 );
 const capstoneJobs = computed(() => projectJobs.value.filter((job) => job.kind === "capstone-eval"));
 const lessonJobs = computed(() => projectJobs.value.filter((job) => job.kind === "lesson"));
-const assessmentJobs = computed(() => projectJobs.value.filter((job) => job.kind === "assessment"));
+const assessmentJobs = computed(() => projectJobs.value.filter((job) => job.kind === "assessment" || job.kind === "assessment-eval" || job.kind === "remediation"));
 
 const archiveLesson = async (lessonId: string) => {
   if (!selectedProject.value) return;
@@ -710,27 +804,40 @@ onUnmounted(() => {
               v-for="project in projects"
               :key="project.id"
               @click="selectProject(project.id)"
-              class="w-full bg-white rounded-xl p-4 border border-surface-200 hover:border-primary-300 hover:shadow-md transition-all text-left"
-              :class="{ 'border-primary-500 ring-2 ring-primary-100': selectedProject?.session_id === project.id }"
+              class="w-full rounded-xl p-4 border transition-all text-left"
+              :class="[
+                selectedProject?.session_id === project.id
+                  ? 'border-primary-500 ring-2 ring-primary-100'
+                  : project.capstone_passed
+                    ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-400 hover:shadow-md'
+                    : 'bg-white border-surface-200 hover:border-primary-300 hover:shadow-md'
+              ]"
             >
               <div class="flex items-center justify-between mb-2">
-                <Target :size="18" class="text-primary-500" />
+                <CheckCircle
+                  v-if="project.capstone_passed"
+                  :size="18"
+                  class="text-emerald-500"
+                />
+                <Target v-else :size="18" class="text-primary-500" />
                 <ChevronRight
                   :size="16"
                   class="text-surface-400 transition-transform"
                   :class="{ 'rotate-90': selectedProject?.session_id === project.id }"
                 />
               </div>
-              <h3 class="font-semibold text-surface-800 mb-2 line-clamp-2">{{ project.name }}</h3>
-              <div class="flex items-center gap-2 text-xs text-surface-400">
-                <Clock :size="12" />
-                <span>{{ formatDate(project.created_at) }}</span>
+              <h3 class="font-semibold mb-2 line-clamp-2" :class="project.capstone_passed ? 'text-emerald-800' : 'text-surface-800'">{{ project.name }}</h3>
+              <div class="flex items-center gap-2 text-xs" :class="project.capstone_passed ? 'text-emerald-600' : 'text-surface-400'">
+                <CheckCircle v-if="project.capstone_passed" :size="12" />
+                <Clock v-else :size="12" />
+                <span>{{ project.capstone_passed ? 'Completed' : formatDate(project.created_at) }}</span>
               </div>
               <div v-if="project.interests.length > 0" class="mt-3 flex flex-wrap gap-1">
                 <span
                   v-for="interest in project.interests.slice(0, 3)"
                   :key="interest"
-                  class="text-xs px-2 py-0.5 bg-surface-100 text-surface-600 rounded-full"
+                  class="text-xs px-2 py-0.5 rounded-full"
+                  :class="project.capstone_passed ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-100 text-surface-600'"
                 >
                   {{ interest }}
                 </span>
@@ -1107,7 +1214,8 @@ onUnmounted(() => {
                   <div class="flex items-start justify-between gap-3">
                     <button @click="openLesson(lesson)" class="flex-1 text-left">
                       <p class="text-sm font-semibold text-surface-700">{{ lesson.title }}</p>
-                      <div class="text-xs text-surface-500 mt-1 line-clamp-2 markdown-container" v-html="renderMarkdown(lesson.explanation)"></div>
+                      <div v-if="lesson.explanation" class="text-xs text-surface-500 mt-1 line-clamp-2 markdown-container" v-html="renderMarkdown(lesson.explanation)"></div>
+                      <p v-else class="text-xs text-surface-400 mt-1 italic">Content not yet available.</p>
                     </button>
                     <div class="flex flex-col gap-2">
                       <button
@@ -1152,113 +1260,128 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
-              <div class="text-sm text-surface-700 mb-3 markdown-container" v-html="renderMarkdown(selectedLesson.explanation)"></div>
-              <div v-if="selectedLesson.task" class="text-sm text-surface-600 mb-4 markdown-container" v-html="renderMarkdown(selectedLesson.task)"></div>
-              <button
-                @click="openAssessmentPanel"
-                class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
-              >
-                Open task
-              </button>
-              <div v-if="showAssessmentPanel" class="mt-4 p-3 bg-surface-50 rounded-lg">
-                <div class="flex items-center justify-between mb-2">
-                  <p class="text-xs font-semibold text-surface-600">Assessment</p>
-                  <button @click="closeAssessmentPanel" class="text-xs text-surface-500 hover:text-surface-700">
-                    Back
+              <div class="text-sm text-surface-700 mb-6 markdown-container" v-html="renderMarkdown(selectedLesson.explanation)"></div>
+              
+              <div v-if="selectedLesson.task" class="mt-6 border-t border-surface-100 pt-4">
+                <p class="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">Practical Task</p>
+                <div class="text-sm text-surface-600 mb-4 markdown-container" v-html="renderMarkdown(selectedLesson.task)"></div>
+              </div>
+
+              <!-- Inline Assessment Section -->
+              <div class="mt-8 pt-6 border-t border-surface-200">
+                <div class="flex items-center justify-between mb-4">
+                  <div class="flex items-center gap-2">
+                    <Target :size="18" class="text-primary-500" />
+                    <h5 class="font-semibold text-surface-800">Knowledge Assessment</h5>
+                  </div>
+                  <button
+                    v-if="!activeAssessments.find(a => a.lesson_id === selectedLesson?.id)"
+                    @click="generateAssessment(selectedLesson.id)"
+                    :disabled="isAssessmentJobActive(selectedLesson.id)"
+                    class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
+                  >
+                    {{ isAssessmentJobActive(selectedLesson.id) ? 'Generating...' : 'Generate test' }}
                   </button>
                 </div>
-                <button
-                  @click="generateAssessment(selectedLesson.id)"
-                  :disabled="isAssessmentJobActive(selectedLesson.id)"
-                  class="text-xs px-3 py-1.5 rounded-lg bg-primary-100 text-primary-700 hover:bg-primary-200 transition-colors"
-                >
-                  {{ isAssessmentJobActive(selectedLesson.id) ? 'Generating...' : 'Generate assessment' }}
-                </button>
-                <p v-if="isAssessmentJobActive(selectedLesson.id)" class="mt-2 text-xs text-surface-500">
-                  Assessment generation in progress. You can continue browsing.
-                </p>
-              </div>
-            </div>
 
-            <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
-              <div class="flex items-center gap-2 mb-4">
-                <CheckCircle :size="18" class="text-emerald-500" />
-                <h4 class="font-semibold text-surface-800">Assessments</h4>
-              </div>
-              <div v-if="assessmentsLoading" class="text-sm text-surface-400">Loading assessments...</div>
-              <div v-else>
-                <div v-if="activeAssessments.length === 0 && assessmentJobs.length === 0" class="text-sm text-surface-400">No assessments yet.</div>
-                <div v-if="assessmentJobs.length > 0" class="mt-3 space-y-2">
-                  <div v-for="job in assessmentJobs" :key="job.job_id" class="flex items-center justify-between text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
-                    <span>Generating assessment for {{ lessonTitleById(job.meta?.lesson_id || '') }}...</span>
-                    <button
-                      @click="cancelProjectJob(job.job_id)"
-                      class="text-xs px-2 py-1 rounded border border-surface-200 text-surface-600 hover:bg-surface-100"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                <div v-if="isAssessmentJobActive(selectedLesson.id)" class="p-4 bg-surface-50 rounded-xl text-center">
+                  <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600 mx-auto mb-2"></div>
+                  <p class="text-xs text-surface-500">Creating your personalized assessment...</p>
                 </div>
-                <div v-if="activeAssessments.length > 0" class="mt-3 space-y-4">
-                  <div v-for="assessment in activeAssessments" :key="assessment.id" class="p-3 bg-surface-50 rounded-lg">
-                    <p class="text-xs text-surface-400 mb-1">Lesson: {{ lessonTitleById(assessment.lesson_id) }}</p>
-                    <div class="text-sm text-surface-700 markdown-container" v-html="renderMarkdown(assessment.prompt)"></div>
-                    <p class="text-xs mt-2 text-surface-500">
-                      Status: <span class="font-semibold">{{ assessmentStatusLabel(assessment.status) }}</span>
-                    </p>
-                    <div v-if="assessment.feedback" class="text-xs text-surface-600 mt-2 markdown-container" v-html="renderMarkdown(assessment.feedback)"></div>
-                    <div class="mt-3">
+
+                <!-- Show assessment if it exists for this lesson -->
+                <div v-else-if="activeAssessments.find(a => a.lesson_id === selectedLesson?.id)" class="space-y-4">
+                  <div v-for="assessment in activeAssessments.filter(a => a.lesson_id === selectedLesson?.id)" :key="assessment.id" class="bg-surface-50 rounded-xl p-4">
+                    <div class="text-sm text-surface-700 markdown-container mb-4" v-html="renderMarkdown(assessment.prompt)"></div>
+                    
+                    <div v-if="assessment.status === 'pass'" class="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-xs flex items-center gap-2">
+                       <CheckCircle :size="14" />
+                       Passed! Well done.
+                    </div>
+                    
+                    <div v-else>
                       <textarea
                         v-model="assessmentAnswers[assessment.id]"
-                        rows="2"
-                        class="w-full px-3 py-2 text-xs rounded-lg border border-surface-200"
+                        rows="3"
+                        class="w-full px-4 py-3 text-sm rounded-xl border border-surface-200 focus:ring-2 focus:ring-primary-100 focus:border-primary-400 outline-none transition-all"
                         placeholder="Write your answer here..."
+                        :disabled="submittingAssessmentIds.has(assessment.id)"
                       ></textarea>
-                      <div class="flex items-center justify-between mt-2">
-                        <div class="flex items-center gap-2">
-                          <button
-                            @click="archiveAssessment(assessment.id)"
-                            class="text-xs px-2 py-1 rounded border border-surface-200 text-surface-600 hover:bg-surface-100"
-                          >
-                            Archive
-                          </button>
-                          <button
-                            @click="removeAssessment(assessment.id)"
-                            class="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                          >
-                            Remove
-                          </button>
+                      
+                      <div class="flex items-center justify-between mt-3">
+                        <div v-if="assessment.status" class="text-xs flex items-center gap-1.5" :class="assessment.status === 'fail' ? 'text-red-500' : 'text-emerald-600'">
+                          <span class="w-2 h-2 rounded-full bg-current"></span>
+                          {{ assessmentStatusLabel(assessment.status) }}
                         </div>
+                        <div v-else></div>
+
                         <button
                           @click="submitAssessment(assessment.id)"
-                          class="text-xs px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                          :disabled="submittingAssessmentIds.has(assessment.id)"
+                          class="text-xs px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+                          :class="submittingAssessmentIds.has(assessment.id) 
+                            ? 'bg-surface-200 text-surface-500 cursor-wait' 
+                            : 'bg-primary-600 text-white hover:bg-primary-700'"
                         >
-                          Submit answer
+                          <span v-if="submittingAssessmentIds.has(assessment.id)" class="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></span>
+                          {{ submittingAssessmentIds.has(assessment.id) ? 'Evaluating...' : 'Submit assessment' }}
                         </button>
+                      </div>
+
+                      <div v-if="assessment.feedback" class="mt-4 p-3 bg-white rounded-lg border border-surface-100 text-xs text-surface-600 markdown-container" v-html="renderMarkdown(assessment.feedback)"></div>
+
+                      <!-- Remediation in Lesson View -->
+                      <div v-if="assessment.status === 'fail'" class="mt-4 pt-4 border-t border-surface-200">
+                        <button
+                          v-if="!remediationResults[assessment.id]"
+                          @click="requestRemediation(assessment.id)"
+                          :disabled="remediationLoading.has(assessment.id)"
+                          class="w-full text-xs px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                          :class="remediationLoading.has(assessment.id) 
+                            ? 'bg-amber-50 text-amber-400 cursor-wait opacity-75' 
+                            : 'bg-amber-100 text-amber-700 hover:bg-amber-200'"
+                        >
+                          <span v-if="remediationLoading.has(assessment.id)" class="animate-spin rounded-full h-3 w-3 border-b-2 border-amber-600"></span>
+                          <Zap v-else :size="14" />
+                          {{ remediationLoading.has(assessment.id) ? 'Generating remediation...' : 'Generate follow-up lesson' }}
+                        </button>
+                        
+                        <div v-else-if="remediationResults[assessment.id]?.error" class="mt-2">
+                          <div class="bg-red-50 rounded-xl p-4 border border-red-100 mb-2">
+                            <p class="text-xs font-bold text-red-800 flex items-center gap-1.5 mb-1">
+                              Failed to generate remediation
+                            </p>
+                            <p class="text-xs text-red-600">{{ remediationResults[assessment.id].error }}</p>
+                          </div>
+                          <button
+                            @click="delete remediationResults[assessment.id]; requestRemediation(assessment.id)"
+                            class="text-[10px] text-primary-600 hover:underline font-medium"
+                          >
+                            Try again
+                          </button>
+                        </div>
+
+                        <div v-else-if="remediationResults[assessment.id]" class="bg-amber-50 rounded-xl p-4 border border-amber-100">
+                          <p class="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
+                            <Sparkles :size="14" />
+                            Remediation Path Created
+                          </p>
+                          <p class="text-xs text-amber-700 italic border-l-2 border-amber-200 pl-2 mb-3">
+                            {{ remediationResults[assessment.id].diagnosis?.diagnosis }}
+                          </p>
+                          <p class="text-xs text-amber-600">A new lesson targeting your specific gaps has been added to your dashboard.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <p v-if="assessmentError" class="mt-2 text-xs text-red-500">{{ assessmentError }}</p>
             </div>
 
+
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div v-if="selectedProject.skills?.length" class="bg-white rounded-xl shadow-sm border border-surface-200 p-5">
-                <div class="flex items-center gap-2 mb-3">
-                  <CheckCircle :size="18" class="text-emerald-500" />
-                  <h4 class="font-semibold text-surface-800">Skills</h4>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                  <span
-                    v-for="skill in selectedProject.skills"
-                    :key="skill"
-                    class="text-xs px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full"
-                  >
-                    {{ skill }}
-                  </span>
-                </div>
-              </div>
+              <!-- Skills list removed as redundant with KG nodes -->
               <div v-if="selectedProject.topics?.length" class="bg-white rounded-xl shadow-sm border border-surface-200 p-5">
                 <div class="flex items-center gap-2 mb-3">
                   <BookOpen :size="18" class="text-blue-500" />

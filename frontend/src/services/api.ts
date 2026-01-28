@@ -1,16 +1,30 @@
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 15000;
+const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 30000;
+const LLM_TIMEOUT_MS = Number(import.meta.env.VITE_LLM_TIMEOUT_MS) || 120000; // 2 minutes for LLM operations
 
 function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  const geminiKey = localStorage.getItem('endstate_gemini_api_key');
-  const neo4jUri = localStorage.getItem('endstate_neo4j_uri');
-  const neo4jUser = localStorage.getItem('endstate_neo4j_user');
-  const neo4jPass = localStorage.getItem('endstate_neo4j_password');
+  const getValue = (key: string): string | null => {
+    const val = localStorage.getItem(key);
+    if (!val) return null;
+    const trimmed = val.trim();
+    // Ignore empty strings or literal "null"/"undefined" strings
+    if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+    return trimmed;
+  };
 
+  const geminiKey = getValue('endstate_gemini_api_key');
+  const openrouterKey = getValue('endstate_openrouter_api_key') || geminiKey;
+  const neo4jUri = getValue('endstate_neo4j_uri');
+  const neo4jUser = getValue('endstate_neo4j_user');
+  const neo4jPass = getValue('endstate_neo4j_password');
+  const llmProvider = getValue('endstate_llm_provider');
+
+  if (llmProvider) headers['X-LLM-Provider'] = llmProvider;
+  if (openrouterKey) headers['X-OpenRouter-API-Key'] = openrouterKey;
   if (geminiKey) headers['X-Gemini-API-Key'] = geminiKey;
   if (neo4jUri) headers['X-Neo4j-URI'] = neo4jUri;
   if (neo4jUser) headers['X-Neo4j-User'] = neo4jUser;
@@ -129,6 +143,7 @@ export interface GraphData {
   relationships: ApiRelationship[];
   total_nodes: number;
   total_relationships: number;
+  filtered_project_id?: string | null;
 }
 
 export interface GraphStats {
@@ -254,10 +269,21 @@ export interface ProjectListItem {
   name: string;
   created_at: string;
   interests: string[];
+  capstone_passed?: boolean;
 }
 
-export async function fetchGraphData(): Promise<GraphData> {
-  return requestJson<GraphData>('/api/graph');
+export interface GraphProjectsResponse {
+  projects: Array<{ id: string; name: string; created_at: string; is_default: boolean }>;
+  most_recent_project_id: string | null;
+}
+
+export async function fetchGraphData(projectId?: string): Promise<GraphData> {
+  const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return requestJson<GraphData>(`/api/graph${params}`);
+}
+
+export async function fetchGraphProjects(): Promise<GraphProjectsResponse> {
+  return requestJson<GraphProjectsResponse>('/api/graph/projects');
 }
 
 export async function fetchGraphStats(): Promise<GraphStats> {
@@ -548,14 +574,37 @@ export async function submitProjectAssessment(
   projectId: string,
   assessmentId: string,
   answer: string,
-): Promise<{ assessment_id: string; result: string; feedback: string }> {
-  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/submit`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ answer }),
-  });
+): Promise<{ status: string; job_id: string }> {
+  // Assessment evaluation is now an async job
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/submit`, {
+      method: 'POST',
+      headers: {
+        ...getHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ answer }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const detail = errorBody?.detail || errorBody?.message || `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+
+    return response.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Assessment evaluation timed out. Please try again.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function archiveProjectLesson(projectId: string, lessonId: string): Promise<{ lesson_id: string; archived: boolean }> {
@@ -625,4 +674,55 @@ export async function listProjectSubmissions(projectId: string): Promise<{ submi
 
 export async function getSubmission(submissionId: string): Promise<{ submission: ProjectSubmission; evaluations: SubmissionEvaluation[] }> {
   return requestJson(`/api/submissions/${encodeURIComponent(submissionId)}`);
+}
+
+export interface RemediationResult {
+  status?: string;
+  job_id?: string;
+  action?: string;
+  diagnosis?: {
+    diagnosis: string;
+    missing_concepts: string[];
+    severity: string;
+    recommended_action?: string;
+  };
+  remediation_node_id?: string;
+  remediation_content?: {
+    title: string;
+    description: string;
+    explanation: string;
+  };
+  error?: string;
+}
+
+export async function triggerRemediation(
+  projectId: string,
+  assessmentId: string,
+): Promise<{ status: string; job_id: string }> {
+  // Use longer timeout for LLM-based remediation
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/remediate`, {
+      method: 'POST',
+      headers: getHeaders(),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const detail = errorBody?.detail || errorBody?.message || `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+
+    return response.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Remediation generation timed out. Please try again.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

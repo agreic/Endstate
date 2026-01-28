@@ -14,6 +14,7 @@ from typing import Any
 from backend.config import config
 from backend.llm.provider import get_llm
 from backend.services.prompt_registry import get_prompt_template, get_prompt_version
+from .utils import extract_json
 
 
 EVALUATION_TIMEOUT = config.llm.timeout_seconds
@@ -41,17 +42,7 @@ RUBRIC = {
 }
 
 
-def _extract_json_block(content: str) -> dict | None:
-    try:
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
-        if fence_match:
-            return json.loads(fence_match.group(1))
-        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
-        if obj_match:
-            return json.loads(obj_match.group(1))
-    except Exception:
-        return None
-    return None
+# Removed _extract_json_block in favor of .utils.extract_json
 
 
 async def _repair_json(llm, content: str) -> dict | None:
@@ -65,7 +56,7 @@ async def _repair_json(llm, content: str) -> dict | None:
         LOGGER.warning("[CapstoneEval] JSON repair failed: %s", exc)
         return None
     repaired = str(response.content if hasattr(response, "content") else response)
-    return _extract_json_block(repaired)
+    return extract_json(repaired)
 
 
 def _normalize_skill(name: str) -> str:
@@ -135,7 +126,7 @@ async def evaluate_submission(
         return {"error": f"Evaluation failed: {e}"}
 
     content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content)
+    parsed = extract_json(content)
     parse_error = None
     if not parsed:
         repaired = await _repair_json(llm, content)
@@ -193,7 +184,7 @@ def build_project_brief(summary: dict) -> str:
     ]
     milestones = agreed.get("milestones") if isinstance(agreed.get("milestones"), list) else []
     if milestones:
-        parts.append("Milestones: " + "; ".join(milestones))
+        parts.append("Milestones: " + "; ".join(str(m) for m in milestones if m is not None))
     return "\n".join([part for part in parts if part.strip()])
 
 
@@ -213,7 +204,7 @@ async def evaluate_project_alignment(goal: str, project: dict) -> dict[str, Any]
     except Exception as e:
         return {"error": f"Alignment evaluation failed: {e}"}
     content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content) or {}
+    parsed = extract_json(content) or {}
     score = float(parsed.get("score") or 0.0)
     return {
         "score": score,
@@ -232,16 +223,16 @@ async def evaluate_kg_quality(project: dict, summary: dict) -> dict[str, Any]:
     prompt = template.format(
         project_name=project.get("name", ""),
         project_description=project.get("description", ""),
-        skills=", ".join(skills),
-        topics=", ".join(topics),
-        concepts=", ".join(concepts),
+        skills=", ".join(str(s) for s in skills if s is not None),
+        topics=", ".join(str(t) for t in topics if t is not None),
+        concepts=", ".join(str(c) for c in concepts if c is not None),
     )
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=EVALUATION_TIMEOUT)
     except Exception as e:
         return {"error": f"KG evaluation failed: {e}"}
     content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content) or {}
+    parsed = extract_json(content) or {}
     return {
         "coverage_score": float(parsed.get("coverage_score") or 0.0),
         "redundancy_score": float(parsed.get("redundancy_score") or 0.0),

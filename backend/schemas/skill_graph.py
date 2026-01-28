@@ -26,6 +26,7 @@ SkillGraphSchema = GraphSchema(
         "Tool",               # Software tool or technology (e.g., "VS Code", "Git")
         "Domain",             # Application domain (e.g., "Data Science", "Game Dev")
         "Person",             # Learner or instructor
+        "RemediationConcept", # Dynamically inserted prerequisite for remediation
     ],
     
     # Relationship types with source->target constraints

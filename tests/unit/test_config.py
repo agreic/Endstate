@@ -42,7 +42,7 @@ class TestNeo4jConfig:
 
     def test_uri_property(self):
         """Test URI property."""
-        config = Neo4jConfig(uri="bolt://custom:7687")
+        config = Neo4jConfig(_uri="bolt://custom:7687")
         assert config.uri == "bolt://custom:7687"
 
 
@@ -145,6 +145,6 @@ class TestConfig:
 
     def test_config_override(self):
         """Test configuration override with custom values."""
-        neo4j_config = Neo4jConfig(uri="bolt://override:7687")
+        neo4j_config = Neo4jConfig(_uri="bolt://override:7687")
         config = Config(neo4j=neo4j_config)
         assert config.neo4j.uri == "bolt://override:7687"

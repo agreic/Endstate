@@ -38,6 +38,13 @@ class GraphTransformer:
         """
         self._llm = llm
         self._schema = schema or SkillGraphSchema
+        
+        # Default to prompt extraction for OpenRouter and Ollama as they often struggle with tool formats
+        if ignore_tool_usage is False:
+            provider = config.llm.provider
+            if provider in ("openrouter", "ollama"):
+                ignore_tool_usage = True
+                
         self._ignore_tool_usage = ignore_tool_usage
         self._transformer: Optional[LLMGraphTransformer] = None
     
@@ -63,10 +70,19 @@ class GraphTransformer:
     def transformer(self) -> LLMGraphTransformer:
         """Get or create LLMGraphTransformer instance."""
         if self._transformer is None:
+            kwargs = self._schema.to_transformer_kwargs()
+            
+            # LLMGraphTransformer doesn't support property extraction when ignore_tool_usage is True
+            # We also force it for OpenRouter/Ollama as they often fail to follow the tool schema anyway
+            provider = config.llm.provider
+            if self._ignore_tool_usage or provider in ("openrouter", "ollama"):
+                kwargs.pop("node_properties", None)
+                kwargs.pop("relationship_properties", None)
+                
             self._transformer = LLMGraphTransformer(
                 llm=self.llm,
                 ignore_tool_usage=self._ignore_tool_usage,
-                **self._schema.to_transformer_kwargs(),
+                **kwargs,
             )
         return self._transformer
     

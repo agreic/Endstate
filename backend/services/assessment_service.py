@@ -8,6 +8,7 @@ import asyncio
 
 from backend.config import config
 from backend.llm.provider import get_llm
+from .utils import extract_json, clean_markdown
 
 
 ASSESSMENT_TIMEOUT = config.llm.timeout_seconds
@@ -24,33 +25,37 @@ def _style_hint(style: str) -> str:
     return "Use a short conceptual question."
 
 
-def _extract_json_block(content: str) -> dict | None:
-    try:
-        import json
-        import re
-
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
-        if fence_match:
-            return json.loads(fence_match.group(1))
-
-        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
-        if obj_match:
-            return json.loads(obj_match.group(1))
-    except Exception:
-        return None
-    return None
+# Removed _extract_json_block in favor of .utils.extract_json
 
 
 def parse_assessment_content(content: str) -> dict:
-    data = _extract_json_block(content)
+    data = extract_json(content)
     if data:
+        # Flexible mapping for common synonym keys
+        if "prompt" not in data:
+            for key in ["question", "problem", "task", "assessment"]:
+                if key in data:
+                    data["prompt"] = data[key]
+                    break
+        
+        if "result" not in data:
+            for key in ["score", "status", "outcome"]:
+                if key in data:
+                    data["result"] = data[key]
+                    break
+
         return data
-    cleaned = content.replace("```json", "").replace("```", "").strip()
+        
+    cleaned = clean_markdown(content)
     return {"raw": cleaned}
 
 
 async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
     llm = get_llm()
+
+    explanation = lesson.get("explanation", "").strip()
+    if not explanation:
+        return {"error": "Cannot generate assessment for lesson with no content."}
 
     learning_style = (profile or {}).get("learning_style", "")
     prompt = (
@@ -64,6 +69,10 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment generation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment generation failed: {e}"}
 
@@ -86,6 +95,10 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
 
     try:
         response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {"error": f"Assessment evaluation timed out after {ASSESSMENT_TIMEOUT}s"}
     except Exception as e:
         return {"error": f"Assessment evaluation failed: {e}"}
 

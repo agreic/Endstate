@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import * as d3 from "d3";
 import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Plus, Trash2, BookOpen } from "lucide-vue-next";
-import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, type ApiNode, type ApiRelationship } from "../services/api";
+import { fetchGraphData, extractFromText, deleteNode, generateNodeLessons, cancelJob, listProjectJobs, fetchGraphProjects, type ApiNode, type ApiRelationship, type GraphProjectsResponse } from "../services/api";
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -52,6 +52,13 @@ const lessonJobIds = ref<string[]>([]);
 const lessonCanceling = ref(false);
 const lessonJobNodeId = ref<string | null>(null);
 const lessonQueuedCount = ref(0);
+
+// Project filter state
+const selectedProjectId = ref<string | null>(null);
+const showAllProjects = ref(false);
+const availableProjects = ref<Array<{ id: string; name: string; created_at: string }>>([]);
+const filteredProjectId = ref<string | null>(null);
+
 let lessonPollTimer: number | null = null;
 const lessonQueuedText = computed(() => {
   if (lessonQueuedCount.value > 0) {
@@ -174,12 +181,33 @@ const getDisplayProperties = (node: GraphNode): Array<{ key: string; value: any 
     .map(([key, value]) => ({ key, value }));
 };
 
+const loadProjects = async () => {
+  try {
+    const data = await fetchGraphProjects();
+    availableProjects.value = data.projects;
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+  }
+};
+
 const loadGraphData = async () => {
   isLoading.value = true;
   loadError.value = null;
   
   try {
-    const data = await fetchGraphData();
+    // Determine which project_id to pass
+    let projectIdParam: string | undefined;
+    if (showAllProjects.value) {
+      projectIdParam = 'all';
+    } else if (selectedProjectId.value) {
+      projectIdParam = selectedProjectId.value;
+    }
+    // If neither, let backend auto-select most recent project
+    
+    const data = await fetchGraphData(projectIdParam);
+    
+    // Store the active filtered project ID from response
+    filteredProjectId.value = data.filtered_project_id || null;
     
     if (data.total_nodes === 0) {
       if (graphData.value.nodes.length > 0) {
@@ -229,9 +257,15 @@ const loadGraphData = async () => {
     }));
     
     setTimeout(() => {
-      initGraph();
-      isLoading.value = false;
-    }, 100);
+      try {
+        initGraph();
+      } catch (e) {
+        console.error("Failed to initialize graph visualization:", e);
+        loadError.value = "Failed to render graph visualization";
+      } finally {
+        isLoading.value = false;
+      }
+    }, 200);
     
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'Failed to load graph data';
@@ -502,7 +536,15 @@ const initGraph = () => {
     fx: null,
     fy: null,
   }));
-  const links: GraphLink[] = graphData.value.links.map((d) => ({ ...d }));
+  
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const links: GraphLink[] = graphData.value.links
+    .filter(link => {
+      const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      return nodeIds.has(sourceId) && nodeIds.has(targetId);
+    })
+    .map((d) => ({ ...d }));
 
   for (const link of links) {
     const sourceNode = nodes.find((n) => n.id === link.source || (link.source as GraphNode)?.id === link.source);
@@ -676,8 +718,14 @@ const handleResize = () => {
 };
 
 onMounted(() => {
+  loadProjects();
   loadGraphData();
   window.addEventListener("resize", handleResize);
+});
+
+// Watch for project filter changes and reload graph
+watch([selectedProjectId, showAllProjects], () => {
+  loadGraphData();
 });
 
 onUnmounted(() => {
@@ -688,11 +736,14 @@ onUnmounted(() => {
 });
 
 const getConnectionCount = (nodeId: string): number => {
-  return graphData.value.links.filter((l) => {
+  const neighbors = new Set<string>();
+  graphData.value.links.forEach((l) => {
     const sourceId = typeof l.source === "string" ? l.source : (l.source as GraphNode).id;
     const targetId = typeof l.target === "string" ? l.target : (l.target as GraphNode).id;
-    return sourceId === nodeId || targetId === nodeId;
-  }).length;
+    if (sourceId === nodeId) neighbors.add(targetId);
+    if (targetId === nodeId) neighbors.add(sourceId);
+  });
+  return neighbors.size;
 };
 
 const clearSearch = () => {
@@ -722,6 +773,17 @@ const getDisplayLabels = (labels?: string[]): string[] => {
   if (!labels) return [];
   return labels.filter((label) => label !== "__Entity__");
 };
+
+const isProjectNode = computed(() => {
+  if (!selectedNode.value) return false;
+  return selectedNode.value.labels?.includes("Project") || selectedNode.value.labels?.includes("ProjectSummary");
+});
+
+const isRemediationNode = computed(() => {
+  if (!selectedNode.value) return false;
+  return selectedNode.value.properties?.is_remediation === true || 
+         selectedNode.value.properties?.node_type === 'remediation';
+});
 </script>
 
 <template>
@@ -761,6 +823,33 @@ const getDisplayLabels = (labels?: string[]): string[] => {
             Refresh
           </template>
         </button>
+        
+        <!-- Project Filter -->
+        <div class="mb-3 border-t border-surface-100 pt-3">
+          <label class="flex items-center gap-2 text-xs text-surface-600 mb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              v-model="showAllProjects"
+              class="form-checkbox rounded text-primary-500"
+            />
+            <span>Show All Projects</span>
+          </label>
+          
+          <select
+            v-if="!showAllProjects && availableProjects.length > 0"
+            v-model="selectedProjectId"
+            class="w-full text-xs border border-surface-200 rounded-lg p-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-300"
+          >
+            <option :value="null">Latest Project</option>
+            <option v-for="project in availableProjects" :key="project.id" :value="project.id">
+              {{ project.name || project.id }}
+            </option>
+          </select>
+          
+          <p v-if="filteredProjectId && !showAllProjects" class="text-xs text-surface-400 mt-1">
+            Showing: {{ availableProjects.find(p => p.id === filteredProjectId)?.name || filteredProjectId }}
+          </p>
+        </div>
         
         <div v-if="loadError" class="text-xs text-red-500 mb-2">
           {{ loadError }}
@@ -878,7 +967,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0" class="mb-3">
+        <div v-if="selectedNode.properties && Object.keys(selectedNode.properties).length > 0 && !isProjectNode" class="mb-3">
           <button
             @click="showProperties = !showProperties"
             class="flex items-center gap-2 text-xs text-surface-500 font-medium"
@@ -893,7 +982,7 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </div>
         </div>
 
-        <div class="mt-3">
+        <div class="mt-3" v-if="!isProjectNode && !isRemediationNode">
           <button
             @click="loadLesson"
             :disabled="lessonLoading"
@@ -916,9 +1005,15 @@ const getDisplayLabels = (labels?: string[]): string[] => {
           </button>
         </div>
         
+        <div v-if="isProjectNode" class="p-3 bg-surface-50 rounded-xl border border-surface-100">
+          <p class="text-xs text-surface-500 leading-relaxed">
+            This is your project node. It represents the target goal of your learning journey.
+          </p>
+        </div>
+        
         <div class="mt-3 pt-3 border-t border-surface-100">
           <span class="text-xs text-surface-400">
-            Connected to {{ getConnectionCount(selectedNode.id) }} nodes
+            Connected to {{ getConnectionCount(selectedNode.id) }} node{{ getConnectionCount(selectedNode.id) === 1 ? '' : 's' }}
           </span>
         </div>
       </div>

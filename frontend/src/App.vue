@@ -18,8 +18,10 @@ const showHelp = ref(false)
 const chat = useChat()
 
 const isConfigMissing = computed(() => {
-  return !localStorage.getItem('endstate_gemini_api_key') || 
-         !localStorage.getItem('endstate_neo4j_uri')
+  const hasProvider = localStorage.getItem('endstate_llm_provider');
+  const hasKey = localStorage.getItem('endstate_gemini_api_key') || localStorage.getItem('endstate_openrouter_api_key');
+  // Show banner only if neither provider nor key is set
+  return !hasProvider && !hasKey;
 })
 
 // Apply saved theme on mount
@@ -140,7 +142,7 @@ const setActiveTab = (tab: 'dashboard' | 'chat' | 'graph' | 'projects') => {
       <div v-if="isConfigMissing" class="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-900/30 px-4 py-2 flex items-center justify-between">
         <div class="flex items-center gap-2 text-amber-800 dark:text-amber-400">
           <AlertTriangle :size="16" />
-          <span class="text-xs font-medium">Cloud configuration missing. Please set your Gemini API Key and Neo4j credentials in Settings.</span>
+          <span class="text-xs font-medium">Cloud LLM not configured. Choose your provider and add an API key in Settings.</span>
         </div>
         <button 
           @click="showSettings = true"
