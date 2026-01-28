@@ -94,34 +94,59 @@ async def diagnose_failure(
         f"{prereq_context}"
     )
     
-    try:
-        response = await asyncio.wait_for(
-            llm.ainvoke([("human", prompt)]),
-            timeout=REMEDIATION_TIMEOUT
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.error(f"Diagnosis failed: {e}")
-        return {
-            "error": f"Diagnosis failed: {e}",
-            "diagnosis": "Unable to diagnose failure",
-            "missing_concepts": [],
-            "severity": "moderate",
-            "recommended_action": "review_prerequisite",
-        }
-    
-    content = str(response.content if hasattr(response, "content") else response)
-    parsed = _extract_json_block(content)
-    
+    model_used = getattr(config.llm, "model", None) or getattr(config.llm, "model_name", None) or "unknown"
+
+    with trace(
+        name="assessment_evaluation.diagnose_failure",
+        input={
+            "workflow": "assessment_evaluation.diagnose_failure",
+            "model_used": model_used,
+            "prompt": prompt,
+        },
+        tags=["workflow:assessment_evaluation", "stage:diagnose_failure"],
+    ) as tr:
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke([("human", prompt)]),
+                timeout=REMEDIATION_TIMEOUT
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Diagnosis failed: {e}")
+            if tr is not None:
+                tr.output = {"error": str(e)}
+            return {
+                "error": f"Diagnosis failed: {e}",
+                "diagnosis": "Unable to diagnose failure",
+                "missing_concepts": [],
+                "severity": "moderate",
+                "recommended_action": "review_prerequisite",
+            }
+
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = _extract_json_block(content)
+
+        if tr is not None:
+            tr.output = {
+                "raw": content,
+                "parsed": parsed or {},
+            }
+
     if not parsed:
         return {
             "diagnosis": content.strip()[:200],
             "missing_concepts": [],
             "severity": "moderate",
             "recommended_action": "review_prerequisite",
+            "_opik": {
+                "prompt": prompt,
+                "raw": content,
+                "parsed": {},
+                "model_used": model_used,
+            },
         }
-    
+
     return {
         "diagnosis": str(parsed.get("diagnosis", "")).strip(),
         "missing_concepts": parsed.get("missing_concepts", []),
@@ -129,10 +154,12 @@ async def diagnose_failure(
         "recommended_action": str(parsed.get("recommended_action", "review_prerequisite")),
         "_opik": {
             "prompt": prompt,
-            "raw": content[:2000],
+            "raw": content,
             "parsed": parsed or {},
+            "model_used": model_used,
         },
     }
+
 
 
 async def generate_remediation_content(
@@ -461,9 +488,16 @@ async def remediate_assessment_failure(
                     "explanation_chars": len((remediation_content.get("explanation") or "")),
                 },
                 "llm": {
-                    "diagnose_failure": (diagnosis.get("_opik") or {}),
-                    "generate_remediation": (remediation_content.get("_opik") or {}),
+                    "diagnose_failure": {
+                        "raw": (diagnosis.get("_opik") or {}).get("raw", ""),
+                        "parsed": (diagnosis.get("_opik") or {}).get("parsed", {}),
+                    },
+                    "generate_remediation": {
+                        "raw": (remediation_content.get("_opik") or {}).get("raw", ""),
+                        "parsed": (remediation_content.get("_opik") or {}).get("parsed", {}),
+                    },
                 },
+
             }
 
 
