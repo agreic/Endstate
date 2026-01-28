@@ -25,7 +25,7 @@ export function useChat() {
   const isChatBlocked = computed(() => isLocked.value || pendingProposals.value.length > 0);
   const messageKeys = new Set<string>();
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
   let eventSource: EventSource | null = null;
   let reconnectAttempts = 0;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -36,7 +36,7 @@ export function useChat() {
   const fetchWithTimeout = async (url: string, options?: RequestInit): Promise<Response> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-    
+
     try {
       const response = await fetch(url, {
         ...options,
@@ -89,7 +89,7 @@ export function useChat() {
     try {
       const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/messages`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
+
       const data = await response.json();
       isLocked.value = data.is_locked || false;
       pendingProposals.value = Array.isArray(data.proposals) ? data.proposals : [];
@@ -217,7 +217,7 @@ export function useChat() {
   const connectSSE = () => {
     connectionStatus.value = 'connecting';
     disconnect(); // Clean up any existing connection
-    
+
     // Timeout fallback - if SSE doesn't connect within 5s, use fetch
     const connectionTimeout = setTimeout(() => {
       if (connectionStatus.value === 'connecting') {
@@ -231,16 +231,16 @@ export function useChat() {
         });
       }
     }, 5000);
-    
+
     try {
       eventSource = new EventSource(`${API_URL}/api/chat/${sessionId.value}/stream`);
-      
+
       eventSource.onopen = () => {
         console.log('[Chat] SSE connected');
         clearTimeout(connectionTimeout);
         reconnectAttempts = 0; // Reset reconnect counter on successful connection
       };
-      
+
       eventSource.addEventListener('initial_messages', (event) => {
         clearTimeout(connectionTimeout);
         try {
@@ -337,22 +337,22 @@ export function useChat() {
           console.error('[Chat] SSE parse error:', e);
         }
       };
-      
+
       eventSource.onerror = () => {
         clearTimeout(connectionTimeout);
         console.log('[Chat] SSE connection error');
         eventSource?.close();
         eventSource = null;
-        
+
         reconnectAttempts++;
-        
+
         if (reconnectAttempts >= 5) {
           console.log('[Chat] Max reconnect attempts reached');
           connectionStatus.value = 'ready';
           error.value = 'Connection lost. Please refresh the page.';
           return;
         }
-        
+
         const delay = Math.pow(2, reconnectAttempts - 1) * 1000;
         console.log(`[Chat] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/5)`);
         connectionStatus.value = 'connecting';
@@ -376,10 +376,10 @@ export function useChat() {
       error.value = 'Chat is processing. Please wait.';
       return;
     }
-    
+
     isSending.value = true;
     error.value = null;
-    
+
     try {
       const requestId = crypto.randomUUID();
       const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/messages`, {
@@ -390,12 +390,12 @@ export function useChat() {
         },
         body: JSON.stringify({ message: content }),
       });
-      
+
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${response.status}`);
       }
-      
+
       // SSE will deliver the new message automatically
       // If SSE is not connected, fallback to fetch
       if (!eventSource || eventSource.readyState !== EventSource.OPEN) {
@@ -411,7 +411,7 @@ export function useChat() {
 
   const resetChat = async () => {
     if (isSending.value) return;
-    
+
     try {
       await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/reset`, { method: 'POST' });
       setMessages([]);

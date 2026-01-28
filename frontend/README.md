@@ -1,6 +1,6 @@
 # Endstate Frontend
 
-A sleek, modern Vue 3 + Tailwind CSS frontend demo with chat and interactive knowledge graph.
+Vue 3 + Tailwind CSS frontend with chat and interactive knowledge graph.
 
 ## Quick Start
 
@@ -14,36 +14,36 @@ Open http://localhost:3000
 
 ## Features
 
-- **Collapsible Sidebar** - Smooth animations, responsive design. Click sidebar items to navigate.
-- **Tab System** - Switch between Chat and Knowledge Graph views (header tabs or sidebar)
-- **Chat Interface** - Socratic interviewer plus “Suggest Projects” proposals
-- **Interactive Knowledge Graph** - D3.js force-directed graph with:
+- **Collapsible Sidebar** - Smooth animations, responsive design
+- **Tab System** - Switch between Chat, Knowledge Graph, and Projects
+- **Chat Interface** - Socratic interviewer with "Suggest Projects" button
+- **Interactive Knowledge Graph** - D3.js force-directed graph:
   - Data loaded from Neo4j database
   - Drag nodes to reposition
   - Zoom in/out with buttons or scroll
   - Click nodes for details
   - Search/filter functionality
+- **Project Management** - View projects, lessons, assessments, and capstone submissions
 
 ## Controls
 
-### Sidebar
-- Click the chevron icon to collapse/expand
-- Click menu items to navigate between Chat and Knowledge Graph
-
 ### Chat
 - Type message and press Enter to send
-- Shift+Enter for new line
-- Click “Suggest Projects” to generate proposal cards
+- Click "Suggest Projects" to generate proposal cards
 - Select a proposal to create a project or reject to keep chatting
 
 ### Knowledge Graph
-- Data loaded from Neo4j database via backend API
 - Drag nodes to move them
 - Scroll to zoom in/out
 - Click nodes to see details
 - Use search to filter nodes
-- Zoom buttons in top-right corner
-- Refresh button to reload data from database
+- Zoom and refresh buttons in top-right corner
+
+### Projects
+- Click a project to view details
+- Generate lessons for knowledge graph nodes
+- Complete assessments to progress
+- Submit capstone work for evaluation
 
 ## Tech Stack
 

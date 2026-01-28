@@ -9,43 +9,37 @@ import asyncio
 from backend.config import config
 from backend.llm.provider import get_llm
 from backend.services.opik_client import trace, span
+from .utils import extract_json, clean_markdown
 
 
 LESSON_TIMEOUT = config.llm.timeout_seconds
 
 
-def _extract_json_block(content: str) -> dict | None:
-    try:
-        import json
-        import re
-
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
-        if fence_match:
-            return json.loads(fence_match.group(1))
-
-        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
-        if obj_match:
-            return json.loads(obj_match.group(1))
-    except Exception:
-        return None
-    return None
+# Removed _extract_json_block in favor of .utils.extract_json
 
 
 def parse_lesson_content(content: str) -> dict:
-    data = _extract_json_block(content)
-    if data:
+    data = extract_json(content)
+    if data and "explanation" in data:
         return {
-            "explanation": data.get("explanation", ""),
+            "explanation": str(data["explanation"]).strip(),
             "task": "",
         }
 
-    cleaned = content.replace("```json", "").replace("```", "").strip()
-    lowered = cleaned.lower()
-    for marker in ("task:", "practical task", "assessment:"):
-        idx = lowered.find(marker)
-        if idx != -1:
-            cleaned = cleaned[:idx].strip()
-            break
+    # Fallback: if JSON failed or missing expected key, use the cleaned raw content
+    cleaned = clean_markdown(content)
+    
+    # Heuristic: sometimes models return "explanation: ..." even if JSON fails
+    lower_cleaned = cleaned.lower()
+    if lower_cleaned.startswith("explanation:"):
+        cleaned = cleaned[len("explanation:"):].strip()
+    elif lower_cleaned.startswith("lesson:"):
+        cleaned = cleaned[len("lesson:"):].strip()
+
+    # Truncate if there are accidental task/assessment sections at the end
+    import re
+    cleaned = re.split(r"(?i)\n\s*(?:task|assessment|quiz|exercise):", cleaned, maxsplit=1)[0].strip()
+
     return {
         "explanation": cleaned,
         "task": "",

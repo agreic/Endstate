@@ -573,6 +573,17 @@ class ChatService:
         if not proposal:
             raise ValueError("Proposal not found")
 
+        # Check for duplicate project before creating
+        title = proposal.get("title", "")
+        description = proposal.get("description", "")
+        existing = self.db.find_existing_project_by_content(session_id, title, description)
+        if existing:
+            self.db.clear_pending_proposals(session_id)
+            self.set_locked(session_id, False)
+            message = f"Project **{existing['name']}** already exists. View it in the Projects tab."
+            assistant_message = self.add_message(session_id, "assistant", message)
+            return {"project_id": existing["id"], "project_name": existing["name"], "message": message, "assistant_message": assistant_message, "duplicate": True}
+
         history = self.get_messages(session_id)
         summary = self._build_summary_from_proposal(proposal)
         project_name, project_id = self._persist_project(session_id, summary, history)
@@ -585,6 +596,17 @@ class ChatService:
 
     async def create_project_from_option(self, session_id: str, option: dict) -> dict:
         """Create a project directly from a selected project option."""
+        # Check for duplicate project before creating
+        title = option.get("title", "")
+        description = option.get("description", "")
+        existing = self.db.find_existing_project_by_content(session_id, title, description)
+        if existing:
+            self.db.clear_pending_proposals(session_id)
+            self.set_locked(session_id, False)
+            message = f"Project **{existing['name']}** already exists. View it in the Projects tab."
+            assistant_message = self.add_message(session_id, "assistant", message)
+            return {"project_id": existing["id"], "project_name": existing["name"], "message": message, "assistant_message": assistant_message, "duplicate": True}
+
         history = self.get_messages(session_id)
         summary = self._build_summary_from_option(option)
         project_name, project_id = self._persist_project(session_id, summary, history)
@@ -630,13 +652,13 @@ class ChatService:
             result = await evaluate_project_alignment(user_goal, project_info)
             if "error" in result:
                 return
-            prompt_version = str(result.get("prompt_version", "unknown"))
+            str(result.get("prompt_version", "unknown"))
 
         async def _log_kg_quality():
             result = await evaluate_kg_quality(project_info, summary)
             if "error" in result:
                 return
-            prompt_version = str(result.get("prompt_version", "unknown"))
+            str(result.get("prompt_version", "unknown"))
 
         try:
             loop = asyncio.get_running_loop()

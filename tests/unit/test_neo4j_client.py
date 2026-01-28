@@ -16,9 +16,9 @@ class TestNeo4jClientInit:
         """Test initialization with default config."""
         with patch("backend.db.neo4j_client.config") as mock_config:
             mock_config.neo4j = Neo4jConfig(
-                uri="bolt://localhost:7687",
-                username="neo4j",
-                password="password",
+                _uri="bolt://localhost:7687",
+                _username="neo4j",
+                _password="password",
                 database="neo4j",
             )
 
@@ -31,9 +31,9 @@ class TestNeo4jClientInit:
     def test_custom_config_initialization(self):
         """Test initialization with custom config."""
         custom_config = Neo4jConfig(
-            uri="bolt://custom:7687",
-            username="admin",
-            password="secret",
+            _uri="bolt://custom:7687",
+            _username="admin",
+            _password="secret",
             database="testdb",
         )
 
@@ -101,6 +101,7 @@ class TestNeo4jClientDriver:
         mock_graph_db.driver.assert_called_once_with(
             "bolt://localhost:7687",
             auth=("neo4j", "password123"),
+            notifications_disabled_categories=["UNRECOGNIZED", "DEPRECATION"],
         )
         assert driver == mock_driver
 
@@ -168,7 +169,7 @@ class TestNeo4jClientQuery:
         config = Neo4jConfig()
         client = Neo4jClient(neo4j_config=config)
 
-        result = client.query("MATCH (n) RETURN count(n) as count")
+        client.query("MATCH (n) RETURN count(n) as count")
 
         mock_graph.query.assert_called_once_with(
             "MATCH (n) RETURN count(n) as count",
@@ -695,3 +696,111 @@ class TestNeo4jClientProjectGraph:
 
         assert result == [{"id": "proj-1", "is_default": False}]
         mock_query.assert_called_once()
+
+
+class TestNeo4jClientProjectFilter:
+    """Tests for project filter methods."""
+
+    @patch.object(Neo4jClient, "query")
+    def test_get_most_recent_project_id_returns_id(self, mock_query):
+        """Test getting most recent project ID when projects exist."""
+        mock_query.return_value = [{"id": "proj-123", "created_at": "2024-01-27"}]
+
+        client = Neo4jClient()
+        result = client.get_most_recent_project_id()
+
+        assert result == "proj-123"
+        mock_query.assert_called_once()
+
+    @patch.object(Neo4jClient, "query")
+    def test_get_most_recent_project_id_returns_none(self, mock_query):
+        """Test getting most recent project ID when no projects exist."""
+        mock_query.return_value = []
+
+        client = Neo4jClient()
+        result = client.get_most_recent_project_id()
+
+        assert result is None
+
+    @patch.object(Neo4jClient, "query")
+    @patch.object(Neo4jClient, "get_knowledge_graph_nodes")
+    def test_get_knowledge_graph_nodes_for_project_none(self, mock_kg_nodes, mock_query):
+        """Test filtering nodes when project_id is None falls back to all nodes."""
+        mock_kg_nodes.return_value = [{"id": "node-1", "labels": ["Skill"]}]
+
+        client = Neo4jClient()
+        result = client.get_knowledge_graph_nodes_for_project(None)
+
+        mock_kg_nodes.assert_called_once_with(limit=500)
+        assert result == [{"id": "node-1", "labels": ["Skill"]}]
+
+    @patch.object(Neo4jClient, "query")
+    def test_get_knowledge_graph_nodes_for_project_with_id(self, mock_query):
+        """Test filtering nodes by specific project."""
+        # Mock project query
+        mock_query.side_effect = [
+            [{"labels": ["Project"], "properties": {"id": "proj-1", "name": "Test"}, "element_id": "4:abc:1", "id": "proj-1"}],
+            [{"labels": ["Skill"], "properties": {"id": "skill-1", "name": "Python"}, "element_id": "4:abc:2", "id": "skill-1"}],
+        ]
+
+        client = Neo4jClient()
+        result = client.get_knowledge_graph_nodes_for_project("proj-1")
+
+        assert len(result) == 2
+        assert mock_query.call_count == 2
+
+    @patch.object(Neo4jClient, "query")
+    @patch.object(Neo4jClient, "get_knowledge_graph_relationships")
+    def test_get_knowledge_graph_relationships_for_project_none(self, mock_kg_rels, mock_query):
+        """Test filtering relationships when project_id is None falls back to all."""
+        mock_kg_rels.return_value = [{"source": "n1", "target": "n2", "type": "RELATED"}]
+
+        client = Neo4jClient()
+        result = client.get_knowledge_graph_relationships_for_project(None)
+
+        mock_kg_rels.assert_called_once_with(limit=500)
+        assert result == [{"source": "n1", "target": "n2", "type": "RELATED"}]
+
+    @patch.object(Neo4jClient, "query")
+    def test_get_knowledge_graph_relationships_for_project_with_id(self, mock_query):
+        """Test filtering relationships by specific project."""
+        mock_query.return_value = [
+            {"source": "node-1", "target": "node-2", "type": "REQUIRES", "properties": {}}
+        ]
+
+        client = Neo4jClient()
+        result = client.get_knowledge_graph_relationships_for_project("proj-1")
+
+        assert len(result) == 1
+        assert result[0]["type"] == "REQUIRES"
+        mock_query.assert_called_once()
+
+    @patch.object(Neo4jClient, "query")
+    def test_list_all_projects_excludes_default(self, mock_query):
+        """Test listing all projects without default."""
+        mock_query.return_value = [
+            {"id": "proj-1", "name": "Project 1", "created_at": "2024-01-27", "is_default": False},
+        ]
+
+        client = Neo4jClient()
+        result = client.list_all_projects(include_default=False)
+
+        assert len(result) == 1
+        assert result[0]["id"] == "proj-1"
+        mock_query.assert_called_once()
+        assert "WHERE NOT COALESCE" in mock_query.call_args[0][0]
+
+    @patch.object(Neo4jClient, "query")
+    def test_list_all_projects_includes_default(self, mock_query):
+        """Test listing all projects including default."""
+        mock_query.return_value = [
+            {"id": "default", "name": "Default", "created_at": "2024-01-01", "is_default": True},
+            {"id": "proj-1", "name": "Project 1", "created_at": "2024-01-27", "is_default": False},
+        ]
+
+        client = Neo4jClient()
+        result = client.list_all_projects(include_default=True)
+
+        assert len(result) == 2
+        mock_query.assert_called_once()
+        assert "WHERE NOT" not in mock_query.call_args[0][0]

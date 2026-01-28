@@ -16,6 +16,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    profiles:
+      - ollama
     environment:
       - OLLAMA_CONTEXT_LENGTH=8096
     container_name: ollama-local
@@ -49,7 +51,6 @@ services:
 
     depends_on:
       - neo4j
-      - ollama
     networks:
       - endstate-network
 

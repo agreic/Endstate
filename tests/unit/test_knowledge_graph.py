@@ -42,7 +42,7 @@ class TestKnowledgeGraphServiceInit:
         mock_db = MagicMock()
         mock_neo4j_client.return_value = mock_db
 
-        service = KnowledgeGraphService(llm_provider="ollama")
+        KnowledgeGraphService(llm_provider="ollama")
 
         call_kwargs = mock_get_llm.call_args[1]
         assert call_kwargs["provider"] == "ollama"
@@ -71,7 +71,7 @@ class TestKnowledgeGraphServiceInit:
     ):
         """Test initialization with custom configuration."""
         custom_config = Config(
-            neo4j=Neo4jConfig(uri="bolt://custom:7687"),
+            neo4j=Neo4jConfig(_uri="bolt://custom:7687"),
             llm=LLMConfig(provider="ollama"),
         )
         mock_llm = MagicMock()
@@ -79,7 +79,7 @@ class TestKnowledgeGraphServiceInit:
         mock_db = MagicMock()
         mock_neo4j_client.return_value = mock_db
 
-        service = KnowledgeGraphService(app_config=custom_config)
+        KnowledgeGraphService(app_config=custom_config)
 
         mock_neo4j_client.assert_called_once_with(custom_config.neo4j)
         call_kwargs = mock_get_llm.call_args[1]
@@ -505,7 +505,7 @@ class TestKnowledgeGraphServiceQuery:
 
         service = KnowledgeGraphService()
 
-        result = _ = service.query("MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"})
+        _ = service.query("MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"})
 
         mock_db.query.assert_called_once_with(
             "MATCH (n:Skill WHERE n.id = $id) RETURN n", {"id": "test"}
@@ -554,7 +554,7 @@ class TestKnowledgeGraphServiceStats:
 
         service = KnowledgeGraphService()
 
-        nodes = service.get_nodes(label="Skill", limit=50)
+        service.get_nodes(label="Skill", limit=50)
 
         mock_db.get_all_nodes.assert_called_once_with("Skill", 50)
 
@@ -573,7 +573,7 @@ class TestKnowledgeGraphServiceStats:
 
         service = KnowledgeGraphService()
 
-        rels = service.get_relationships(limit=10)
+        service.get_relationships(limit=10)
 
         mock_db.get_all_relationships.assert_called_once_with(10)
 

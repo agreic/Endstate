@@ -6,78 +6,65 @@ FastAPI backend for the Endstate knowledge-graph powered learning platform.
 
 ```
 backend/
-├── __init__.py           # Main exports
 ├── config.py             # Configuration management
-├── db/                   # Database layer
-│   ├── __init__.py
+├── db/
 │   └── neo4j_client.py   # Neo4j operations
-├── llm/                  # LLM layer
-│   ├── __init__.py
+├── llm/
 │   └── provider.py       # LLM providers (Ollama, Gemini)
-├── services/             # Service layer
-│   ├── __init__.py
-│   ├── chat_service.py   # Chat with SSE real-time updates
-│   ├── evaluation_service.py  # Rubric-based capstone evaluator
-│   └── lesson_service.py # Lesson generation
+├── services/
+│   ├── chat_service.py       # Chat with SSE real-time updates
+│   ├── evaluation_service.py # Rubric-based capstone evaluator
+│   ├── lesson_service.py     # Lesson generation
+│   ├── knowledge_graph.py    # Graph extraction and management
+│   └── assessment_service.py # Assessment generation
 └── main.py               # FastAPI application
 ```
 
 ## Services
 
 ### Chat Service
-
-Handles persistent chat conversations with real-time SSE updates.
-
-**Key Features:**
+- Persistent chat conversations with real-time SSE updates
 - Idempotent message sending via `X-Request-ID` header
-- Processing state prevents concurrent requests
 - Background task management for async operations
 - Explicit project suggestions via `/api/suggest-projects`
 
-**SSE Events:**
-- `initial_messages` - Message history and status
-- `message_added` - New message delivered
-- `processing_started/complete` - Async operation status
-- `error` - Error messages for display
-- `heartbeat` - Keep-alive (silent)
+**SSE Events**: `initial_messages`, `message_added`, `processing_started/complete`, `error`, `heartbeat`
 
 ### Evaluation Service
+Rubric-based capstone evaluation using the configured LLM.
 
-Rubric-based capstone evaluation using the same LLM as chat.
+**Rubric**:
+- Skill Application (50%)
+- Conceptual Understanding (30%)
+- Completeness (20%)
 
-**Rubric:**
-- Skill Application (50%) - Correct application of required skills
-- Conceptual Understanding (30%) - Understanding demonstrated
-- Completeness (20%) - Addresses full project brief
+**Completion**: Score ≥ 0.7 AND all required skills evidenced
 
-**Completion Criteria:**
-- Score ≥ 0.7 AND all required skills evidenced
+### Lesson Service
+Generates focused lessons for knowledge graph nodes, personalized to user profile.
 
-### Summary Cache
-Project summaries and chat history are stored in Neo4j.
+### Knowledge Graph Service
+Extracts skills, concepts, and topics from text using LLM-powered graph generation.
 
 ## API Endpoints
 
 ### Chat
-
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/chat/{id}/stream` | GET | SSE event stream |
 | `/api/chat/{id}/messages` | POST | Send message |
 | `/api/chat/{id}/messages` | GET | Get message history |
 | `/api/chat/{id}/reset` | POST | Reset session |
-| `/api/suggest-projects` | POST | Generate project options from chat history |
-| `/api/suggest-projects/accept` | POST | Accept a project option |
+| `/api/suggest-projects` | POST | Generate project options |
+| `/api/suggest-projects/accept` | POST | Accept a project |
 
 ### Knowledge Graph
-
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/graph` | GET | Graph nodes + relationships |
 | `/api/graph/stats` | GET | Graph statistics |
 
 ### Projects
-
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/projects` | GET | List projects |
