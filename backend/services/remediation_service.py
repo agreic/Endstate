@@ -66,7 +66,7 @@ async def diagnose_failure(
     llm = get_llm()
     
     lesson_title = lesson.get("title", "Unknown topic")
-    lesson_explanation = lesson.get("explanation", "")[:500]
+    lesson_explanation = lesson.get("explanation", "")
     assessment_prompt = assessment.get("prompt", "")
     
     prereq_context = ""
@@ -395,7 +395,7 @@ async def remediate_assessment_failure(
     """
     from uuid import uuid4
     trace_input = {
-        "workflow": "remediation",
+        "workflow": "assessment_evaluation.remediation",
         "project_id": project_id,
         "assessment_id": assessment_id,
         "node_id": node_id,
@@ -412,7 +412,8 @@ async def remediate_assessment_failure(
     diagnosis: dict = {}
     remediation_content: dict = {}
 
-    with trace("endstate.remediation.run", input=trace_input, tags=tags) as t:
+    with trace("assessment_evaluation.remediation", input=trace_input, tags=tags) as t:
+
 
         # Get node context for better diagnosis
         node_result = db.get_node_by_id(node_id)
