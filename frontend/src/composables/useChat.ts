@@ -1,7 +1,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { ChatMessage } from '../types/chat';
 import type { ProjectProposal } from '../services/api';
-
+import { getHeaders } from '../services/api';
 const SESSION_ID_KEY = 'endstate_chat_session_id';
 
 function getSessionId(): string {
@@ -385,7 +385,8 @@ export function useChat() {
       const response = await fetchWithTimeout(`${API_URL}/api/chat/${sessionId.value}/messages`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json', 
+          ...getHeaders(),
           'X-Request-ID': requestId,
         },
         body: JSON.stringify({ message: content }),
@@ -431,7 +432,11 @@ export function useChat() {
     try {
       const response = await fetchWithTimeout(`${API_URL}/api/suggest-projects`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        ...getHeaders(),
+        'Content-Type': 'application/json',
+        },
+
         body: JSON.stringify({
           session_id: sessionId.value,
           history: messages.value.map((message) => ({

@@ -8,6 +8,7 @@ from enum import Enum
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 import json
+from backend.config import X_OPENROUTER_API_KEY, X_OPENROUTER_MODEL
 
 from ..config import LLMConfig, config
 
@@ -84,6 +85,8 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     
     # Check for API key
     api_key = kwargs.get("api_key") or gemini_config.api_key
+
+
     if not api_key:
         raise ValueError(
             "Gemini API key not found. Set GOOGLE_API_KEY environment variable, "
@@ -97,24 +100,50 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
         **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "google_api_key"]},
     )
 
+
+
 def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
-    """
-    OpenRouter uses an OpenAI compatible API.
-    We use LangChain ChatOpenAI with a custom base_url.
-    """
+    """Get OpenRouter LLM instance (OpenAI compatible)."""
     import os
     from langchain_openai import ChatOpenAI
 
-    api_key = kwargs.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    or_config = llm_config.openrouter
+
+    # Accept key from:
+    # 1) explicit kwargs (if you ever pass it)
+    # 2) per-request header contextvar
+    # 3) main-branch compose env (OPENAI_API_KEY)
+    # 4) alternative env (OPENROUTER_API_KEY)
+    # 5) config file
+    api_key = (
+        kwargs.get("api_key")
+        or X_OPENROUTER_API_KEY.get()
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+        or or_config.api_key
+    )
+
     if not api_key:
         raise ValueError(
-            "OpenRouter API key not found. Set OPENAI_API_KEY (recommended) or OPENROUTER_API_KEY."
+            "OpenRouter API key not found. Provide X-OpenRouter-API-Key header, "
+            "or set OPENAI_API_KEY / OPENROUTER_API_KEY."
         )
 
-    base_url = kwargs.get("base_url") or os.getenv("OPENAI_BASE_URL") or "https://openrouter.ai/api/v1"
-    model = kwargs.get("model") or os.getenv("OPENAI_MODEL") or "xiaomi/mimo-v2-flash:free"
-    temperature = kwargs.get("temperature", 0.2)
+    model = (
+        kwargs.get("model")
+        or X_OPENROUTER_MODEL.get()
+        or os.getenv("OPENAI_MODEL")
+        or or_config.model
+    )
 
+    base_url = (
+        kwargs.get("base_url")
+        or os.getenv("OPENAI_BASE_URL")
+        or or_config.base_url
+        or "https://openrouter.ai/api/v1"
+    )
+
+    temperature = kwargs.get("temperature", or_config.temperature)
     timeout = kwargs.get("timeout_seconds", llm_config.timeout_seconds)
 
     return ChatOpenAI(
@@ -124,29 +153,6 @@ def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
         temperature=temperature,
         timeout=timeout,
     )
-
-def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
-    """Get OpenRouter LLM instance (OpenAI compatible)."""
-    from langchain_openai import ChatOpenAI
-
-    or_config = llm_config.openrouter
-
-    # Check for API key
-    api_key = kwargs.get("api_key") or or_config.api_key
-    if not api_key:
-        raise ValueError(
-            "OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable "
-            "or pass api_key parameter."
-        )
-
-    return ChatOpenAI(
-        model=kwargs.get("model", or_config.model),
-        temperature=kwargs.get("temperature", or_config.temperature),
-        openai_api_key=api_key,
-        openai_api_base=or_config.base_url,
-        **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "openai_api_key", "openai_api_base"]},
-    )
-
 
 def test_llm(llm: BaseChatModel) -> tuple[bool, str]:
     """

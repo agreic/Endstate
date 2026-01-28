@@ -48,7 +48,6 @@ services:
       - OPIK_PROJECT=endstate-demo
       - OPIK_API_KEY=${OPIK_API_KEY}
       - ENDSTATE_CAPSTONE_PROMPT=${ENDSTATE_CAPSTONE_PROMPT:-capstone_evaluation_v2}
-
     depends_on:
       - neo4j
     networks:

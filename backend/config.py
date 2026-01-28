@@ -18,6 +18,7 @@ import contextvars
 # Context variables for request-scoped overrides
 X_GEMINI_API_KEY = contextvars.ContextVar("x_gemini_api_key", default="")
 X_OPENROUTER_API_KEY = contextvars.ContextVar("x_openrouter_api_key", default="")
+X_OPENROUTER_MODEL = contextvars.ContextVar("x_openrouter_model", default="")
 X_NEO4J_URI = contextvars.ContextVar("x_neo4j_uri", default="")
 X_NEO4J_USERNAME = contextvars.ContextVar("x_neo4j_username", default="")
 X_NEO4J_PASSWORD = contextvars.ContextVar("x_neo4j_password", default="")

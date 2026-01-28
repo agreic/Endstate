@@ -29,6 +29,7 @@ from backend.db.neo4j_client import DEFAULT_PROJECT_ID
 from backend.config import (
     X_GEMINI_API_KEY,
     X_OPENROUTER_API_KEY,
+    X_OPENROUTER_MODEL,
     X_NEO4J_URI,
     X_NEO4J_USERNAME,
     X_NEO4J_PASSWORD,
@@ -163,6 +164,7 @@ async def extract_config_headers(request: Request, call_next):
     neo4j_password = request.headers.get("X-Neo4j-Password")
     openrouter_key = request.headers.get("X-OpenRouter-API-Key") or request.headers.get("X-Gemini-API-Key")
     llm_provider = request.headers.get("X-LLM-Provider")
+    openrouter_model = request.headers.get("X-OpenRouter-Model") or request.headers.get("X-LLM-Model")
 
     # Set context variables and restore them after request
     tokens = []
@@ -171,6 +173,7 @@ async def extract_config_headers(request: Request, call_next):
         if val and val.strip():
             tokens.append(var.set(val.strip()))
 
+    set_if_valid(X_OPENROUTER_MODEL, openrouter_model)
     set_if_valid(X_GEMINI_API_KEY, gemini_key)
     set_if_valid(X_OPENROUTER_API_KEY, openrouter_key)
     set_if_valid(X_NEO4J_URI, neo4j_uri)

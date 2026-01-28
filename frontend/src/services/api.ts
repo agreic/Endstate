@@ -2,7 +2,7 @@ const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replac
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 30000;
 const LLM_TIMEOUT_MS = Number(import.meta.env.VITE_LLM_TIMEOUT_MS) || 120000; // 2 minutes for LLM operations
 
-function getHeaders(): Record<string, string> {
+export function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -11,7 +11,7 @@ function getHeaders(): Record<string, string> {
     const val = localStorage.getItem(key);
     if (!val) return null;
     const trimmed = val.trim();
-    // Ignore empty strings or literal "null"/"undefined" strings
+    // Ignore empty strings or literal  "null"/"undefined" strings
     if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
     return trimmed;
   };
