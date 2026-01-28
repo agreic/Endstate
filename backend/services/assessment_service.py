@@ -6,9 +6,14 @@ from __future__ import annotations
 
 import asyncio
 
+import json
+import os
 from backend.config import config
 from backend.llm.provider import get_llm
+from backend.services.opik_client import trace, span
+
 from .utils import extract_json, clean_markdown
+
 
 
 ASSESSMENT_TIMEOUT = config.llm.timeout_seconds
@@ -67,20 +72,63 @@ async def generate_assessment(lesson: dict, profile: dict | None) -> dict:
         f"Instruction: {_style_hint(learning_style)}\n"
     )
 
-    try:
-        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
-    except asyncio.CancelledError:
-        raise
-    except asyncio.TimeoutError:
-        return {"error": f"Assessment generation timed out after {ASSESSMENT_TIMEOUT}s"}
-    except Exception as e:
-        return {"error": f"Assessment generation failed: {e}"}
+    model = (os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or "").strip()
+    provider = (os.getenv("LLM_PROVIDER") or "openrouter").strip()
 
-    content = str(response.content if hasattr(response, "content") else response)
-    parsed = parse_assessment_content(content)
-    if "prompt" in parsed:
-        return {"prompt": str(parsed.get("prompt", "")).strip()}
-    return {"prompt": str(parsed.get("raw", "")).strip()}
+    if not model:
+        model = (
+            getattr(getattr(config, "llm", None), "model", None)
+            or getattr(getattr(config, "llm", None), "model_name", None)
+            or "unknown"
+        )
+
+
+    trace_input = {
+        "workflow": "assessment_generation",
+        "learning_style": learning_style or "not specified",
+        "lesson": lesson,
+        "model": model,
+        "provider": provider,
+        "prompt": prompt,
+    }
+
+    with trace(
+        "endstate.assessment.generate",
+        input=trace_input,
+        tags=[
+            "workflow:assessment",
+            "step:generate",
+            f"model:{model}",
+            f"provider:{provider}",
+        ],
+    ) as t:
+        try:
+            with span("llm.call"):
+                response = await asyncio.wait_for(
+                    llm.ainvoke([("human", prompt)]),
+                    timeout=ASSESSMENT_TIMEOUT,
+                )
+        except Exception as e:
+            if t is not None:
+                t.output = {"error": f"Assessment generation failed: {e}"}
+            return {"error": f"Assessment generation failed: {e}"}
+
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = parse_assessment_content(content)
+
+        if "prompt" in parsed:
+            out = {"prompt": str(parsed.get("prompt", "")).strip()}
+        else:
+            out = {"prompt": str(parsed.get("raw", "")).strip()}
+
+        if t is not None:
+            t.output = {
+                "parsed": parsed,
+                "output": out,
+            }
+
+        return out
+
 
 
 async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> dict:
@@ -93,20 +141,62 @@ async def evaluate_assessment(lesson: dict, assessment: dict, answer: str) -> di
         f"Learner answer: {answer}\n"
     )
 
-    try:
-        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=ASSESSMENT_TIMEOUT)
-    except asyncio.CancelledError:
-        raise
-    except asyncio.TimeoutError:
-        return {"error": f"Assessment evaluation timed out after {ASSESSMENT_TIMEOUT}s"}
-    except Exception as e:
-        return {"error": f"Assessment evaluation failed: {e}"}
+    model = (os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or "").strip()
+    provider = (os.getenv("LLM_PROVIDER") or "openrouter").strip()
 
-    content = str(response.content if hasattr(response, "content") else response)
-    parsed = parse_assessment_content(content)
-    if "result" in parsed:
-        result = str(parsed.get("result", "")).strip().lower()
-        if result not in {"pass", "fail"}:
-            result = "fail"
-        return {"result": result, "feedback": str(parsed.get("feedback", "")).strip()}
-    return {"result": "fail", "feedback": str(parsed.get("raw", "")).strip()}
+    if not model:
+        model = (
+            getattr(getattr(config, "llm", None), "model", None)
+            or getattr(getattr(config, "llm", None), "model_name", None)
+            or "unknown"
+        )
+    trace_input = {
+        "workflow": "assessment_evaluation",
+        "lesson": lesson,
+        "assessment": assessment,
+        "answer": answer,
+        "model": model,
+        "provider": provider,
+        "prompt": prompt,
+    }
+
+    with trace(
+        "endstate.assessment.evaluate",
+        input=trace_input,
+        tags=[
+            "workflow:assessment",
+            "step:evaluate",
+            f"model:{model}",
+            f"provider:{provider}",
+        ],
+    ) as t:
+        try:
+            with span("llm.call"):
+                response = await asyncio.wait_for(
+                    llm.ainvoke([("human", prompt)]),
+                    timeout=ASSESSMENT_TIMEOUT,
+                )
+        except Exception as e:
+            if t is not None:
+                t.output = {"error": f"Assessment evaluation failed: {e}"}
+            return {"error": f"Assessment evaluation failed: {e}"}
+
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = parse_assessment_content(content)
+
+        if "result" in parsed:
+            result = str(parsed.get("result", "")).strip().lower()
+            if result not in {"pass", "fail"}:
+                result = "fail"
+            out = {"result": result, "feedback": str(parsed.get("feedback", "")).strip()}
+        else:
+            out = {"result": "fail", "feedback": str(parsed.get("raw", "")).strip()}
+
+        if t is not None:
+            t.output = {
+                "parsed": parsed,
+                "output": out,
+            }
+
+        return out
+

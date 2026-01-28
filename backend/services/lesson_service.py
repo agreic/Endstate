@@ -8,6 +8,7 @@ import asyncio
 
 from backend.config import config
 from backend.llm.provider import get_llm
+from backend.services.opik_client import trace, span
 from .utils import extract_json, clean_markdown
 
 
@@ -74,6 +75,8 @@ async def generate_lesson(
     prior_titles: list[str],
 ) -> dict:
     llm = get_llm()
+    model = getattr(getattr(config, "llm", None), "model", None) or getattr(getattr(config, "llm", None), "model_name", None) or "unknown"
+    provider = getattr(getattr(config, "llm", None), "provider", None) or "openrouter"
 
     name = _display_name(node)
     labels = ", ".join(node.get("labels", []))
@@ -114,15 +117,59 @@ async def generate_lesson(
         f"{prior_section}"
     )
 
-    try:
-        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=LESSON_TIMEOUT)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        return {"error": f"Lesson generation failed: {e}"}
+    trace_input = {
+        "workflow": "lesson_generation",
+        "node_id": node.get("id"),
+        "node_name": name,
+        "labels": node.get("labels", []),
+        "description": description,
+        "lesson_index": lesson_index,
+        "prior_titles": prior_titles,
+        "profile": profile or {},
+        "learning_style": learning_style or "not specified",
+        "skill_level": skill_level,
+        "time_available": time_available,
+        "instruction": instruction,
+        "model": model,
+        "provider": provider,
+        "prompt": prompt,
+    }
 
-    content = str(response.content if hasattr(response, "content") else response)
-    return parse_lesson_content(content)
+    with trace(
+        "endstate.lesson.generate",
+        input=trace_input,
+        tags=[
+            "workflow:lesson",
+            "step:generate",
+            f"model:{model}",
+            f"provider:{provider}",
+            f"node_id:{node.get('id')}",
+        ],
+    ) as t:
+        try:
+            with span("llm.call"):
+                response = await asyncio.wait_for(
+                    llm.ainvoke([("human", prompt)]),
+                    timeout=LESSON_TIMEOUT,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if t is not None:
+                t.output = {"error": f"Lesson generation failed: {e}"}
+            return {"error": f"Lesson generation failed: {e}"}
+
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = parse_lesson_content(content)
+
+        if t is not None:
+            t.output = {
+                "parsed": parsed,
+                "raw": content,
+            }
+
+        return parsed
+
 
 
 async def generate_and_store_lesson(
@@ -141,13 +188,15 @@ async def generate_and_store_lesson(
 
     lesson_id = f"lesson-{uuid4().hex[:8]}"
     title = _display_name(node)
-    db.save_project_lesson(
-        project_id,
-        lesson_id,
-        node.get("id"),
-        title,
-        result.get("explanation", ""),
-        result.get("task", ""),
-        lesson_index,
-    )
+    with span("db.save_project_lesson"):
+        db.save_project_lesson(
+            project_id,
+            lesson_id,
+            node.get("id"),
+            title,
+            result.get("explanation", ""),
+            result.get("task", ""),
+            lesson_index,
+        )
+
     return {"lesson_id": lesson_id, **result}
