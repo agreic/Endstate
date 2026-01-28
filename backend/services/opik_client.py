@@ -82,11 +82,9 @@ def trace(
             t.metadata = metadata
         yield t
 
-
 @contextmanager
 def span(
     name: str,
-    input: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Iterator[Any]:
     if opik is None:
@@ -94,8 +92,7 @@ def span(
         return
 
     with opik.start_as_current_span(name=name) as s:
-        if input is not None:
-            s.input = input
         if metadata is not None:
             s.metadata = metadata
         yield s
+

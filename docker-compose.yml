@@ -43,7 +43,7 @@ services:
       - LLM_PROVIDER=openrouter
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=https://openrouter.ai/api/v1
-      - OPENAI_MODEL=xiaomi/mimo-v2-flash:free
+      - OPENAI_MODEL=arcee-ai/trinity-large-preview:free
       - OLLAMA_BASE_URL=http://ollama:11434
       - OPIK_PROJECT=endstate-demo
       - OPIK_API_KEY=${OPIK_API_KEY}

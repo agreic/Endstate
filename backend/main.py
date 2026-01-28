@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from backend.services.opik_client import trace, span, log_metric
 
 from backend.services.knowledge_graph import KnowledgeGraphService
 from backend.services.chat_service import chat_service, BackgroundTaskStore
@@ -1667,64 +1668,141 @@ async def start_project(project_id: str):
 
         text = build_project_extraction_text(summary, history)
         service = KnowledgeGraphService(schema=SkillGraphSchema)
-        documents = await service.aextract(text)
-        normalized = service.normalize_documents(documents)
 
-        # Filter out "Project" nodes to prevents duplicates of the main project node
-        # We rely on generic HAS_NODE/HAS_SKILL links for connecting items to the project
-        filtered_docs = []
-        for doc in normalized:
-            valid_nodes = [n for n in doc.nodes if n.type != "Project"]
-            valid_node_ids = {n.id for n in valid_nodes}
+        trace_input = {
+            "workflow": "project-reinit",
+            "project_id": project_id,
+            "project_name": project_name,
+            "text_chars": len(text),
+            "history_count": len(history),
+        }
+        tags = [
+            "workflow:nodes",
+            "kind:project-reinit",
+            f"project_id:{project_id}",
+        ]
+        node_count_final = 0
+        rel_count_final = 0
+
+        with trace("endstate.nodes.generate", input=trace_input, tags=tags) as t:
+            with span("llm.extract"):
+                documents = await service.aextract(text)
+
+            extracted_nodes = sum(len(doc.nodes) for doc in documents) if documents else 0
+            extracted_rels = sum(len(doc.relationships) for doc in documents) if documents else 0
+
+            with span("graph.normalize"):
+                normalized = service.normalize_documents(documents)
+
+                project_nodes_dropped = 0
+                orphan_rels_dropped = 0
+                filtered_docs = []
+
+                for doc in normalized:
+                    valid_nodes = [n for n in doc.nodes if n.type != "Project"]
+                    project_nodes_dropped += (len(doc.nodes) - len(valid_nodes))
+
+                    valid_node_ids = {n.id for n in valid_nodes}
+                    valid_rels = []
+                    for rel in doc.relationships:
+                        if rel.source.id in valid_node_ids and rel.target.id in valid_node_ids:
+                            valid_rels.append(rel)
+                        else:
+                            orphan_rels_dropped += 1
+
+                    doc.nodes = valid_nodes
+                    doc.relationships = valid_rels
+                    filtered_docs.append(doc)
+
+                normalized = filtered_docs
+
+            normalized_nodes = sum(len(doc.nodes) for doc in normalized)
+            normalized_rels = sum(len(doc.relationships) for doc in normalized)
+
+            node_types_counts = {}
+            for doc in normalized:
+                for n in doc.nodes:
+                    node_types_counts[n.type] = node_types_counts.get(n.type, 0) + 1
+
+            if normalized_nodes == 0 and normalized_rels == 0:
+                log_metric("nodes.extracted", float(extracted_nodes), session_id=project_id, tags=tags)
+                log_metric("nodes.normalized", float(normalized_nodes), session_id=project_id, tags=tags)
+                log_metric("nodes.orphan_rels_dropped", float(orphan_rels_dropped), session_id=project_id, tags=tags)
+
+                if t is not None:
+                    t.output = {
+                        "status": "empty_extraction",
+                        "extracted_nodes": extracted_nodes,
+                        "extracted_relationships": extracted_rels,
+                        "normalized_nodes": normalized_nodes,
+                        "normalized_relationships": normalized_rels,
+                        "project_nodes_dropped": project_nodes_dropped,
+                        "orphan_rels_dropped": orphan_rels_dropped,
+                        "node_types_counts": node_types_counts,
+                    }
+
+                return {
+                    "message": "Project reinitialized (no new nodes extracted)",
+                    "project_id": project_id,
+                    "user_profile": summary.get("user_profile"),
+                    "nodes_added": 0,
+                    "relationships_added": 0,
+                    "project_status": summary.get("project_status"),
+                    "started_at": summary.get("started_at"),
+                }
+
+            with span("db.clear_project_nodes"):
+                db.clear_project_nodes(project_id)
+
+            with span("db.add_documents"):
+                service.add_documents(normalized, normalize=False)
+
+            with span("db.merge_duplicates"):
+                for label in ("Skill", "Concept", "Topic"):
+                    try:
+                        service.merge_duplicates(label, match_property="name")
+                    except Exception as e:
+                        print(f"[Projects] Merge duplicates failed for {label}: {e}")
+
+            node_refs = []
+            for doc in normalized:
+                for node in doc.nodes:
+                    node_refs.append({"label": node.type, "name": node.properties.get("name")})
+
+            with span("db.connect_project_to_nodes"):
+                db.connect_project_to_nodes(project_id, node_refs)
+
+            with span("db.upsert_project_nodes_from_summary"):
+                db.upsert_project_nodes_from_summary(project_id, summary)
+
+            graph_counts = db.get_project_graph_counts(project_id)
+            node_count_final = graph_counts.get("nodes", 0)
+            rel_count_final = graph_counts.get("relationships", 0)
+
+            log_metric("nodes.extracted", float(extracted_nodes), session_id=project_id, tags=tags)
+            log_metric("nodes.normalized", float(normalized_nodes), session_id=project_id, tags=tags)
+            log_metric("nodes.final", float(node_count_final), session_id=project_id, tags=tags)
+            log_metric("relationships.final", float(rel_count_final), session_id=project_id, tags=tags)
+            log_metric("nodes.orphan_rels_dropped", float(orphan_rels_dropped), session_id=project_id, tags=tags)
+
+            if t is not None:
+                t.output = {
+                    "status": "ok",
+                    "extracted_nodes": extracted_nodes,
+                    "extracted_relationships": extracted_rels,
+                    "normalized_nodes": normalized_nodes,
+                    "normalized_relationships": normalized_rels,
+                    "project_nodes_dropped": project_nodes_dropped,
+                    "orphan_rels_dropped": orphan_rels_dropped,
+                    "nodes_written_refs": len(node_refs),
+                    "node_types_counts": node_types_counts,
+                    "graph_nodes_final": node_count_final,
+                    "graph_relationships_final": rel_count_final,
+                }
+
             
-            valid_rels = []
-            for rel in doc.relationships:
-                if rel.source.id in valid_node_ids and rel.target.id in valid_node_ids:
-                    valid_rels.append(rel)
-            
-            doc.nodes = valid_nodes
-            doc.relationships = valid_rels
-            filtered_docs.append(doc)
+
         
-        normalized = filtered_docs
-
-        node_count = sum(len(doc.nodes) for doc in normalized)
-        rel_count = sum(len(doc.relationships) for doc in normalized)
-        if node_count == 0 and rel_count == 0:
-            return {
-                "message": "Project reinitialized (no new nodes extracted)",
-                "project_id": project_id,
-                "user_profile": summary.get("user_profile"),
-                "nodes_added": 0,
-                "relationships_added": 0,
-                "project_status": summary.get("project_status"),
-                "started_at": summary.get("started_at"),
-            }
-
-        db.clear_project_nodes(project_id)
-        service.add_documents(normalized, normalize=False)
-
-        graph_counts = db.get_project_graph_counts(project_id)
-        node_count = graph_counts.get("nodes", 0)
-        rel_count = graph_counts.get("relationships", 0)
-
-        for label in ("Skill", "Concept", "Topic"):
-            try:
-                service.merge_duplicates(label, match_property="name")
-            except Exception as e:
-                print(f"[Projects] Merge duplicates failed for {label}: {e}")
-
-        node_refs = []
-        for doc in normalized:
-            for node in doc.nodes:
-                node_refs.append({"label": node.type, "name": node.properties.get("name")})
-        db.connect_project_to_nodes(project_id, node_refs)
-        db.upsert_project_nodes_from_summary(project_id, summary)
-        graph_counts = db.get_project_graph_counts(project_id)
-        node_count = graph_counts.get("nodes", 0)
-        rel_count = graph_counts.get("relationships", 0)
-
-        summary["project_status"] = "initialized"
         summary["started_at"] = datetime.utcnow().isoformat()
         db.upsert_project_summary(project_id, project_name, json.dumps(summary))
 
@@ -1732,11 +1810,12 @@ async def start_project(project_id: str):
             "message": "Project reinitialized",
             "project_id": project_id,
             "user_profile": summary.get("user_profile"),
-            "nodes_added": node_count,
-            "relationships_added": rel_count,
+            "nodes_added": node_count_final,
+            "relationships_added": rel_count_final,
             "project_status": summary.get("project_status"),
             "started_at": summary.get("started_at"),
         }
+
 
     job = task_registry.register(project_id, "project-reinit", _task(), meta={"project_id": project_id})
     return {"status": "queued", "job_id": job.job_id}
