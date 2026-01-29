@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock* ./
 
-RUN pip install uv && uv sync
+RUN pip install uv && uv sync && uv pip install "opik==1.9.98" "langchain-openai>=0.2.0"
 
 COPY backend/ ./backend/
 

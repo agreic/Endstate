@@ -8,43 +8,38 @@ import asyncio
 
 from backend.config import config
 from backend.llm.provider import get_llm
+from backend.services.opik_client import trace, span
+from .utils import extract_json, clean_markdown
 
 
 LESSON_TIMEOUT = config.llm.timeout_seconds
 
 
-def _extract_json_block(content: str) -> dict | None:
-    try:
-        import json
-        import re
-
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
-        if fence_match:
-            return json.loads(fence_match.group(1))
-
-        obj_match = re.search(r"(\{.*\})", content, flags=re.DOTALL)
-        if obj_match:
-            return json.loads(obj_match.group(1))
-    except Exception:
-        return None
-    return None
+# Removed _extract_json_block in favor of .utils.extract_json
 
 
 def parse_lesson_content(content: str) -> dict:
-    data = _extract_json_block(content)
-    if data:
+    data = extract_json(content)
+    if data and "explanation" in data:
         return {
-            "explanation": data.get("explanation", ""),
+            "explanation": str(data["explanation"]).strip(),
             "task": "",
         }
 
-    cleaned = content.replace("```json", "").replace("```", "").strip()
-    lowered = cleaned.lower()
-    for marker in ("task:", "practical task", "assessment:"):
-        idx = lowered.find(marker)
-        if idx != -1:
-            cleaned = cleaned[:idx].strip()
-            break
+    # Fallback: if JSON failed or missing expected key, use the cleaned raw content
+    cleaned = clean_markdown(content)
+    
+    # Heuristic: sometimes models return "explanation: ..." even if JSON fails
+    lower_cleaned = cleaned.lower()
+    if lower_cleaned.startswith("explanation:"):
+        cleaned = cleaned[len("explanation:"):].strip()
+    elif lower_cleaned.startswith("lesson:"):
+        cleaned = cleaned[len("lesson:"):].strip()
+
+    # Truncate if there are accidental task/assessment sections at the end
+    import re
+    cleaned = re.split(r"(?i)\n\s*(?:task|assessment|quiz|exercise):", cleaned, maxsplit=1)[0].strip()
+
     return {
         "explanation": cleaned,
         "task": "",
@@ -80,6 +75,8 @@ async def generate_lesson(
     prior_titles: list[str],
 ) -> dict:
     llm = get_llm()
+    model = getattr(getattr(config, "llm", None), "model", None) or getattr(getattr(config, "llm", None), "model_name", None) or "unknown"
+    provider = getattr(getattr(config, "llm", None), "provider", None) or "openrouter"
 
     name = _display_name(node)
     labels = ", ".join(node.get("labels", []))
@@ -120,15 +117,57 @@ async def generate_lesson(
         f"{prior_section}"
     )
 
-    try:
-        response = await asyncio.wait_for(llm.ainvoke([("human", prompt)]), timeout=LESSON_TIMEOUT)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        return {"error": f"Lesson generation failed: {e}"}
+    model_used = (
+        getattr(llm, "model_name", None)
+        or getattr(llm, "model", None)
+        or getattr(getattr(llm, "client", None), "model", None)
+        or getattr(getattr(llm, "client", None), "model_name", None)
+        or model
+        or "unknown"
+    )
 
-    content = str(response.content if hasattr(response, "content") else response)
-    return parse_lesson_content(content)
+    with trace(
+        name="lesson_generation.generate_lesson",
+        input={
+            "workflow": "lesson_generation.generate_lesson",
+            "model_used": model_used,
+            "prompt": prompt,
+            "node_id": node.get("id"),
+            "node_name": name,
+            "lesson_index": lesson_index,
+        },
+        tags=[
+            "workflow:lesson_generation",
+            "stage:generate_lesson",
+            f"model:{model_used}",
+            f"provider:{provider}",
+            f"node_id:{node.get('id')}",
+        ],
+    ) as tr:
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke([("human", prompt)]),
+                timeout=LESSON_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if tr is not None:
+                tr.output = {"error": f"Lesson generation failed: {e}"}
+            return {"error": f"Lesson generation failed: {e}"}
+
+        content = str(response.content if hasattr(response, "content") else response)
+        parsed = parse_lesson_content(content)
+
+        if tr is not None:
+            tr.output = {
+                "raw": content,
+                "parsed": parsed or {},
+            }
+
+        return parsed
+
+
 
 
 async def generate_and_store_lesson(
@@ -147,13 +186,15 @@ async def generate_and_store_lesson(
 
     lesson_id = f"lesson-{uuid4().hex[:8]}"
     title = _display_name(node)
-    db.save_project_lesson(
-        project_id,
-        lesson_id,
-        node.get("id"),
-        title,
-        result.get("explanation", ""),
-        result.get("task", ""),
-        lesson_index,
-    )
+    with span("db.save_project_lesson"):
+        db.save_project_lesson(
+            project_id,
+            lesson_id,
+            node.get("id"),
+            title,
+            result.get("explanation", ""),
+            result.get("task", ""),
+            lesson_index,
+        )
+
     return {"lesson_id": lesson_id, **result}

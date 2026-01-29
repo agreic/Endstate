@@ -22,7 +22,7 @@ def build_project_extraction_text(
         f"Project Name: {agreed.get('name', '')}",
         f"Description: {agreed.get('description', '')}",
         f"Timeline: {agreed.get('timeline', '')}",
-        f"Milestones: {', '.join(agreed.get('milestones', []) or [])}",
+        f"Milestones: {', '.join(str(m) for m in (agreed.get('milestones', []) or []) if m is not None)}",
     ]
 
     snippet = history[-max_messages:] if max_messages > 0 else history

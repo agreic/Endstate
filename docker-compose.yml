@@ -16,6 +16,8 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    profiles:
+      - ollama
     environment:
       - OLLAMA_CONTEXT_LENGTH=8096
     container_name: ollama-local
@@ -38,11 +40,16 @@ services:
       - NEO4J_USERNAME=neo4j
       - NEO4J_PASSWORD=password123
       - NEO4J_DATABASE=neo4j
-      - LLM_PROVIDER=ollama
+      - LLM_PROVIDER=openrouter
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=https://openrouter.ai/api/v1
+      - OPENAI_MODEL=arcee-ai/trinity-large-preview:free
       - OLLAMA_BASE_URL=http://ollama:11434
+      - OPIK_PROJECT=endstate-demo
+      - OPIK_API_KEY=${OPIK_API_KEY}
+      - ENDSTATE_CAPSTONE_PROMPT=${ENDSTATE_CAPSTONE_PROMPT:-capstone_evaluation_v2}
     depends_on:
       - neo4j
-      - ollama
     networks:
       - endstate-network
 

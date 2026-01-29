@@ -8,6 +8,7 @@ from enum import Enum
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 import json
+from backend.config import X_OPENROUTER_API_KEY, X_OPENROUTER_MODEL
 
 from ..config import LLMConfig, config
 
@@ -16,6 +17,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OLLAMA = "ollama"
     GEMINI = "gemini"
+    OPENROUTER = "openrouter"
     MOCK = "mock"
 
 
@@ -48,6 +50,8 @@ def get_llm(
         return _get_ollama_llm(llm_config, **kwargs)
     elif provider == LLMProvider.GEMINI:
         return _get_gemini_llm(llm_config, **kwargs)
+    elif provider == LLMProvider.OPENROUTER:
+        return _get_openrouter_llm(llm_config, **kwargs)
     elif provider == LLMProvider.MOCK:
         return MockChatModel()
     else:
@@ -81,6 +85,8 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
     
     # Check for API key
     api_key = kwargs.get("api_key") or gemini_config.api_key
+
+
     if not api_key:
         raise ValueError(
             "Gemini API key not found. Set GOOGLE_API_KEY environment variable, "
@@ -94,6 +100,59 @@ def _get_gemini_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
         **{k: v for k, v in kwargs.items() if k not in ["model", "temperature", "api_key", "timeout", "google_api_key"]},
     )
 
+
+
+def _get_openrouter_llm(llm_config: LLMConfig, **kwargs) -> BaseChatModel:
+    """Get OpenRouter LLM instance (OpenAI compatible)."""
+    import os
+    from langchain_openai import ChatOpenAI
+
+    or_config = llm_config.openrouter
+
+    # Accept key from:
+    # 1) explicit kwargs (if you ever pass it)
+    # 2) per-request header contextvar
+    # 3) main-branch compose env (OPENAI_API_KEY)
+    # 4) alternative env (OPENROUTER_API_KEY)
+    # 5) config file
+    api_key = (
+        kwargs.get("api_key")
+        or X_OPENROUTER_API_KEY.get()
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+        or or_config.api_key
+    )
+
+    if not api_key:
+        raise ValueError(
+            "OpenRouter API key not found. Provide X-OpenRouter-API-Key header, "
+            "or set OPENAI_API_KEY / OPENROUTER_API_KEY."
+        )
+
+    model = (
+        kwargs.get("model")
+        or X_OPENROUTER_MODEL.get()
+        or os.getenv("OPENAI_MODEL")
+        or or_config.model
+    )
+
+    base_url = (
+        kwargs.get("base_url")
+        or os.getenv("OPENAI_BASE_URL")
+        or or_config.base_url
+        or "https://openrouter.ai/api/v1"
+    )
+
+    temperature = kwargs.get("temperature", or_config.temperature)
+    timeout = kwargs.get("timeout_seconds", llm_config.timeout_seconds)
+
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
+        timeout=timeout,
+    )
 
 def test_llm(llm: BaseChatModel) -> tuple[bool, str]:
     """
@@ -184,6 +243,21 @@ class MockChatModel:
                 "skill_evidence": {"Python": "Mentioned usage in core logic."},
                 "overall_feedback": "Mock feedback: good progress, add more concrete details.",
                 "suggestions": ["Add code snippets or specific implementation details."],
+            })
+        # Remediation diagnosis
+        if "learning diagnostician" in lower or "analyze why a learner failed" in lower:
+            return json.dumps({
+                "diagnosis": "Confusion between base case and recursive case in recursion concept",
+                "missing_concepts": ["Understanding Base Cases", "Recursion Fundamentals"],
+                "severity": "moderate",
+                "recommended_action": "insert_prerequisite"
+            })
+        # Remediation content generation  
+        if "remediation lesson" in lower or "learner who struggled" in lower:
+            return json.dumps({
+                "name": "Understanding Base Cases",
+                "description": "A focused review of base case concepts essential for recursion.",
+                "explanation": "Base cases are the foundation of recursive thinking. A base case is the condition where the recursion stops. Without proper base cases, recursion leads to infinite loops."
             })
         return "Mock response: thanks for the message. Please continue."
 

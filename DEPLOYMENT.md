@@ -56,6 +56,8 @@ Deploy Endstate to the cloud using free tiers.
 
 > [!TIP]
 > This "Bring Your Own Key" architecture ensures the live demo is completely free for the maintainer while keeping user data perfectly isolated.
+> 
+> **Security Note:** All overrides are **request-scoped**. Credentials provided in the UI are sent via headers and managed in memory only for the duration of that specific request. They never modify the global server configuration or affect other users.
 
 ## Alternative: Local Development
 
@@ -71,4 +73,10 @@ docker run -d \
   -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/password123 \
   neo4j:latest
+
+---
+
+> [!TIP]
+> **Saving Resources**: If you are using Cloud LLMs (Gemini/OpenRouter), you can keep the local Ollama container disabled by not setting `COMPOSE_PROFILES=ollama`. 
+
 ```
