@@ -477,21 +477,52 @@ class ChatService:
             await BackgroundTaskStore.notify(session_id, "processing_complete", {"reason": "proposal"})
             if session_id in BackgroundTaskStore._tasks:
                 del BackgroundTaskStore._tasks[session_id]
-
     async def _create_project_suggestions(self, history: list[dict], count: int) -> list[dict]:
         prompt = get_project_suggestion_prompt(history, max_projects=count)
-        response = await asyncio.wait_for(self.llm.ainvoke([("human", prompt)]), timeout=LLM_TIMEOUT)
-        content = str(response.content if hasattr(response, "content") else response)
-        proposals = self._normalize_project_suggestions(self._parse_project_suggestions(content))
 
-        if not proposals:
-            proposals = [{
-                "id": f"proposal-{uuid.uuid4().hex[:8]}",
-                "title": "Learning Project",
-                "description": "A focused learning project based on your goals.",
-                "difficulty": "Beginner",
-                "tags": [],
-            }]
+        model_used = (
+            getattr(self.llm, "model_name", None)
+            or getattr(self.llm, "model", None)
+            or "unknown"
+        )
+
+        with trace(
+            name="chat.suggest_projects",
+            input={
+                "workflow": "chat.suggest_projects",
+                "model_used": model_used,
+                "prompt": prompt,
+                "count": count,
+                "history": history,
+            },
+            tags=["workflow:chat", "stage:suggest_projects", f"model:{model_used}"],
+        ) as t:
+            response = await asyncio.wait_for(
+                self.llm.ainvoke([("human", prompt)]),
+                timeout=LLM_TIMEOUT,
+            )
+
+            raw = str(response.content if hasattr(response, "content") else response)
+
+            proposals = self._normalize_project_suggestions(
+                self._parse_project_suggestions(raw)
+            )
+
+            if not proposals:
+                proposals = [{
+                    "id": f"proposal-{uuid.uuid4().hex[:8]}",
+                    "title": "Learning Project",
+                    "description": "A focused learning project based on your goals.",
+                    "difficulty": "Beginner",
+                    "tags": [],
+                }]
+
+            if t is not None:
+                t.output = {
+                    "raw": raw,
+                    "parsed": {"projects": proposals},
+                }
+
         return proposals
 
 
