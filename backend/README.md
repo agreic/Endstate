@@ -1,5 +1,7 @@
 # Endstate Backend
 
+> ← Back to [Main README](../README.md)
+
 FastAPI backend for the Endstate knowledge-graph powered learning platform.
 
 ## Structure
@@ -77,11 +79,15 @@ Extracts skills, concepts, and topics from text using LLM-powered graph generati
 Create a `.env` file:
 
 ```bash
-# LLM Provider
-LLM_PROVIDER=gemini  # or "ollama"
+# LLM Provider: "ollama", "gemini", or "openrouter"
+LLM_PROVIDER=gemini
 
 # Gemini API
 GOOGLE_API_KEY=your_api_key
+
+# OpenRouter API (alternative)
+OPENROUTER_API_KEY=your_api_key
+OPENROUTER_MODEL=openai/gpt-4o-mini
 
 # Ollama (local)
 OLLAMA_BASE_URL=http://localhost:11434

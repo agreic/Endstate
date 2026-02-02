@@ -1,5 +1,7 @@
 # AGENTS.md - Endstate Development Guide
 
+> ← Back to [Main README](./README.md)
+
 Quick reference for agentic coding agents working on Endstate.
 
 ## Build & Run Commands
@@ -106,4 +108,4 @@ docs(readme): update installation steps
 ## Project Workflow Notes
 - Chat is a Socratic interviewer
 - Project creation via explicit "Suggest Projects" button
-- Opik integration is disabled in current codebase
+- LLM providers: Ollama (local), Gemini, or OpenRouter

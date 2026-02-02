@@ -1,5 +1,7 @@
 # Endstate Frontend
 
+> ← Back to [Main README](../README.md)
+
 Vue 3 + Tailwind CSS frontend with chat and interactive knowledge graph.
 
 ## Quick Start

@@ -1,5 +1,7 @@
 # Deployment Guide: Endstate Live Demo
 
+> ← Back to [Main README](./README.md)
+
 Deploy Endstate to the cloud using free tiers.
 
 ## 1. Database: Neo4j Aura (Free Tier)
@@ -11,10 +13,15 @@ Deploy Endstate to the cloud using free tiers.
    - Username (usually `neo4j`)
    - Password
 
-## 2. LLM: Google Gemini
+## 2. LLM Provider (Choose One)
 
+### Option A: Google Gemini
 1. Get an API key from [Google AI Studio](https://aistudio.google.com/)
-2. Ensure access to `gemini-2.0-flash-lite` or similar models
+2. Set `LLM_PROVIDER=gemini` and `GOOGLE_API_KEY=your_key`
+
+### Option B: OpenRouter
+1. Get an API key from [OpenRouter](https://openrouter.ai/)
+2. Set `LLM_PROVIDER=openrouter` and `OPENROUTER_API_KEY=your_key`
 
 ## 3. Backend: Render (Free Tier)
 
@@ -77,6 +84,4 @@ docker run -d \
 ---
 
 > [!TIP]
-> **Saving Resources**: If you are using Cloud LLMs (Gemini/OpenRouter), you can keep the local Ollama container disabled by not setting `COMPOSE_PROFILES=ollama`. 
-
-```
+> **Saving Resources**: If you are using Cloud LLMs (Gemini/OpenRouter), you can keep the local Ollama container disabled by not setting `COMPOSE_PROFILES=ollama`.

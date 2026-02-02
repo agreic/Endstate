@@ -1,6 +1,12 @@
 # Endstate
 
-Knowledge-graph powered learning platform with AI-guided project creation and iterative skill assessment.
+An AI learning platform that turns vague goals into structured skill paths with adaptive lessons and project-based assessments.
+
+[![Deploy](https://img.shields.io/badge/deploy-guide-blue)](./DEPLOYMENT.md)
+
+**📚 Documentation:** [Deployment](./DEPLOYMENT.md) · [Backend](./backend/README.md) · [Frontend](./frontend/README.md) · [Developer Guide](./AGENTS.md) · [Vision](./IDEA.md)
+
+---
 
 ## The Endstate Loop
 
@@ -189,6 +195,6 @@ You can also set `COMPOSE_PROFILES=ollama` in your `.env` file to make it perman
 - Python 3.11+
 - Vue 3 + TypeScript
 - Neo4j database
-- LLM (Ollama or Gemini)
+- LLM (Ollama, Gemini, or OpenRouter)
 
 See `pyproject.toml` and `frontend/package.json` for full dependency lists.
