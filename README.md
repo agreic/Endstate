@@ -8,69 +8,9 @@ An AI learning platform that turns vague goals into structured skill paths with 
 
 ---
 
-## The Endstate Loop
+## Demo
 
-```
-Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons → Assessments → Capstone → Complete
-```
-
-## Key Features
-
-### 1. Conversational Project Discovery
-- Socratic interviewer clarifies goals through chat
-- "Suggest Projects" generates 3 concrete options
-- Select a proposal card to create a project
-
-### 2. Skill-Graph Learning Path
-- Visual knowledge graph of skills and concepts
-- Dependencies between skills explicitly shown
-- Lessons and assessments linked to projects
-
-### 3. Iterative Capstone Evaluation
-- Text-based submissions (flexible, LLM-evaluatable)
-- Rubric-based evaluation with skill-to-evidence mapping
-- Constructive feedback with unlimited resubmissions
-
-### 4. Persistent Chat Archive
-- All conversations saved alongside projects
-- Review learning journey anytime
-
-## Architecture
-
-```
-endstate/
-├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
-│   ├── src/components/ # ChatBox, KnowledgeGraph, Projects, etc.
-│   ├── src/composables/# useChat (SSE state management)
-│   └── src/services/   # API client
-├── backend/            # Python FastAPI
-│   ├── services/       # chat, evaluation, lesson, knowledge_graph
-│   ├── db/             # neo4j_client
-│   ├── llm/            # provider (Ollama/Gemini)
-│   └── main.py         # FastAPI app
-└── tests/
-```
-
-## Chat System
-
-- Real-time updates via Server-Sent Events (SSE)
-- Idempotent message sending prevents duplicates
-- Project suggestions requested explicitly via "Suggest Projects"
-- Chat history stored in Neo4j alongside projects
-
-## Knowledge Graph
-
-- Skills, concepts, topics as nodes
-- Dependencies shown as relationships
-- Projects connected to relevant skills
-- Chat sessions stored separately from graph data
-
-## Capstone Evaluation
-
-- Submit text solution explaining skill application
-- LLM evaluates against rubric (skill application, understanding, completeness)
-- Feedback with suggestions for improvement
-- Resubmit until complete (score ≥ 0.7 + all skills evidenced)
+<video src="https://github.com/user-attachments/assets/bce335d3-5fbb-4548-ac60-1a326f2fad99" controls="controls" muted="muted" autoplay="autoplay" loop="loop" style="max-width: 100%; height: auto;"></video>
 
 ## How to Use Endstate
 
@@ -117,6 +57,27 @@ When you're ready to prove your mastery:
 4. Resubmit as many times as needed
 5. **Pass** (score ≥ 0.7 with all skills evidenced) to complete the project!
 
+## Key Features
+
+### 1. Conversational Project Discovery
+- Socratic interviewer clarifies goals through chat
+- "Suggest Projects" generates 3 concrete options
+- Select a proposal card to create a project
+
+### 2. Skill-Graph Learning Path
+- Visual knowledge graph of skills and concepts
+- Dependencies between skills explicitly shown
+- Lessons and assessments linked to projects
+
+### 3. Iterative Capstone Evaluation
+- Text-based submissions (flexible, LLM-evaluatable)
+- Rubric-based evaluation with skill-to-evidence mapping
+- Constructive feedback with unlimited resubmissions
+
+### 4. Persistent Chat Archive
+- All conversations saved alongside projects
+- Review learning journey anytime
+
 ## Installation
 
 ```bash
@@ -162,9 +123,56 @@ We use Docker Compose profiles to keep the local LLM optional.
 
 You can also set `COMPOSE_PROFILES=ollama` in your `.env` file to make it permanent.
 
-## API Endpoints
+---
 
-### Chat
+## Technical Details
+
+### The Endstate Loop
+
+```
+Goal → Chat (Interviewer) → Suggest Projects → Project → KG → Lessons → Assessments → Capstone → Complete
+```
+
+### Architecture
+
+```
+endstate/
+├── frontend/           # Vue 3 + TypeScript + Tailwind CSS
+│   ├── src/components/ # ChatBox, KnowledgeGraph, Projects, etc.
+│   ├── src/composables/# useChat (SSE state management)
+│   └── src/services/   # API client
+├── backend/            # Python FastAPI
+│   ├── services/       # chat, evaluation, lesson, knowledge_graph
+│   ├── db/             # neo4j_client
+│   ├── llm/            # provider (Ollama/Gemini)
+│   └── main.py         # FastAPI app
+└── tests/
+```
+
+### Chat System
+
+- Real-time updates via Server-Sent Events (SSE)
+- Idempotent message sending prevents duplicates
+- Project suggestions requested explicitly via "Suggest Projects"
+- Chat history stored in Neo4j alongside projects
+
+### Knowledge Graph
+
+- Skills, concepts, topics as nodes
+- Dependencies shown as relationships
+- Projects connected to relevant skills
+- Chat sessions stored separately from graph data
+
+### Capstone Evaluation
+
+- Submit text solution explaining skill application
+- LLM evaluates against rubric (skill application, understanding, completeness)
+- Feedback with suggestions for improvement
+- Resubmit until complete (score ≥ 0.7 + all skills evidenced)
+
+### API Endpoints
+
+#### Chat
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -174,14 +182,14 @@ You can also set `COMPOSE_PROFILES=ollama` in your `.env` file to make it perman
 | `/api/suggest-projects` | POST | Generate project options |
 | `/api/suggest-projects/accept` | POST | Accept a project |
 
-### Knowledge Graph
+#### Knowledge Graph
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/graph` | GET | Graph nodes + relationships |
 | `/api/graph/stats` | GET | Graph statistics |
 
-### Projects
+#### Projects
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -190,7 +198,7 @@ You can also set `COMPOSE_PROFILES=ollama` in your `.env` file to make it perman
 | `/api/projects/{id}/submit` | POST | Submit capstone |
 | `/api/projects/{id}/submissions` | GET | Submission history |
 
-## Dependencies
+### Dependencies
 
 - Python 3.11+
 - Vue 3 + TypeScript
